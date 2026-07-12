@@ -148,6 +148,33 @@ PUT /organisations/current
 
 The uploaded logo also replaces the "K" mark in the sidebar for everyone in that organisation.
 
+**Custom Template.** Alongside the 10 presets, a tenant can build its own layout from scratch by setting
+`invoiceTemplateId` to the reserved id `"custom"` and filling in `customInvoiceTemplate` — the same knobs a
+built-in template has (font, header style, title alignment, table style, divider style, paper tone, plus
+`compact`/`narrow` flags), picked one at a time from the Invoice Templates page's "Custom Template" section:
+
+```json
+{
+  "brandingConfig": {
+    "invoiceTemplateId": "custom",
+    "customInvoiceTemplate": {
+      "font": "Courier",
+      "headerStyle": "sidebar",
+      "titleAlign": "left",
+      "tableStyle": "zebra",
+      "dividerStyle": "dotted",
+      "paperTone": "cream",
+      "compact": true,
+      "narrow": false
+    }
+  }
+}
+```
+
+`resolveTemplate()` in `backend/src/services/invoiceTemplates.js` (mirrored by `resolveInvoiceTemplate()` in
+`frontend/src/app/core/invoice-templates.ts`) substitutes this custom build whenever `invoiceTemplateId` is
+`"custom"`, so the PDF and the on-screen preview stay in lockstep exactly like the built-in presets do.
+
 ## Super Admin API
 
 - `GET /superadmin/overview` — platform-wide counts + revenue
