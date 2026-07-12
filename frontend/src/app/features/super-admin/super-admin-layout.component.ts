@@ -29,10 +29,6 @@ const SUPER_ADMIN_COMMANDS: CommandItem[] = [
     <div class="shell" [class.sidebar-collapsed]="collapsed()">
       <aside class="sidebar super no-print" [class.open]="menuOpen()" [class.collapsed]="collapsed()">
         <div class="sidebar-glow" aria-hidden="true"></div>
-        <button class="collapse-toggle no-print" type="button" (click)="toggleCollapse()"
-          [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'" [title]="collapsed() ? 'Expand' : 'Collapse'">
-          <app-icon [name]="collapsed() ? 'chevronRight' : 'chevronLeft'" [size]="13" />
-        </button>
         <div class="sidebar-logo">
           <div class="brand">
             <div class="brand-mark"><app-icon name="shield" [size]="18" /></div>
@@ -70,6 +66,10 @@ const SUPER_ADMIN_COMMANDS: CommandItem[] = [
           </div>
         </div>
       </aside>
+      <button class="collapse-toggle no-print" type="button" (click)="toggleCollapse()"
+        [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'" [title]="collapsed() ? 'Expand' : 'Collapse'">
+        <app-icon [name]="collapsed() ? 'chevronRight' : 'chevronLeft'" [size]="13" />
+      </button>
       <main class="main">
         <div class="topbar no-print">
           <div class="topbar-crumb">

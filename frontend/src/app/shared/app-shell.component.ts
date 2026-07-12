@@ -19,10 +19,6 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
     <div class="shell" [class.sidebar-collapsed]="collapsed()">
       <aside class="sidebar no-print" [class.open]="menuOpen()" [class.collapsed]="collapsed()">
         <div class="sidebar-glow" aria-hidden="true"></div>
-        <button class="collapse-toggle no-print" type="button" (click)="toggleCollapse()"
-          [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'" [title]="collapsed() ? 'Expand' : 'Collapse'">
-          <app-icon [name]="collapsed() ? 'chevronRight' : 'chevronLeft'" [size]="13" />
-        </button>
         <div class="sidebar-logo">
           <div class="brand">
             @if (auth.organisation()?.brandingConfig?.logoUrl) {
@@ -72,6 +68,10 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
           </div>
         </div>
       </aside>
+      <button class="collapse-toggle no-print" type="button" (click)="toggleCollapse()"
+        [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'" [title]="collapsed() ? 'Expand' : 'Collapse'">
+        <app-icon [name]="collapsed() ? 'chevronRight' : 'chevronLeft'" [size]="13" />
+      </button>
       <main class="main">
         <div class="topbar no-print">
           <div class="topbar-crumb">
