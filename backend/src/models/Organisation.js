@@ -1,0 +1,81 @@
+const mongoose = require('mongoose');
+
+// Which invoice document elements render — tenant-level override of the
+// platform defaults, set from the tenant Invoice Templates page.
+const invoiceContentSchema = new mongoose.Schema({
+  showLogo: { type: Boolean, default: true },
+  showSignature: { type: Boolean, default: true },
+  showBankDetails: { type: Boolean, default: true },
+  showAmountInWords: { type: Boolean, default: true },
+  showGstBreakdown: { type: Boolean, default: true }
+}, { _id: false });
+
+// A tenant-built invoice template ("Custom Template" in the Invoice
+// Templates page) — the same knobs a built-in template has, picked one
+// at a time. Only used when brandingConfig.invoiceTemplateId === 'custom'.
+const customInvoiceTemplateSchema = new mongoose.Schema({
+  font: { type: String, default: 'Helvetica' },
+  headerStyle: { type: String, default: 'plain' },
+  titleAlign: { type: String, default: 'right' },
+  tableStyle: { type: String, default: 'bordered' },
+  dividerStyle: { type: String, default: 'solid' },
+  paperTone: { type: String, default: 'white' },
+  compact: { type: Boolean, default: false },
+  narrow: { type: Boolean, default: false }
+}, { _id: false });
+
+const brandingSchema = new mongoose.Schema({
+  logoUrl: String,
+  primaryColor: { type: String, default: '#4f46e5' },
+  invoicePrefix: { type: String, default: 'KLG' },
+  invoiceTemplateId: { type: String, default: 'classic-corporate' },
+  customInvoiceTemplate: { type: customInvoiceTemplateSchema, default: null },
+  invoiceContent: { type: invoiceContentSchema, default: () => ({}) }
+}, { _id: false });
+
+// Custom palette a tenant admin builds from scratch in the Appearance page.
+const customThemeSchema = new mongoose.Schema({
+  primary: String,
+  secondary: String,
+  accent: String,
+  background: String,
+  text: String,
+  mode: { type: String, enum: ['light', 'dark'], default: 'light' }
+}, { _id: false });
+
+// One role's theme: either references a built-in preset by id, or a fully
+// custom palette — the frontend prefers `custom` when present.
+const roleThemeSchema = new mongoose.Schema({
+  presetId: { type: String, default: 'indigo' },
+  custom: { type: customThemeSchema, default: null }
+}, { _id: false });
+
+// Per-role UI theme, set by the tenant admin from the Appearance page.
+// Each role (admin/accountant/viewer) can have its own look, so an
+// organisation can, say, give viewers a lighter/simpler theme than admins.
+const themeConfigSchema = new mongoose.Schema({
+  admin: { type: roleThemeSchema, default: () => ({}) },
+  accountant: { type: roleThemeSchema, default: () => ({}) },
+  viewer: { type: roleThemeSchema, default: () => ({}) }
+}, { _id: false });
+
+const organisationSchema = new mongoose.Schema({
+  name: { type: String, required: true, trim: true },
+  adminEmail: { type: String, required: true, lowercase: true, trim: true },
+  gstin: String,
+  pan: String,
+  phone: String,
+  address: String,
+  state: String,
+  stateCode: { type: String, default: '27' },
+  plan: { type: String, default: 'starter' },
+  status: { type: String, enum: ['trial', 'active', 'suspended', 'cancelled'], default: 'trial' },
+  brandingConfig: { type: brandingSchema, default: () => ({}) },
+  themeConfig: { type: themeConfigSchema, default: () => ({}) },
+  invoiceSequence: { type: Number, default: 0 }
+}, { timestamps: true });
+
+organisationSchema.index({ adminEmail: 1 });
+organisationSchema.index({ status: 1, plan: 1 });
+
+module.exports = { Organisation: mongoose.model('Organisation', organisationSchema) };

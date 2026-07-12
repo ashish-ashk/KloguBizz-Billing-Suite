@@ -1,0 +1,12 @@
+{
+  "plans": ["starter", "growth", "business", "enterprise"],
+  "superAdmin": {
+    "email": "superadmin@klogubizz.local",
+    "password": "SuperAdmin@123"
+  },
+  "tenantAdmin": {
+    "email": "admin@techsoft.local",
+    "password": "Admin@123"
+  },
+  "note": "Run backend npm run seed to insert full seed data with hashed passwords and calculated invoice totals."
+}

@@ -1,0 +1,70 @@
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
+const { User } = require('../models/User');
+const { asyncHandler } = require('../utils/asyncHandler');
+const { httpError } = require('../utils/httpError');
+const { tenantFilter } = require('../middleware/tenantMiddleware');
+const { sendInviteEmail } = require('../services/emailService');
+const { assertUserQuota } = require('../services/planService');
+const { logAudit } = require('../services/auditService');
+
+const listUsers = asyncHandler(async (req, res) => {
+  const users = await User.find(tenantFilter(req)).select('-passwordHash').sort({ createdAt: -1 });
+  res.json(users);
+});
+
+const inviteUser = asyncHandler(async (req, res) => {
+  const { name, email, role = 'viewer' } = req.body;
+  if (!name || !email) throw httpError(400, 'name and email are required');
+  await assertUserQuota(req.orgId);
+  const inviteToken = crypto.randomBytes(24).toString('hex');
+  const user = await User.create({
+    orgId: req.orgId,
+    name,
+    email,
+    role,
+    status: 'invited',
+    inviteToken,
+    passwordHash: await bcrypt.hash(crypto.randomBytes(12).toString('hex'), 12)
+  });
+  const inviteUrl = `${process.env.FRONTEND_URL || 'http://localhost:4200'}/accept-invite?token=${inviteToken}`;
+  await sendInviteEmail({ to: email, inviteUrl });
+  logAudit({ req, action: 'user.invited', entity: 'user', entityId: user._id, meta: { email, role } });
+  res.status(201).json({ user: { ...user.toObject(), passwordHash: undefined }, inviteUrl });
+});
+
+// Authenticated user changes their own password.
+const changePassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) throw httpError(400, 'currentPassword and newPassword are required');
+  if (newPassword.length < 8) throw httpError(400, 'New password must be at least 8 characters');
+  const user = await User.findById(req.user._id);
+  const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+  if (!valid) throw httpError(401, 'Current password is incorrect');
+  user.passwordHash = await bcrypt.hash(newPassword, 12);
+  await user.save();
+  logAudit({ req, action: 'user.password_changed', entity: 'user', entityId: user._id });
+  res.json({ ok: true });
+});
+
+const updateUser = asyncHandler(async (req, res) => {
+  const user = await User.findOneAndUpdate(
+    { _id: req.params.id, ...tenantFilter(req) },
+    req.body,
+    { new: true, runValidators: true }
+  ).select('-passwordHash');
+  if (!user) throw httpError(404, 'User not found');
+  res.json(user);
+});
+
+const removeUser = asyncHandler(async (req, res) => {
+  const user = await User.findOneAndUpdate(
+    { _id: req.params.id, ...tenantFilter(req) },
+    { status: 'disabled' },
+    { new: true }
+  ).select('-passwordHash');
+  if (!user) throw httpError(404, 'User not found');
+  res.json(user);
+});
+
+module.exports = { listUsers, inviteUser, updateUser, removeUser, changePassword };
