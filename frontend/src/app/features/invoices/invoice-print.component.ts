@@ -4,6 +4,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
+import { IconComponent } from '../../shared/icons';
 import { ToastsComponent } from '../../shared/ui';
 import { InvoiceDocumentComponent } from '../../shared/invoice-document.component';
 import { Client, Invoice } from '../../core/models';
@@ -12,15 +13,15 @@ import { downloadBlob } from '../../core/format';
 @Component({
   selector: 'app-invoice-print',
   standalone: true,
-  imports: [CommonModule, RouterLink, ToastsComponent, InvoiceDocumentComponent],
+  imports: [CommonModule, RouterLink, IconComponent, ToastsComponent, InvoiceDocumentComponent],
   template: `
     <div style="min-height:100vh;background:var(--bg);padding:28px 20px;">
       <div class="no-print" style="max-width:860px;margin:0 auto 18px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
         <a class="btn secondary" [routerLink]="['/invoices', invoiceId, 'edit']">← Back to editor</a>
         <div style="display:flex;gap:10px;">
-          <button class="btn secondary" type="button" (click)="print()">🖨 Print</button>
+          <button class="btn secondary" type="button" (click)="print()"><app-icon name="printer" [size]="14" /> Print</button>
           <button class="btn primary" type="button" [disabled]="downloading()" (click)="downloadPdf()">
-            @if (downloading()) { <span class="spinner"></span> } ⬇ Download PDF
+            @if (downloading()) { <span class="spinner"></span> } <app-icon name="download" [size]="14" /> Download PDF
           </button>
         </div>
       </div>

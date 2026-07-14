@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { forkJoin } from 'rxjs';
 import { AppShellComponent } from '../../shared/app-shell.component';
+import { IconComponent } from '../../shared/icons';
 import { AvatarComponent, EmptyStateComponent, ModalComponent, PillComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
@@ -15,47 +16,47 @@ type PayTab = 'tracker' | 'history' | 'reminders';
 @Component({
   selector: 'app-payments',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppShellComponent, ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent],
+  imports: [CommonModule, FormsModule, AppShellComponent, IconComponent, ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent],
   template: `
     <app-shell title="Payments" subtitle="Track collections, reminders and history">
       <button actions class="btn ghost" type="button" [disabled]="exporting()" (click)="exportCsv()">
-        @if (exporting()) { <span class="spinner"></span> } ⬇ Export CSV
+        @if (exporting()) { <span class="spinner"></span> } <app-icon name="download" [size]="13" /> Export CSV
       </button>
 
       <!-- Metrics -->
       <div class="grid grid-4" style="margin-bottom:20px">
-        <div class="card metric">
-          <div class="accent" style="background:var(--green)"></div>
+        <div class="card metric success">
+          <div class="accent"></div>
           <div class="metric-row">
             <span class="label">Total Collected</span>
-            <span class="m-icon" style="background:var(--green-bg)">₹</span>
+            <span class="m-icon"><app-icon name="rupee" [size]="15" /></span>
           </div>
           <div class="value" style="color:var(--green)">{{ fmtINR(totalCollected()) }}</div>
           <div class="sub">{{ successCount() }} successful payment{{ successCount() === 1 ? '' : 's' }}</div>
         </div>
-        <div class="card metric">
-          <div class="accent" style="background:var(--amber)"></div>
+        <div class="card metric warning">
+          <div class="accent"></div>
           <div class="metric-row">
             <span class="label">Pending Amount</span>
-            <span class="m-icon" style="background:var(--amber-bg)">◔</span>
+            <span class="m-icon"><app-icon name="clock" [size]="15" /></span>
           </div>
           <div class="value">{{ fmtINR(pendingAmount()) }}</div>
           <div class="sub">{{ pendingInvoices().length }} open invoice{{ pendingInvoices().length === 1 ? '' : 's' }}</div>
         </div>
-        <div class="card metric">
-          <div class="accent" style="background:var(--red)"></div>
+        <div class="card metric danger">
+          <div class="accent"></div>
           <div class="metric-row">
             <span class="label">Overdue Amount</span>
-            <span class="m-icon" style="background:var(--red-bg)">⚠</span>
+            <span class="m-icon"><app-icon name="alertTriangle" [size]="15" /></span>
           </div>
           <div class="value" style="color:var(--red)">{{ fmtINR(overdueAmount()) }}</div>
           <div class="sub">{{ overdueInvoices().length }} invoice{{ overdueInvoices().length === 1 ? '' : 's' }} past due</div>
         </div>
-        <div class="card metric">
-          <div class="accent" style="background:var(--brand)"></div>
+        <div class="card metric brand">
+          <div class="accent"></div>
           <div class="metric-row">
             <span class="label">Avg. Collection</span>
-            <span class="m-icon">◷</span>
+            <span class="m-icon"><app-icon name="clock" [size]="15" /></span>
           </div>
           <div class="value" style="color:var(--brand)">
             {{ avgCollectionDays() === null ? '—' : avgCollectionDays() + ' days' }}
@@ -77,7 +78,7 @@ type PayTab = 'tracker' | 'history' | 'reminders';
           @if (loading()) {
             <app-skeleton-rows [count]="5" />
           } @else if (dueInvoices().length === 0) {
-            <app-empty-state icon="✓" title="All invoices are paid 🎉" message="No pending, partial or overdue invoices right now." />
+            <app-empty-state icon="✓" title="All invoices are paid" message="No pending, partial or overdue invoices right now." />
           } @else {
             <div class="table-wrap">
               <table class="table">
@@ -122,7 +123,7 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                       <td>
                         <div class="actions">
                           <button class="btn primary sm" type="button" (click)="openPay(inv)">Record Payment</button>
-                          <button class="btn ghost sm" type="button" (click)="openRemind(inv)">📧 Remind</button>
+                          <button class="btn ghost sm" type="button" (click)="openRemind(inv)"><app-icon name="mail" [size]="13" /> Remind</button>
                         </div>
                       </td>
                     </tr>
@@ -190,7 +191,7 @@ type PayTab = 'tracker' | 'history' | 'reminders';
         } @else {
           <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
             <button class="btn secondary sm" type="button" [disabled]="remindingAll()" (click)="confirmRemindAll.set(true)">
-              @if (remindingAll()) { <span class="spinner"></span> } 📧 Remind All ({{ dueInvoices().length }})
+              @if (remindingAll()) { <span class="spinner"></span> } <app-icon name="mail" [size]="13" /> Remind All ({{ dueInvoices().length }})
             </button>
           </div>
           <div class="grid grid-2">
@@ -207,31 +208,31 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                   <app-pill [status]="inv.status" />
                 </div>
                 <div class="grid grid-2" style="gap:10px;margin-bottom:16px">
-                  <div>
-                    <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--faint)">Invoice #</div>
-                    <div class="mono" style="font-weight:600;color:var(--brand)">{{ inv.invoiceNumber }}</div>
+                  <div class="stat-block">
+                    <div class="sb-label">Invoice #</div>
+                    <div class="sb-value mono" style="color:var(--brand)">{{ inv.invoiceNumber }}</div>
                   </div>
-                  <div>
-                    <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--faint)">Amount Due</div>
-                    <div style="font-weight:700">{{ fmtINR(remainingFor(inv)) }}</div>
+                  <div class="stat-block">
+                    <div class="sb-label">Amount Due</div>
+                    <div class="sb-value">{{ fmtINR(remainingFor(inv)) }}</div>
                   </div>
-                  <div>
-                    <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--faint)">Due Date</div>
-                    <div>{{ fmtDate(inv.dueDate) }}</div>
+                  <div class="stat-block">
+                    <div class="sb-label">Due Date</div>
+                    <div class="sb-value">{{ fmtDate(inv.dueDate) }}</div>
                   </div>
-                  <div>
-                    <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--faint)">Days</div>
+                  <div class="stat-block">
+                    <div class="sb-label">Days</div>
                     @if (overdueDays(inv) > 0) {
-                      <div style="color:var(--red);font-weight:700">+{{ overdueDays(inv) }}d overdue</div>
+                      <div class="sb-value" style="color:var(--red)">+{{ overdueDays(inv) }}d overdue</div>
                     } @else if (overdueDays(inv) === 0) {
-                      <div style="color:var(--amber);font-weight:600">Due today</div>
+                      <div class="sb-value" style="color:var(--amber)">Due today</div>
                     } @else {
-                      <div style="color:var(--green);font-weight:600">{{ -overdueDays(inv) }}d left</div>
+                      <div class="sb-value" style="color:var(--green)">{{ -overdueDays(inv) }}d left</div>
                     }
                   </div>
                 </div>
                 <div style="display:flex;gap:8px">
-                  <button class="btn primary sm" type="button" style="flex:1" (click)="openRemind(inv)">📧 Send Reminder</button>
+                  <button class="btn primary sm" type="button" style="flex:1" (click)="openRemind(inv)"><app-icon name="mail" [size]="13" /> Send Reminder</button>
                   <button class="btn success sm" type="button" (click)="openPay(inv)">Record Payment</button>
                 </div>
               </div>
@@ -279,7 +280,7 @@ type PayTab = 'tracker' | 'history' | 'reminders';
       <!-- Reminder preview modal -->
       <app-modal [open]="!!remindInvoice()" title="Send Payment Reminder" [width]="520" (close)="remindInvoice.set(null)">
         @if (remindInvoice(); as inv) {
-          <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px 18px">
+          <div class="card">
             <div style="font-size:12px;color:var(--muted);margin-bottom:4px">
               <strong>To:</strong> {{ clientEmail(inv.clientId) || '— no email on file —' }}
             </div>

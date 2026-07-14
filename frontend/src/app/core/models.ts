@@ -66,6 +66,27 @@ export interface Client {
   status?: string;
 }
 
+export interface Item {
+  _id: string;
+  itemCode?: string;
+  name: string;
+  description?: string;
+  type: 'goods' | 'service';
+  hsn?: string;
+  category?: string;
+  unit: string;
+  gstRate: number;
+  cessRate?: number;
+  sellingPrice: number;
+  mrp?: number;
+  purchasePrice?: number;
+  taxInclusive?: boolean;
+  stockQty?: number;
+  reorderLevel?: number;
+  barcode?: string;
+  status?: 'active' | 'inactive';
+}
+
 export interface InvoiceTotals {
   subtotal: number;
   cgst: number;

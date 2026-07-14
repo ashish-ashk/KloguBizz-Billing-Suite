@@ -2,6 +2,7 @@ import { Component, ElementRef, OnInit, ViewChild, computed, signal } from '@ang
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AppShellComponent } from '../../shared/app-shell.component';
+import { IconComponent } from '../../shared/icons';
 import { InvoiceDocumentComponent, InvoiceDocClient, InvoiceDocData } from '../../shared/invoice-document.component';
 import { AuthService } from '../../core/auth.service';
 import { ApiService } from '../../core/api.service';
@@ -46,7 +47,11 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
 @Component({
   selector: 'app-invoice-templates',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppShellComponent, InvoiceDocumentComponent],
+  imports: [CommonModule, FormsModule, AppShellComponent, InvoiceDocumentComponent, IconComponent],
+  styles: [`
+    .it-layout { display: grid; grid-template-columns: minmax(320px, 380px) 1fr; gap: 24px; align-items: start; }
+    @media (max-width: 880px) { .it-layout { grid-template-columns: 1fr; } }
+  `],
   template: `
     <app-shell title="Invoice Templates" subtitle="Choose how your invoices and bills look, and add your company logo">
       <button actions class="btn ghost" type="button" [disabled]="!dirty()" (click)="discard()">Discard Changes</button>
@@ -54,13 +59,14 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
         @if (saving()) { <span class="spinner"></span> } Save Template
       </button>
 
-      <div class="info-box" style="margin-bottom:20px;">
-        📄 Pick from 10 authentic layouts, or build your own from scratch below. Add your logo and toggle what appears
+      <div class="info-box" style="margin-bottom:20px;display:flex;gap:8px;align-items:flex-start;">
+        <app-icon name="template" [size]="14" style="margin-top:1px;flex-shrink:0;" />
+        <span>Pick from 10 authentic layouts, or build your own from scratch below. Add your logo and toggle what appears
         on the document. The preview on the right updates instantly — nothing changes for your real invoices until
-        you hit <strong>Save Template</strong>.
+        you hit <strong>Save Template</strong>.</span>
       </div>
 
-      <div style="display:grid;grid-template-columns:380px 1fr;gap:24px;align-items:start;">
+      <div class="it-layout">
         <div style="display:grid;gap:20px;">
           <section class="card">
             <div class="card-title" style="margin-bottom:4px;">Company Logo</div>
@@ -69,9 +75,11 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
               style="width:100%;border:2px dashed var(--border);border-radius:10px;padding:20px;text-align:center;background:var(--card);cursor:pointer;">
               @if (logoUrl()) {
                 <img [src]="logoUrl()" alt="Logo" style="max-height:40px;max-width:100%;display:block;margin:0 auto 8px;" />
-                <div style="font-size:11px;color:var(--green);font-weight:600;">✅ Uploaded — click to replace</div>
+                <div style="font-size:11px;color:var(--green);font-weight:600;display:flex;gap:4px;align-items:center;justify-content:center;">
+                  <app-icon name="checkCircle" [size]="13" /> Uploaded — click to replace
+                </div>
               } @else {
-                <div style="font-size:22px;">📁</div>
+                <div style="color:var(--muted);display:flex;justify-content:center;"><app-icon name="upload" [size]="22" [strokeWidth]="1.5" /></div>
                 <div style="font-size:12px;color:var(--muted);margin-top:6px;">Click to upload your logo</div>
               }
             </button>

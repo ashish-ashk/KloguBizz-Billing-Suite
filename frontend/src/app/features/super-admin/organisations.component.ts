@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { forkJoin } from 'rxjs';
 import { ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent } from '../../shared/ui';
+import { IconComponent } from '../../shared/icons';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
 import { OrgSummary, Plan, SuperOverview } from '../../core/models';
@@ -21,7 +22,7 @@ interface OrgEditForm {
 @Component({
   selector: 'app-super-organisations',
   standalone: true,
-  imports: [CommonModule, FormsModule, ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent],
+  imports: [CommonModule, FormsModule, ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, IconComponent],
   template: `
     <div class="page-head">
       <div>
@@ -34,29 +35,29 @@ interface OrgEditForm {
     </div>
 
     <section class="grid grid-5" style="margin-bottom:20px">
-      <div class="card metric">
-        <div class="accent" style="background:var(--brand)"></div>
-        <div class="metric-row"><span class="label">Total Orgs</span><span class="m-icon">🏢</span></div>
+      <div class="card metric brand">
+        <div class="accent"></div>
+        <div class="metric-row"><span class="label">Total Orgs</span><span class="m-icon"><app-icon name="package" [size]="15" /></span></div>
         <div class="value">{{ overview()?.organisations || 0 }}</div>
       </div>
-      <div class="card metric">
-        <div class="accent" style="background:var(--green)"></div>
-        <div class="metric-row"><span class="label">Active</span><span class="m-icon">✓</span></div>
+      <div class="card metric success">
+        <div class="accent"></div>
+        <div class="metric-row"><span class="label">Active</span><span class="m-icon"><app-icon name="checkCircle" [size]="15" /></span></div>
         <div class="value">{{ overview()?.active || 0 }}</div>
       </div>
-      <div class="card metric">
-        <div class="accent" style="background:#f59e0b"></div>
-        <div class="metric-row"><span class="label">Trial</span><span class="m-icon">◔</span></div>
+      <div class="card metric warning">
+        <div class="accent"></div>
+        <div class="metric-row"><span class="label">Trial</span><span class="m-icon"><app-icon name="clock" [size]="15" /></span></div>
         <div class="value">{{ overview()?.trial || 0 }}</div>
       </div>
-      <div class="card metric">
-        <div class="accent" style="background:var(--red)"></div>
-        <div class="metric-row"><span class="label">Suspended</span><span class="m-icon">⊘</span></div>
+      <div class="card metric danger">
+        <div class="accent"></div>
+        <div class="metric-row"><span class="label">Suspended</span><span class="m-icon"><app-icon name="ban" [size]="15" /></span></div>
         <div class="value">{{ overview()?.suspended || 0 }}</div>
       </div>
-      <div class="card metric">
-        <div class="accent" style="background:var(--purple)"></div>
-        <div class="metric-row"><span class="label">Platform Revenue</span><span class="m-icon">₹</span></div>
+      <div class="card metric purple">
+        <div class="accent"></div>
+        <div class="metric-row"><span class="label">Platform Revenue</span><span class="m-icon"><app-icon name="rupee" [size]="15" /></span></div>
         <div class="value">{{ fmtINR(overview()?.totalRevenue || 0, true) }}</div>
       </div>
     </section>
@@ -180,12 +181,19 @@ interface OrgEditForm {
 
     <!-- Credentials follow-up -->
     <app-modal [open]="showCreds()" title="Organization Created" [width]="480" (close)="showCreds.set(false)">
-      <div class="info-box ok" style="margin-bottom:14px">✓ Organization created. Share these credentials securely with the admin.</div>
-      <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
-        <div style="font-size:10px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Login Email</div>
-        <div class="mono" style="font-weight:700;margin:2px 0 12px">{{ credEmail() }}</div>
-        <div style="font-size:10px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Temporary Password</div>
-        <div class="mono" style="font-weight:700;margin-top:2px">{{ credPassword() }}</div>
+      <div class="info-box ok" style="margin-bottom:14px;display:flex;gap:8px;align-items:flex-start">
+        <app-icon name="checkCircle" [size]="15" style="flex-shrink:0;margin-top:1px" />
+        <span>Organization created. Share these credentials securely with the admin.</span>
+      </div>
+      <div class="grid grid-2" style="gap:10px">
+        <div class="stat-block">
+          <div class="sb-label">Login Email</div>
+          <div class="sb-value mono">{{ credEmail() }}</div>
+        </div>
+        <div class="stat-block">
+          <div class="sb-label">Temporary Password</div>
+          <div class="sb-value mono">{{ credPassword() }}</div>
+        </div>
       </div>
       <div class="modal-foot">
         <button class="btn primary" type="button" (click)="showCreds.set(false)">Done</button>
@@ -253,36 +261,36 @@ interface OrgEditForm {
           </div>
         </div>
         <div class="grid grid-2" style="gap:10px">
-          <div style="background:var(--bg);border-radius:10px;padding:10px 12px">
-            <div style="font-size:10px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Admin</div>
-            <div style="font-size:13px;font-weight:600;margin-top:2px">{{ o.admin?.name || '—' }}</div>
+          <div class="stat-block">
+            <div class="sb-label">Admin</div>
+            <div class="sb-value">{{ o.admin?.name || '—' }}</div>
           </div>
-          <div style="background:var(--bg);border-radius:10px;padding:10px 12px">
-            <div style="font-size:10px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Email</div>
-            <div style="font-size:13px;font-weight:600;margin-top:2px;overflow:hidden;text-overflow:ellipsis">{{ o.admin?.email || o.adminEmail }}</div>
+          <div class="stat-block">
+            <div class="sb-label">Email</div>
+            <div class="sb-value" style="overflow:hidden;text-overflow:ellipsis">{{ o.admin?.email || o.adminEmail }}</div>
           </div>
-          <div style="background:var(--bg);border-radius:10px;padding:10px 12px">
-            <div style="font-size:10px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Phone</div>
-            <div style="font-size:13px;font-weight:600;margin-top:2px">{{ o.phone || '—' }}</div>
+          <div class="stat-block">
+            <div class="sb-label">Phone</div>
+            <div class="sb-value">{{ o.phone || '—' }}</div>
           </div>
-          <div style="background:var(--bg);border-radius:10px;padding:10px 12px">
-            <div style="font-size:10px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Plan</div>
-            <div style="font-size:13px;font-weight:600;margin-top:2px">{{ planLabel(o.plan) }}</div>
+          <div class="stat-block">
+            <div class="sb-label">Plan</div>
+            <div class="sb-value">{{ planLabel(o.plan) }}</div>
           </div>
-          <div style="background:var(--bg);border-radius:10px;padding:10px 12px">
-            <div style="font-size:10px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Users</div>
-            <div style="font-size:13px;font-weight:600;margin-top:2px">{{ o.userCount }}</div>
+          <div class="stat-block">
+            <div class="sb-label">Users</div>
+            <div class="sb-value">{{ o.userCount }}</div>
           </div>
-          <div style="background:var(--bg);border-radius:10px;padding:10px 12px">
-            <div style="font-size:10px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Invoices</div>
-            <div style="font-size:13px;font-weight:600;margin-top:2px">{{ o.invoiceCount }}</div>
+          <div class="stat-block">
+            <div class="sb-label">Invoices</div>
+            <div class="sb-value">{{ o.invoiceCount }}</div>
           </div>
-          <div style="background:var(--bg);border-radius:10px;padding:10px 12px">
-            <div style="font-size:10px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Joined</div>
-            <div style="font-size:13px;font-weight:600;margin-top:2px">{{ fmtDate(o.createdAt) }}</div>
+          <div class="stat-block">
+            <div class="sb-label">Joined</div>
+            <div class="sb-value">{{ fmtDate(o.createdAt) }}</div>
           </div>
-          <div style="background:var(--bg);border-radius:10px;padding:10px 12px">
-            <div style="font-size:10px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Status</div>
+          <div class="stat-block">
+            <div class="sb-label">Status</div>
             <div style="margin-top:4px"><app-pill [status]="o.status" /></div>
           </div>
         </div>
@@ -314,7 +322,10 @@ interface OrgEditForm {
     <!-- Delete confirm -->
     <app-modal [open]="!!deleteTarget()" title="Delete Organization" (close)="deleteTarget.set(null)">
       @if (deleteTarget(); as o) {
-        <div class="info-box danger" style="margin-bottom:12px">⚠ Permanent deletion — All data, invoices, and user accounts for this organization will be permanently deleted.</div>
+        <div class="info-box danger" style="margin-bottom:12px;display:flex;gap:8px;align-items:flex-start">
+          <app-icon name="alertTriangle" [size]="15" style="flex-shrink:0;margin-top:1px" />
+          <span><strong>Permanent deletion</strong> — All data, invoices, and user accounts for this organization will be permanently deleted.</span>
+        </div>
         <p style="margin:0">Are you sure you want to delete <strong>{{ o.name }}</strong>?</p>
         <div class="modal-foot">
           <button class="btn ghost" type="button" (click)="deleteTarget.set(null)">Cancel</button>

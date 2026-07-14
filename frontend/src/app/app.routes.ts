@@ -16,6 +16,7 @@ export const routes: Routes = [
       { path: 'bill-generator', loadComponent: () => import('./features/bill-generator/bill-generator.component').then(m => m.BillGeneratorComponent) },
       { path: 'bill-generator/:id/edit', loadComponent: () => import('./features/bill-generator/bill-generator.component').then(m => m.BillGeneratorComponent) },
       { path: 'clients', loadComponent: () => import('./features/clients/clients.component').then(m => m.ClientsComponent) },
+      { path: 'items', loadComponent: () => import('./features/items/items.component').then(m => m.ItemsComponent) },
       { path: 'payments', loadComponent: () => import('./features/payments/payments.component').then(m => m.PaymentsComponent) },
       { path: 'reports', loadComponent: () => import('./features/reports/reports.component').then(m => m.ReportsComponent) },
       { path: 'users', loadComponent: () => import('./features/users/users.component').then(m => m.UsersComponent) },

@@ -2,6 +2,7 @@ import { Component, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AppShellComponent } from '../../shared/app-shell.component';
+import { IconComponent } from '../../shared/icons';
 import { ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
@@ -25,7 +26,7 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
 @Component({
   selector: 'app-users',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppShellComponent, ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent],
+  imports: [CommonModule, FormsModule, AppShellComponent, IconComponent, ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent],
   template: `
     <app-shell title="Users &amp; Roles" [subtitle]="subtitleText()">
       <button actions class="btn primary" type="button" (click)="openInvite()">+ Invite User</button>
@@ -37,12 +38,14 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
         <!-- Role summary cards -->
         <section class="grid grid-3" style="margin-bottom:16px">
           @for (r of roles; track r) {
-            <div class="card">
-              <app-pill [status]="r" />
-              <div style="font-family:var(--font-display);font-size:26px;font-weight:800;margin:10px 0 6px" [style.color]="roleColor(r)">
-                {{ roleCount(r) }}
+            <div class="card metric" [class.brand]="r === 'admin'" [class.info]="r === 'accountant'">
+              <div class="accent" [style.background]="r === 'viewer' ? 'var(--slate)' : null"></div>
+              <div class="metric-row">
+                <span class="label">{{ roleLabel(r) }}</span>
+                <app-pill [status]="r" />
               </div>
-              <div style="font-size:12px;color:var(--muted);line-height:1.55">{{ roleDescriptions[r] }}</div>
+              <div class="value">{{ roleCount(r) }}</div>
+              <div class="sub">{{ roleDescriptions[r] }}</div>
             </div>
           }
         </section>
@@ -59,9 +62,8 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
             @if (visibleUsers().length === 0) {
               <app-empty-state icon="◉" title="No team members yet" message="Invite your accountant or a viewer to start collaborating." />
             } @else {
-              @for (u of visibleUsers(); track u._id; let last = $last) {
-                <div style="display:flex;align-items:center;gap:12px;padding:14px 20px"
-                  [style.borderBottom]="last ? 'none' : '1px solid var(--border)'">
+              @for (u of visibleUsers(); track u._id) {
+                <div class="member-row" style="display:flex;align-items:center;gap:12px;padding:14px 20px">
                   <app-avatar [name]="u.name" [size]="40" />
                   <div style="flex:1;min-width:0">
                     <div style="font-weight:700;font-size:14px">{{ u.name }}</div>
@@ -108,15 +110,15 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
                     <tr>
                       <td>{{ p.name }}</td>
                       <td style="text-align:center">
-                        @if (p.admin) { <span style="color:var(--green);font-weight:700">✓</span> }
+                        @if (p.admin) { <app-icon name="check" [size]="14" style="color:var(--green)" /> }
                         @else { <span style="color:var(--faint)">—</span> }
                       </td>
                       <td style="text-align:center">
-                        @if (p.accountant) { <span style="color:var(--green);font-weight:700">✓</span> }
+                        @if (p.accountant) { <app-icon name="check" [size]="14" style="color:var(--green)" /> }
                         @else { <span style="color:var(--faint)">—</span> }
                       </td>
                       <td style="text-align:center">
-                        @if (p.viewer) { <span style="color:var(--green);font-weight:700">✓</span> }
+                        @if (p.viewer) { <app-icon name="check" [size]="14" style="color:var(--green)" /> }
                         @else { <span style="color:var(--faint)">—</span> }
                       </td>
                     </tr>
@@ -167,7 +169,7 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
       <!-- Edit modal -->
       <app-modal [open]="editOpen()" title="Edit User" (close)="editOpen.set(false)">
         @if (editTarget(); as u) {
-          <div style="display:flex;align-items:center;gap:12px;background:var(--brand-pale);border-radius:10px;padding:12px 14px;margin-bottom:16px">
+          <div class="info-box" style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
             <app-avatar [name]="u.name" [size]="44" />
             <div style="min-width:0">
               <div style="font-weight:700;font-size:14px">{{ u.name }}</div>
@@ -221,7 +223,10 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
         </div>
       </app-modal>
     </app-shell>
-  `
+  `,
+  styles: [`
+    .member-row:not(:last-child) { border-bottom: 1px solid var(--border); }
+  `]
 })
 export class UsersComponent implements OnInit {
   loading = signal(true);
@@ -280,12 +285,6 @@ export class UsersComponent implements OnInit {
 
   roleCount(role: string): number {
     return this.visibleUsers().filter(u => u.role === role).length;
-  }
-
-  roleColor(role: string): string {
-    if (role === 'admin') return 'var(--brand)';
-    if (role === 'accountant') return 'var(--blue)';
-    return 'var(--slate)';
   }
 
   roleLabel(role: string): string {

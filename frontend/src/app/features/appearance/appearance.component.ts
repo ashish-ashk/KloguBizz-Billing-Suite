@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../../shared/app-shell.component';
+import { IconComponent } from '../../shared/icons';
 import { AuthService } from '../../core/auth.service';
 import { ThemeService } from '../../core/theme.service';
 import { ToastService } from '../../core/toast.service';
@@ -29,7 +30,7 @@ const ROLE_META: Record<TenantRole, { label: string; description: string }> = {
 @Component({
   selector: 'app-appearance',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, IconComponent],
   template: `
     <app-shell title="Appearance" subtitle="Customize how Klogu Bizz looks for each role in your organization">
       <button actions class="btn ghost" type="button" [disabled]="!dirty()" (click)="discard()">Discard Changes</button>
@@ -37,9 +38,10 @@ const ROLE_META: Record<TenantRole, { label: string; description: string }> = {
         @if (saving()) { <span class="spinner"></span> } Save Theme
       </button>
 
-      <div class="info-box" style="margin-bottom:20px;">
-        🎨 Every role can have its own look. Changes preview instantly — on <strong>your</strong> screen and in the
-        preview panel — as you click around. Nothing is applied for that role's users until you hit <strong>Save Theme</strong>.
+      <div class="info-box" style="margin-bottom:20px;display:flex;gap:8px;align-items:flex-start;">
+        <app-icon name="palette" [size]="14" style="margin-top:1px;flex-shrink:0;" />
+        <span>Every role can have its own look. Changes preview instantly — on <strong>your</strong> screen and in the
+        preview panel — as you click around. Nothing is applied for that role's users until you hit <strong>Save Theme</strong>.</span>
       </div>
 
       <section class="card" style="margin-bottom:20px;">
@@ -57,11 +59,12 @@ const ROLE_META: Record<TenantRole, { label: string; description: string }> = {
 
           @if (isBusinessPlan()) {
             <button class="btn secondary sm" type="button" (click)="toggleDarkForRole()">
-              {{ previewIsDark() ? '☀ Switch to Light' : '🌙 Switch to Dark' }} for {{ roleMeta[selectedRole()].label }}
+              @if (previewIsDark()) { <app-icon name="sun" [size]="13" /> Switch to Light } @else { <app-icon name="moon" [size]="13" /> Switch to Dark }
+              for {{ roleMeta[selectedRole()].label }}
             </button>
           } @else {
-            <a routerLink="/subscription" class="info-box warn" style="margin:0;text-decoration:none;">
-              🔒 Dark mode toggle is a Business plan feature — <strong>Upgrade to unlock</strong>
+            <a routerLink="/subscription" class="info-box warn" style="margin:0;text-decoration:none;display:flex;gap:8px;align-items:center;">
+              <app-icon name="lock" [size]="14" /> <span>Dark mode toggle is a Business plan feature — <strong>Upgrade to unlock</strong></span>
             </a>
           }
         </div>
@@ -95,7 +98,9 @@ const ROLE_META: Record<TenantRole, { label: string; description: string }> = {
                   </span>
                   <span class="theme-card-info">
                     <span class="theme-card-name">{{ t.name }}</span>
-                    <span class="pill" [class]="t.mode === 'dark' ? 'draft' : 'active'">{{ t.mode === 'dark' ? '🌙 Dark' : '☀ Light' }}</span>
+                    <span class="pill" [class]="t.mode === 'dark' ? 'draft' : 'active'">
+                      @if (t.mode === 'dark') { <app-icon name="moon" [size]="11" /> Dark } @else { <app-icon name="sun" [size]="11" /> Light }
+                    </span>
                   </span>
                 </button>
               }
@@ -138,8 +143,8 @@ const ROLE_META: Record<TenantRole, { label: string; description: string }> = {
               <div class="field">
                 <label>Mode</label>
                 <div class="tabs" style="width:fit-content;">
-                  <button type="button" [class.active]="custom().mode === 'light'" (click)="setCustom('mode', 'light')">☀ Light</button>
-                  <button type="button" [class.active]="custom().mode === 'dark'" (click)="setCustom('mode', 'dark')">🌙 Dark</button>
+                  <button type="button" [class.active]="custom().mode === 'light'" (click)="setCustom('mode', 'light')"><app-icon name="sun" [size]="13" /> Light</button>
+                  <button type="button" [class.active]="custom().mode === 'dark'" (click)="setCustom('mode', 'dark')"><app-icon name="moon" [size]="13" /> Dark</button>
                 </div>
               </div>
               @if (custom().mode === 'dark') {
@@ -172,24 +177,24 @@ const ROLE_META: Record<TenantRole, { label: string; description: string }> = {
             <div style="display:flex;min-height:400px;">
               <!-- mini sidebar -->
               <div style="width:118px;flex-shrink:0;padding:14px 9px;"
-                [style.background]="'linear-gradient(180deg,' + previewVars()['--sidebar-from'] + ',' + previewVars()['--sidebar-to'] + ')'">
+                [style.background]="previewVars()['--sidebar-bg']" [style.borderRight]="'1px solid ' + previewVars()['--border']">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:16px;">
                   <div style="width:20px;height:20px;border-radius:6px;display:grid;place-items:center;font-size:10px;font-weight:800;color:#fff;flex-shrink:0;"
                     [style.background]="'linear-gradient(135deg,' + previewVars()['--brand-light'] + ',' + previewVars()['--brand'] + ')'">K</div>
-                  <span style="color:#fff;font-size:9.5px;font-weight:800;">Klogu Bizz</span>
+                  <span style="font-size:9.5px;font-weight:800;" [style.color]="previewVars()['--text']">Klogu Bizz</span>
                 </div>
                 @for (item of previewNav; track item; let first = $first) {
                   <div style="padding:6px 8px;border-radius:6px;font-size:9px;margin-bottom:3px;font-weight:600;"
-                    [style.background]="first ? 'linear-gradient(135deg,rgba(99,102,241,.35),rgba(79,70,229,.2))' : 'transparent'"
-                    [style.color]="first ? '#c7d2fe' : 'rgba(200,200,255,.65)'">{{ item }}</div>
+                    [style.background]="first ? previewVars()['--brand-pale'] : 'transparent'"
+                    [style.color]="first ? previewVars()['--brand'] : previewVars()['--muted']">{{ item }}</div>
                 }
               </div>
               <!-- mini main -->
               <div style="flex:1;min-width:0;" [style.background]="previewVars()['--bg']">
                 <div style="height:28px;display:flex;align-items:center;justify-content:flex-end;padding:0 12px;gap:7px;"
                   [style.background]="previewVars()['--card']" [style.borderBottom]="'1px solid ' + previewVars()['--border']">
-                  <div style="width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-size:8.5px;"
-                    [style.background]="previewVars()['--brand-pale']">🌙</div>
+                  <div style="width:18px;height:18px;border-radius:50%;display:grid;place-items:center;"
+                    [style.background]="previewVars()['--brand-pale']" [style.color]="previewVars()['--brand']"><app-icon name="moon" [size]="10" /></div>
                   <div style="width:18px;height:18px;border-radius:50%;" [style.background]="previewVars()['--brand-mid']"></div>
                 </div>
                 <div style="padding:12px;">

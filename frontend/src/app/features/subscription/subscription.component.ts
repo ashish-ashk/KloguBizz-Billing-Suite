@@ -2,6 +2,7 @@ import { Component, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { forkJoin } from 'rxjs';
 import { AppShellComponent } from '../../shared/app-shell.component';
+import { IconComponent } from '../../shared/icons';
 import { ModalComponent, PillComponent, EmptyStateComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
@@ -19,13 +20,13 @@ const PRICE_COLORS: Record<string, string> = {
   starter: 'var(--blue)',
   growth: 'var(--brand)',
   business: 'var(--purple)',
-  enterprise: '#0f172a'
+  enterprise: 'var(--slate)'
 };
 
 @Component({
   selector: 'app-subscription',
   standalone: true,
-  imports: [CommonModule, AppShellComponent, ModalComponent, PillComponent, EmptyStateComponent, SkeletonRowsComponent],
+  imports: [CommonModule, AppShellComponent, IconComponent, ModalComponent, PillComponent, EmptyStateComponent, SkeletonRowsComponent],
   template: `
     <app-shell title="Subscription" subtitle="Manage your plan and billing">
       @if (loading()) {
@@ -73,7 +74,7 @@ const PRICE_COLORS: Record<string, string> = {
                   {{ u.invoicesThisMonth }} / {{ u.invoiceLimit === null ? 'Unlimited' : u.invoiceLimit }}
                 </div>
                 <div class="progress" style="background:rgba(255,255,255,.25)">
-                  <div class="bar" [style.background]="invoiceHot() ? '#fca5a5' : '#fff'" [style.width.%]="invoicePct()"></div>
+                  <div class="bar" [style.background]="invoiceHot() ? 'var(--red-border)' : '#fff'" [style.width.%]="invoicePct()"></div>
                 </div>
               </div>
               <div>
@@ -104,9 +105,9 @@ const PRICE_COLORS: Record<string, string> = {
             @for (plan of plans(); track plan.code) {
               <div class="card" style="position:relative;display:flex;flex-direction:column">
                 @if (plan.code === u.plan) {
-                  <span style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--brand);color:#fff;font-size:10.5px;font-weight:700;padding:4px 12px;border-radius:20px;letter-spacing:.4px;white-space:nowrap">Current Plan</span>
+                  <span class="ribbon current">Current Plan</span>
                 } @else if (plan.code === 'growth') {
-                  <span style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;font-size:10.5px;font-weight:700;padding:4px 12px;border-radius:20px;letter-spacing:.4px;white-space:nowrap">Most Popular</span>
+                  <span class="ribbon brand">Most Popular</span>
                 }
                 <div style="font-family:var(--font-display);font-size:18px;font-weight:700">{{ plan.name }}</div>
                 <div style="margin:8px 0 4px">
@@ -123,7 +124,7 @@ const PRICE_COLORS: Record<string, string> = {
                 <div style="display:grid;gap:7px;margin-bottom:16px">
                   @for (f of plan.features; track f) {
                     <div style="display:flex;gap:8px;align-items:flex-start">
-                      <span style="font-weight:700;font-size:12px" [style.color]="priceColor(plan.code)">✓</span>
+                      <app-icon name="check" [size]="14" [style.color]="priceColor(plan.code)" style="margin-top:1px" />
                       <span style="font-size:12px;color:var(--muted);line-height:1.5">{{ f }}</span>
                     </div>
                   }
@@ -168,7 +169,7 @@ const PRICE_COLORS: Record<string, string> = {
                       <td><app-pill [status]="s.status" [label]="statusLabel(s.status)" /></td>
                       <td>
                         <div class="actions">
-                          <button class="btn ghost sm" type="button" (click)="downloadPdf()">⬇ PDF</button>
+                          <button class="btn ghost sm" type="button" (click)="downloadPdf()"><app-icon name="download" [size]="13" /> PDF</button>
                         </div>
                       </td>
                     </tr>
@@ -197,7 +198,7 @@ const PRICE_COLORS: Record<string, string> = {
           <div style="display:grid;gap:7px">
             @for (f of p.features; track f) {
               <div style="display:flex;gap:8px;align-items:flex-start">
-                <span style="color:var(--green);font-weight:700;font-size:12px">✓</span>
+                <app-icon name="check" [size]="14" style="color:var(--green);margin-top:1px" />
                 <span style="font-size:12px;color:var(--muted);line-height:1.5">{{ f }}</span>
               </div>
             }
@@ -214,8 +215,9 @@ const PRICE_COLORS: Record<string, string> = {
 
       <!-- Cancel modal -->
       <app-modal [open]="cancelOpen()" title="Cancel Subscription" [width]="420" (close)="cancelOpen.set(false)">
-        <div class="info-box danger">
-          ⚠ Are you sure? Your account will remain active until the end of the billing period. After that you'll lose access to paid features.
+        <div class="info-box danger" style="display:flex;gap:8px;align-items:flex-start">
+          <app-icon name="alertTriangle" [size]="15" style="flex-shrink:0;margin-top:1px" />
+          <span>Are you sure? Your account will remain active until the end of the billing period. After that you'll lose access to paid features.</span>
         </div>
         <div class="modal-foot">
           <button class="btn ghost" type="button" (click)="cancelOpen.set(false)">Keep Plan</button>

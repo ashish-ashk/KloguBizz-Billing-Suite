@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { forkJoin } from 'rxjs';
 import { SkeletonRowsComponent } from '../../shared/ui';
+import { IconComponent } from '../../shared/icons';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
 import { OrgSummary, Plan } from '../../core/models';
@@ -15,7 +16,7 @@ interface EditablePlan extends Plan {
 @Component({
   selector: 'app-super-plans',
   standalone: true,
-  imports: [CommonModule, FormsModule, SkeletonRowsComponent],
+  imports: [CommonModule, FormsModule, SkeletonRowsComponent, IconComponent],
   template: `
     <div class="page-head">
       <div>
@@ -32,7 +33,7 @@ interface EditablePlan extends Plan {
           <section class="card">
             <div class="card-head">
               <div style="display:flex;align-items:center;gap:10px;">
-                <div style="width:36px;height:36px;border-radius:9px;background:var(--brand-pale);display:grid;place-items:center;font-size:15px;">💳</div>
+                <div style="width:36px;height:36px;border-radius:9px;background:var(--brand-pale);display:grid;place-items:center;color:var(--brand);"><app-icon name="creditCard" [size]="16" /></div>
                 <div>
                   <div class="card-title">{{ p.name }}</div>
                   <div class="card-sub mono">{{ p.code }}</div>
@@ -95,7 +96,10 @@ interface EditablePlan extends Plan {
               }
             </div>
           } @else {
-            <div class="info-box ok">✓ No organizations on trial</div>
+            <div class="info-box ok" style="display:flex;gap:8px;align-items:flex-start">
+              <app-icon name="checkCircle" [size]="15" style="flex-shrink:0;margin-top:1px" />
+              <span>No organizations on trial</span>
+            </div>
           }
         </section>
       </div>

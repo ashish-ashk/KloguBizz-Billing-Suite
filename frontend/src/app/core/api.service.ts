@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../environments/environment';
 import {
-  AuditEntry, Client, GstSummary, Invoice, InvoiceStats, InvoiceTemplate, Master, MastersResponse,
+  AuditEntry, Client, GstSummary, Invoice, InvoiceStats, InvoiceTemplate, Item, Master, MastersResponse,
   Organisation, OrgSummary, OrgUser, Payment, Plan, PlanUsage, PublicBranding, Reminder, Subscription, SuperOverview
 } from './models';
 
@@ -17,6 +17,12 @@ export class ApiService {
   createClient(payload: Partial<Client>) { return this.http.post<Client>(`${this.api}/clients`, payload); }
   updateClient(id: string, payload: Partial<Client>) { return this.http.put<Client>(`${this.api}/clients/${id}`, payload); }
   deleteClient(id: string) { return this.http.delete(`${this.api}/clients/${id}`); }
+
+  // ── Items ────────────────────────────────────
+  items() { return this.http.get<Item[]>(`${this.api}/items`); }
+  createItem(payload: Partial<Item>) { return this.http.post<Item>(`${this.api}/items`, payload); }
+  updateItem(id: string, payload: Partial<Item>) { return this.http.put<Item>(`${this.api}/items/${id}`, payload); }
+  deleteItem(id: string) { return this.http.delete(`${this.api}/items/${id}`); }
 
   // ── Invoices ─────────────────────────────────
   invoices(status = '') {

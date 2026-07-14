@@ -96,6 +96,9 @@ export function stateName(code: string): string {
   return STATES.find(s => s.code === code)?.name || code;
 }
 
+/** Common units of measurement, shared by the item catalog and bill/invoice line items. */
+export const UNITS = ['Nos', 'Kg', 'Gm', 'Ltr', 'Ml', 'Box', 'Pcs', 'Dozen', 'Set', 'Mtr', 'Sqft', 'Hrs', 'Bag', 'Pair'];
+
 const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 
 export function isValidGSTIN(gstin: string): boolean {

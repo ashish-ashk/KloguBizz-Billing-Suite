@@ -24,78 +24,79 @@ const SUPER_ADMIN_COMMANDS: CommandItem[] = [
   imports: [RouterLink, RouterLinkActive, RouterOutlet, ToastsComponent, AvatarComponent, IconComponent, QuickSearchComponent],
   template: `
     <button class="menu-toggle no-print" type="button" (click)="menuOpen.set(!menuOpen())" aria-label="Toggle menu">
-      <app-icon name="menu" [size]="19" />
+      <app-icon name="menu" [size]="17" />
     </button>
     <div class="shell" [class.sidebar-collapsed]="collapsed()">
       <aside class="sidebar super no-print" [class.open]="menuOpen()" [class.collapsed]="collapsed()">
-        <div class="sidebar-glow" aria-hidden="true"></div>
         <div class="sidebar-logo">
           <div class="brand">
-            <div class="brand-mark"><app-icon name="shield" [size]="18" /></div>
+            <div class="brand-mark"><app-icon name="shield" [size]="16" /></div>
             <div class="brand-text">
               <div class="brand-name">Klogu Bizz</div>
-              <div class="owner-badge"><app-icon name="shield" [size]="10" /><span class="nav-label">Owner Panel</span></div>
+              <div class="owner-badge"><app-icon name="shield" [size]="9" /><span class="nav-label">Owner Panel</span></div>
             </div>
           </div>
         </div>
-        <nav class="nav" (click)="menuOpen.set(false)">
-          <div class="nav-section">Core Management</div>
-          <a routerLink="/super-admin/organisations" routerLinkActive="active" title="Organizations"><span class="nav-icon"><app-icon name="package" /></span><span class="nav-label">Organizations</span></a>
-          <a routerLink="/super-admin/masters" routerLinkActive="active" title="Masters"><span class="nav-icon"><app-icon name="template" /></span><span class="nav-label">Masters</span></a>
-          <div class="nav-section">Global Settings</div>
-          <a routerLink="/super-admin/templates" routerLinkActive="active" title="Invoice Templates"><span class="nav-icon"><app-icon name="invoice" /></span><span class="nav-label">Invoice Templates</span></a>
-          <a routerLink="/super-admin/reminders" routerLinkActive="active" title="Reminders &amp; Receipts"><span class="nav-icon"><app-icon name="creditCard" /></span><span class="nav-label">Reminders &amp; Receipts</span></a>
-          <a routerLink="/super-admin/plans" routerLinkActive="active" title="Subscription Plans"><span class="nav-icon"><app-icon name="chart" /></span><span class="nav-label">Subscription Plans</span></a>
-          <a routerLink="/super-admin/branding" routerLinkActive="active" title="Branding &amp; Logo"><span class="nav-icon"><app-icon name="palette" /></span><span class="nav-label">Branding &amp; Logo</span></a>
-          <a routerLink="/super-admin/profile" routerLinkActive="active" title="Profile &amp; Security"><span class="nav-icon"><app-icon name="user" /></span><span class="nav-label">Profile &amp; Security</span></a>
-          <div class="nav-divider"></div>
-          <a routerLink="/dashboard" title="Tenant App"><span class="nav-icon"><app-icon name="chevronLeft" /></span><span class="nav-label">Tenant App</span></a>
-        </nav>
+        <div class="sidebar-scroll">
+          <nav class="nav" (click)="menuOpen.set(false)">
+            <div class="nav-section">Core Management</div>
+            <a routerLink="/super-admin/organisations" routerLinkActive="active" title="Organizations"><span class="nav-icon"><app-icon name="package" /></span><span class="nav-label">Organizations</span></a>
+            <a routerLink="/super-admin/masters" routerLinkActive="active" title="Masters"><span class="nav-icon"><app-icon name="template" /></span><span class="nav-label">Masters</span></a>
+            <div class="nav-section">Global Settings</div>
+            <a routerLink="/super-admin/templates" routerLinkActive="active" title="Invoice Templates"><span class="nav-icon"><app-icon name="invoice" /></span><span class="nav-label">Invoice Templates</span></a>
+            <a routerLink="/super-admin/reminders" routerLinkActive="active" title="Reminders &amp; Receipts"><span class="nav-icon"><app-icon name="creditCard" /></span><span class="nav-label">Reminders &amp; Receipts</span></a>
+            <a routerLink="/super-admin/plans" routerLinkActive="active" title="Subscription Plans"><span class="nav-icon"><app-icon name="chart" /></span><span class="nav-label">Subscription Plans</span></a>
+            <a routerLink="/super-admin/branding" routerLinkActive="active" title="Branding &amp; Logo"><span class="nav-icon"><app-icon name="palette" /></span><span class="nav-label">Branding &amp; Logo</span></a>
+            <a routerLink="/super-admin/profile" routerLinkActive="active" title="Profile &amp; Security"><span class="nav-icon"><app-icon name="user" /></span><span class="nav-label">Profile &amp; Security</span></a>
+            <div class="nav-divider"></div>
+            <a routerLink="/dashboard" title="Tenant App"><span class="nav-icon"><app-icon name="chevronLeft" /></span><span class="nav-label">Tenant App</span></a>
+          </nav>
+        </div>
         <div class="sidebar-foot">
           <div class="sidebar-user-row">
             <div class="sidebar-org">
-              <app-avatar [name]="auth.user()?.name || '?'" [size]="32" />
+              <app-avatar [name]="auth.user()?.name || '?'" [size]="28" />
               <div class="org-info">
                 <div class="org-name">{{ auth.user()?.name || '—' }}</div>
                 <div class="org-plan">{{ auth.user()?.email }}</div>
               </div>
             </div>
             <button class="sidebar-icon-btn nav-label" type="button" (click)="auth.logout()" title="Sign Out" aria-label="Sign Out">
-              <app-icon name="logout" [size]="15" />
+              <app-icon name="logout" [size]="14" />
             </button>
           </div>
         </div>
       </aside>
-      <button class="collapse-toggle no-print" type="button" (click)="toggleCollapse()"
-        [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'" [title]="collapsed() ? 'Expand' : 'Collapse'">
-        <app-icon [name]="collapsed() ? 'chevronRight' : 'chevronLeft'" [size]="13" />
-      </button>
       <main class="main">
         <div class="topbar no-print">
+          <button class="icon-btn sidebar-toggle-btn" type="button" (click)="toggleCollapse()"
+            [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'" [title]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'">
+            <app-icon name="menu" [size]="17" />
+          </button>
           <div class="topbar-crumb">
             <span class="crumb-org">Owner Panel</span>
-            <app-icon name="chevronRight" [size]="13" class="crumb-sep" />
+            <app-icon name="chevronRight" [size]="12" class="crumb-sep" />
             <span class="crumb-page">Platform Control</span>
           </div>
           <app-quick-search class="no-print" [items]="commandItems" (navigate)="router.navigateByUrl($event)" />
           <div class="topbar-right">
             <div class="topbar-user" (click)="toggleUserMenu($event)">
-              <app-avatar [name]="auth.user()?.name || '?'" [size]="34" />
+              <app-avatar [name]="auth.user()?.name || '?'" [size]="30" />
               <div class="topbar-user-info">
                 <div class="topbar-user-name">{{ auth.user()?.name }}</div>
               </div>
-              <app-icon name="chevronDown" [size]="14" class="chevron" [class.open]="userMenuOpen()" />
+              <app-icon name="chevronDown" [size]="13" class="chevron" [class.open]="userMenuOpen()" />
               @if (userMenuOpen()) {
                 <div class="user-dropdown" (click)="$event.stopPropagation()">
                   <div class="user-dropdown-head">
-                    <app-avatar [name]="auth.user()?.name || '?'" [size]="36" />
+                    <app-avatar [name]="auth.user()?.name || '?'" [size]="32" />
                     <div class="user-dropdown-id">
                       <div class="user-dropdown-name">{{ auth.user()?.name }}</div>
                       <div class="user-dropdown-email">{{ auth.user()?.email }}</div>
                     </div>
                   </div>
                   <div class="user-dropdown-divider"></div>
-                  <button type="button" (click)="auth.logout()"><app-icon name="logout" [size]="15" /> Sign Out</button>
+                  <button type="button" (click)="auth.logout()"><app-icon name="logout" [size]="14" /> Sign Out</button>
                 </div>
               }
             </div>

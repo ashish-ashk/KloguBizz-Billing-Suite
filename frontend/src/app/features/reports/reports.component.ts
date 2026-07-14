@@ -1,7 +1,9 @@
 import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AppShellComponent } from '../../shared/app-shell.component';
+import { IconComponent } from '../../shared/icons';
 import { EmptyStateComponent, SkeletonRowsComponent } from '../../shared/ui';
+import { BarChartComponent, BarChartPoint } from '../../shared/bar-chart.component';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
 import { GstSummary } from '../../core/models';
@@ -10,11 +12,11 @@ import { downloadBlob, fmtINR, monthLabel } from '../../core/format';
 @Component({
   selector: 'app-reports',
   standalone: true,
-  imports: [CommonModule, AppShellComponent, EmptyStateComponent, SkeletonRowsComponent],
+  imports: [CommonModule, AppShellComponent, IconComponent, EmptyStateComponent, SkeletonRowsComponent, BarChartComponent],
   template: `
     <app-shell title="Reports" subtitle="GST filing summary and revenue insights, straight from your issued invoices">
       <button actions class="btn ghost" type="button" [disabled]="exporting()" (click)="exportCsv()">
-        @if (exporting()) { <span class="spinner"></span> } ⬇ Export Monthly CSV
+        @if (exporting()) { <span class="spinner"></span> } <app-icon name="download" [size]="14" /> Export Monthly CSV
       </button>
 
       @if (loading()) {
@@ -27,24 +29,31 @@ import { downloadBlob, fmtINR, monthLabel } from '../../core/format';
           </div>
         } @else {
           <section class="grid grid-3" style="margin-bottom:20px;">
-            <div class="card metric">
-              <div class="accent" style="background:var(--brand);"></div>
-              <div class="metric-row"><span class="label">Taxable Value</span><span class="m-icon">₹</span></div>
+            <div class="card metric brand">
+              <div class="accent"></div>
+              <div class="metric-row"><span class="label">Taxable Value</span><span class="m-icon"><app-icon name="rupee" [size]="15" /></span></div>
               <div class="value">{{ fmtINR(s.totals.taxable, true) }}</div>
               <div class="sub">Across {{ s.totals.invoiceCount }} issued invoice{{ s.totals.invoiceCount === 1 ? '' : 's' }}</div>
             </div>
-            <div class="card metric">
-              <div class="accent" style="background:var(--purple);"></div>
-              <div class="metric-row"><span class="label">Tax Collected</span><span class="m-icon">◈</span></div>
+            <div class="card metric purple">
+              <div class="accent"></div>
+              <div class="metric-row"><span class="label">Tax Collected</span><span class="m-icon"><app-icon name="percent" [size]="15" /></span></div>
               <div class="value" style="color:var(--purple);">{{ fmtINR(s.totals.tax, true) }}</div>
               <div class="sub">CGST + SGST + IGST combined</div>
             </div>
-            <div class="card metric">
-              <div class="accent" style="background:var(--green);"></div>
-              <div class="metric-row"><span class="label">Total Billed</span><span class="m-icon">◧</span></div>
+            <div class="card metric success">
+              <div class="accent"></div>
+              <div class="metric-row"><span class="label">Total Billed</span><span class="m-icon"><app-icon name="invoice" [size]="15" /></span></div>
               <div class="value" style="color:var(--green);">{{ fmtINR(s.totals.taxable + s.totals.tax, true) }}</div>
               <div class="sub">Taxable value + tax</div>
             </div>
+          </section>
+
+          <section class="card" style="margin-bottom:20px;">
+            <div class="card-title">Taxable Value by Month</div>
+            <div class="card-sub" style="margin-bottom:18px;">Trend across issued invoices</div>
+            <app-bar-chart [data]="taxableChartData(s)" [formatValue]="fmtINR"
+              emptyIcon="▤" emptyTitle="No trend yet" emptyMessage="Taxable value will chart here month by month." />
           </section>
 
           <section class="card flush" style="margin-bottom:20px;">
@@ -118,6 +127,10 @@ export class ReportsComponent implements OnInit {
       next: s => { this.summary.set(s); this.loading.set(false); },
       error: err => { this.loading.set(false); this.toast.httpError(err, 'Could not load reports.'); }
     });
+  }
+
+  taxableChartData(s: GstSummary): BarChartPoint[] {
+    return s.byMonth.map(m => ({ label: `${this.monthLabel(m.month)} ${m.month.slice(0, 4)}`, value: m.taxable }));
   }
 
   exportCsv() {

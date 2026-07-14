@@ -2,13 +2,14 @@ import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SkeletonRowsComponent } from '../../shared/ui';
+import { IconComponent } from '../../shared/icons';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
 
 @Component({
   selector: 'app-super-branding',
   standalone: true,
-  imports: [CommonModule, FormsModule, SkeletonRowsComponent],
+  imports: [CommonModule, FormsModule, SkeletonRowsComponent, IconComponent],
   template: `
     <div class="page-head">
       <div>
@@ -32,12 +33,14 @@ import { ToastService } from '../../core/toast.service';
                 <div style="font-size:12px;font-weight:600;margin-bottom:4px;">Main Logo</div>
                 <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">200×60px PNG/SVG · Used in sidebar, emails, invoices</div>
                 <button type="button" (click)="logoInput.click()"
-                  style="width:100%;border:2px dashed var(--border);border-radius:10px;padding:22px;text-align:center;background:#fff;cursor:pointer;">
+                  style="width:100%;border:2px dashed var(--border);border-radius:10px;padding:22px;text-align:center;background:var(--card);cursor:pointer;">
                   @if (branding.logoUrl) {
                     <img [src]="branding.logoUrl" alt="Logo" style="max-height:40px;max-width:100%;display:block;margin:0 auto 8px;" />
-                    <div style="font-size:11px;color:var(--green);font-weight:600;">✅ Uploaded — click to replace</div>
+                    <div style="font-size:11px;color:var(--green);font-weight:600;display:flex;align-items:center;justify-content:center;gap:5px;">
+                      <app-icon name="checkCircle" [size]="13" /> Uploaded — click to replace
+                    </div>
                   } @else {
-                    <div style="font-size:22px;">📁</div>
+                    <div style="display:flex;justify-content:center;color:var(--muted);"><app-icon name="upload" [size]="22" /></div>
                     <div style="font-size:12px;color:var(--muted);margin-top:6px;">Click to upload</div>
                   }
                 </button>
@@ -47,12 +50,14 @@ import { ToastService } from '../../core/toast.service';
                 <div style="font-size:12px;font-weight:600;margin-bottom:4px;">Favicon / App Icon</div>
                 <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">512×512px PNG · Browser tab and mobile icon</div>
                 <button type="button" (click)="favInput.click()"
-                  style="width:100%;border:2px dashed var(--border);border-radius:10px;padding:22px;text-align:center;background:#fff;cursor:pointer;">
+                  style="width:100%;border:2px dashed var(--border);border-radius:10px;padding:22px;text-align:center;background:var(--card);cursor:pointer;">
                   @if (branding.faviconUrl) {
                     <img [src]="branding.faviconUrl" alt="Favicon" style="max-height:40px;display:block;margin:0 auto 8px;" />
-                    <div style="font-size:11px;color:var(--green);font-weight:600;">✅ Uploaded — click to replace</div>
+                    <div style="font-size:11px;color:var(--green);font-weight:600;display:flex;align-items:center;justify-content:center;gap:5px;">
+                      <app-icon name="checkCircle" [size]="13" /> Uploaded — click to replace
+                    </div>
                   } @else {
-                    <div style="font-size:22px;">📁</div>
+                    <div style="display:flex;justify-content:center;color:var(--muted);"><app-icon name="upload" [size]="22" /></div>
                     <div style="font-size:12px;color:var(--muted);margin-top:6px;">Click to upload</div>
                   }
                 </button>
@@ -67,21 +72,21 @@ import { ToastService } from '../../core/toast.service';
               <div class="field">
                 <label>Primary Color</label>
                 <div style="display:flex;gap:8px;align-items:center;">
-                  <input type="color" [(ngModel)]="branding.primaryColor" style="width:42px;height:42px;border:1px solid var(--border);border-radius:8px;padding:2px;background:#fff;cursor:pointer;flex-shrink:0;" />
+                  <input type="color" [(ngModel)]="branding.primaryColor" style="width:42px;height:42px;border:1px solid var(--border);border-radius:8px;padding:2px;background:var(--card);cursor:pointer;flex-shrink:0;" />
                   <input class="mono" [(ngModel)]="branding.primaryColor" />
                 </div>
               </div>
               <div class="field">
                 <label>Secondary Color</label>
                 <div style="display:flex;gap:8px;align-items:center;">
-                  <input type="color" [(ngModel)]="branding.secondaryColor" style="width:42px;height:42px;border:1px solid var(--border);border-radius:8px;padding:2px;background:#fff;cursor:pointer;flex-shrink:0;" />
+                  <input type="color" [(ngModel)]="branding.secondaryColor" style="width:42px;height:42px;border:1px solid var(--border);border-radius:8px;padding:2px;background:var(--card);cursor:pointer;flex-shrink:0;" />
                   <input class="mono" [(ngModel)]="branding.secondaryColor" />
                 </div>
               </div>
               <div class="field">
                 <label>Accent Color</label>
                 <div style="display:flex;gap:8px;align-items:center;">
-                  <input type="color" [(ngModel)]="branding.accentColor" style="width:42px;height:42px;border:1px solid var(--border);border-radius:8px;padding:2px;background:#fff;cursor:pointer;flex-shrink:0;" />
+                  <input type="color" [(ngModel)]="branding.accentColor" style="width:42px;height:42px;border:1px solid var(--border);border-radius:8px;padding:2px;background:var(--card);cursor:pointer;flex-shrink:0;" />
                   <input class="mono" [(ngModel)]="branding.accentColor" />
                 </div>
               </div>
@@ -101,7 +106,7 @@ import { ToastService } from '../../core/toast.service';
 
         <section class="card" style="align-self:start;">
           <div class="card-title" style="margin-bottom:14px;">Live Preview</div>
-          <div style="background:linear-gradient(180deg,#1e1b4b,#312e81);border-radius:12px;padding:14px;">
+          <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;">
             <div style="display:flex;align-items:center;gap:9px;margin-bottom:14px;">
               @if (branding.logoUrl) {
                 <img [src]="branding.logoUrl" alt="Logo" style="height:28px;" />
@@ -112,14 +117,20 @@ import { ToastService } from '../../core/toast.service';
                 </div>
               }
               <div>
-                <div style="color:#fff;font-weight:800;font-size:13px;">{{ branding.appName || 'Klogu Bizz' }}</div>
-                <div style="color:rgba(165,180,252,.7);font-size:10px;">{{ branding.tagline || 'GST Billing Suite' }}</div>
+                <div style="color:var(--text);font-weight:800;font-size:13px;">{{ branding.appName || 'Klogu Bizz' }}</div>
+                <div style="color:var(--muted);font-size:10px;">{{ branding.tagline || 'GST Billing Suite' }}</div>
               </div>
             </div>
             <div [style.background]="hexToTint(branding.primaryColor)"
-              style="border-radius:8px;padding:8px 10px;color:#c7d2fe;font-size:12px;font-weight:600;margin-bottom:4px;">▤ Dashboard</div>
-            <div style="padding:8px 10px;color:rgba(165,180,252,.7);font-size:12px;">◧ Invoices</div>
-            <div style="padding:8px 10px;color:rgba(165,180,252,.7);font-size:12px;">◈ Payments</div>
+              style="border-radius:8px;padding:8px 10px;color:var(--brand);font-size:12px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:7px;">
+              <app-icon name="dashboard" [size]="13" /> Dashboard
+            </div>
+            <div style="padding:8px 10px;color:var(--muted);font-size:12px;display:flex;align-items:center;gap:7px;">
+              <app-icon name="invoice" [size]="13" /> Invoices
+            </div>
+            <div style="padding:8px 10px;color:var(--muted);font-size:12px;display:flex;align-items:center;gap:7px;">
+              <app-icon name="creditCard" [size]="13" /> Payments
+            </div>
           </div>
           <div style="display:grid;gap:10px;margin-top:16px;">
             <button type="button"
@@ -127,7 +138,7 @@ import { ToastService } from '../../core/toast.service';
               style="border:0;border-radius:8px;padding:10px;color:#fff;font-weight:700;font-size:13px;cursor:default;">Primary Button</button>
             <button type="button"
               [style.color]="branding.primaryColor" [style.borderColor]="branding.primaryColor"
-              style="background:#fff;border:1.5px solid;border-radius:8px;padding:10px;font-weight:700;font-size:13px;cursor:default;">Secondary Button</button>
+              style="background:var(--card);border:1.5px solid;border-radius:8px;padding:10px;font-weight:700;font-size:13px;cursor:default;">Secondary Button</button>
           </div>
         </section>
       </div>

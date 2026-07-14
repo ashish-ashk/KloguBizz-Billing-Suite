@@ -118,6 +118,9 @@ export function buildPalette(seed: ThemeSeed): Record<string, string> {
     '--brand-dark': seed.secondary,
     '--brand-pale': dark ? mix(seed.primary, bg, 0.8) : tint(seed.primary, 0.93),
     '--brand-mid': dark ? mix(seed.primary, bg, 0.5) : tint(seed.primary, 0.75),
+    // A more visibly-tinted surface than --brand-pale — used for large fills
+    // (the sidebar background) where a 93%-white tint reads as plain white.
+    '--sidebar-bg': dark ? mix(seed.primary, bg, 0.5) : tint(seed.primary, 0.7),
     '--border': dark ? 'rgba(255,255,255,0.12)' : tint(seed.primary, 0.88),
     '--border-hard': dark ? 'rgba(255,255,255,0.22)' : tint(seed.primary, 0.68),
     '--text': text,

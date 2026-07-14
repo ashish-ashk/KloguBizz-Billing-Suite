@@ -3,22 +3,24 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../../shared/app-shell.component';
+import { IconComponent } from '../../shared/icons';
 import { AvatarComponent, SkeletonRowsComponent } from '../../shared/ui';
+import { ItemPickerComponent } from '../../shared/item-picker.component';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
-import { Client, Invoice, InvoiceItem } from '../../core/models';
+import { Client, Invoice, InvoiceItem, Item } from '../../core/models';
 import { fmtINR, fmtDate, today, addDays, numberToWords, stateName } from '../../core/format';
 
 @Component({
   selector: 'app-invoice-editor',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, AvatarComponent, SkeletonRowsComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, IconComponent, AvatarComponent, SkeletonRowsComponent, ItemPickerComponent],
   template: `
     <app-shell [title]="isEdit() ? 'Edit ' + (invoiceNumber || 'Invoice') : 'New Invoice'"
       [subtitle]="isEdit() ? 'Update details and line items' : 'GST is calculated automatically from state codes'">
       @if (isEdit()) {
-        <a actions class="btn secondary" [routerLink]="['/invoices', invoiceId(), 'print']">🖨 Preview / Print</a>
+        <a actions class="btn secondary" [routerLink]="['/invoices', invoiceId(), 'print']"><app-icon name="printer" [size]="14" /> Preview / Print</a>
       }
       <button actions class="btn ghost" type="button" [disabled]="saving()" (click)="save('draft')">Save Draft</button>
       <button actions class="btn primary" type="button" [disabled]="saving()" (click)="save('pending')">
@@ -64,16 +66,18 @@ import { fmtINR, fmtDate, today, addDays, numberToWords, stateName } from '../..
                 @if (clientError()) { <span class="error">{{ clientError() }}</span> }
               </div>
               @if (selectedClient(); as c) {
-                <div style="background:var(--brand-pale);border-radius:10px;padding:14px 16px;margin-top:12px;display:flex;gap:12px;align-items:flex-start;">
+                <div class="info-box" style="margin-top:12px;display:flex;gap:12px;align-items:flex-start;">
                   <app-avatar [name]="c.companyName" [size]="36" />
-                  <div style="font-size:12px;color:var(--muted);line-height:1.6;">
+                  <div style="line-height:1.6;">
                     <div style="font-weight:700;font-size:13px;color:var(--text);">{{ c.companyName }}</div>
                     @if (c.address) { <div>{{ c.address }}</div> }
                     <div>GSTIN: <span class="mono">{{ c.gstin || '—' }}</span> · {{ stateName(c.stateCode) }} ({{ c.stateCode }})</div>
                   </div>
                 </div>
                 @if (isIGST()) {
-                  <div class="info-box warn" style="margin-top:10px;">⚡ Inter-state supply — IGST applicable</div>
+                  <div class="info-box warn" style="margin-top:10px;display:flex;gap:8px;align-items:center;">
+                    <app-icon name="alertTriangle" [size]="14" /> Inter-state supply — IGST applicable
+                  </div>
                 }
               }
             </section>
@@ -91,7 +95,7 @@ import { fmtINR, fmtDate, today, addDays, numberToWords, stateName } from '../..
                   <tbody>
                     @for (item of items; track $index; let i = $index) {
                       <tr>
-                        <td><input class="input" [(ngModel)]="item.desc" placeholder="Service or product description" /></td>
+                        <td><app-item-picker [items]="catalogItems()" [(value)]="item.desc" (picked)="applyItem(i, $event)" /></td>
                         <td><input class="input mono" style="width:88px;" [(ngModel)]="item.hsn" placeholder="9983xx" /></td>
                         <td><input class="input" style="width:64px;" type="number" min="0" [(ngModel)]="item.qty" /></td>
                         <td><input class="input" style="width:104px;" type="number" min="0" [(ngModel)]="item.rate" /></td>
@@ -174,12 +178,12 @@ import { fmtINR, fmtDate, today, addDays, numberToWords, stateName } from '../..
             @if (selectedClient()) {
               @if (isIGST()) {
                 <div class="info-box warn">
-                  <strong>⚡ IGST Applied</strong><br />
+                  <strong><app-icon name="alertTriangle" [size]="13" style="vertical-align:-2px;" /> IGST Applied</strong><br />
                   Inter-state: {{ stateName(orgStateCode) }} → {{ stateName(selectedClient()!.stateCode) }}
                 </div>
               } @else {
                 <div class="info-box ok">
-                  <strong>✓ CGST + SGST Applied</strong><br />
+                  <strong><app-icon name="check" [size]="13" style="vertical-align:-2px;" /> CGST + SGST Applied</strong><br />
                   Intra-state supply: {{ stateName(orgStateCode) }}
                 </div>
               }
@@ -195,6 +199,7 @@ export class InvoiceEditorComponent implements OnInit {
   readonly terms = ['Net 15', 'Net 30', 'Net 45', 'Due on receipt', 'Advance'];
 
   clients = signal<Client[]>([]);
+  catalogItems = signal<Item[]>([]);
   loading = signal(true);
   saving = signal(false);
   invoiceId = signal<string | null>(null);
@@ -245,6 +250,8 @@ export class InvoiceEditorComponent implements OnInit {
       },
       error: err => { this.loading.set(false); this.toast.httpError(err, 'Could not load clients.'); }
     });
+
+    this.api.items().subscribe({ next: list => this.catalogItems.set(list), error: () => {} });
   }
 
   private loadInvoice(id: string) {
@@ -279,6 +286,13 @@ export class InvoiceEditorComponent implements OnInit {
 
   addItem() { this.items = [...this.items, this.blankItem()]; }
   removeItem(i: number) { this.items = this.items.filter((_, idx) => idx !== i); }
+
+  applyItem(i: number, it: Item) {
+    const row = this.items[i];
+    row.hsn = it.hsn || row.hsn;
+    row.rate = it.sellingPrice;
+    row.gstRate = it.gstRate;
+  }
 
   selectedClient(): Client | null {
     return this.clients().find(c => c._id === this.clientId) || null;

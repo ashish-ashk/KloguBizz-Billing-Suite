@@ -39,8 +39,8 @@ interface TemplateConfig {
               @for (t of templates(); track t._id) {
                 <button type="button" (click)="selected.set(t._id)"
                   [style.border]="selected() === t._id ? '2px solid var(--brand)' : '2px solid var(--border)'"
-                  style="border-radius:12px;padding:0;overflow:hidden;background:#fff;cursor:pointer;text-align:left;transition:all .15s;">
-                  <div [style.background]="'linear-gradient(135deg,' + t.accentColor + ',#1e1b4b)'"
+                  style="border-radius:12px;padding:0;overflow:hidden;background:var(--card);cursor:pointer;text-align:left;transition:all .15s;">
+                  <div [style.background]="'linear-gradient(135deg,' + t.accentColor + ',var(--sidebar-from))'"
                     style="height:90px;padding:12px;display:flex;flex-direction:column;gap:6px;">
                     <div style="color:#fff;font-size:10px;font-weight:800;letter-spacing:1px;">TAX INVOICE</div>
                     <div style="height:5px;width:70%;background:rgba(255,255,255,.5);border-radius:3px;"></div>
@@ -97,7 +97,7 @@ interface TemplateConfig {
           <section class="card">
             <div class="card-title" style="margin-bottom:14px;">Accent Color</div>
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
-              <input type="color" [(ngModel)]="config.accentColor" style="width:44px;height:44px;border:1px solid var(--border);border-radius:8px;padding:2px;cursor:pointer;background:#fff;" />
+              <input type="color" [(ngModel)]="config.accentColor" style="width:44px;height:44px;border:1px solid var(--border);border-radius:8px;padding:2px;cursor:pointer;background:var(--card);" />
               <div>
                 <div class="mono" style="font-weight:700;font-size:13px;">{{ config.accentColor }}</div>
                 <div style="font-size:11px;color:var(--muted);">Custom brand color</div>
@@ -108,7 +108,7 @@ interface TemplateConfig {
                 <button type="button" (click)="config.accentColor = c"
                   [style.background]="c"
                   [style.outline]="config.accentColor === c ? '2px solid var(--text)' : 'none'"
-                  style="width:28px;height:28px;border-radius:7px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.2);cursor:pointer;"></button>
+                  style="width:28px;height:28px;border-radius:7px;border:2px solid var(--card);box-shadow:0 1px 4px rgba(0,0,0,.2);cursor:pointer;"></button>
               }
             </div>
           </section>

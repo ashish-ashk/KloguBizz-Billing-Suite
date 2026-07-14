@@ -2,6 +2,7 @@ import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AvatarComponent, EmptyStateComponent, SkeletonRowsComponent } from '../../shared/ui';
+import { IconComponent } from '../../shared/icons';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
@@ -11,7 +12,7 @@ import { fmtDate } from '../../core/format';
 @Component({
   selector: 'app-super-profile',
   standalone: true,
-  imports: [CommonModule, FormsModule, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent],
+  imports: [CommonModule, FormsModule, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, IconComponent],
   template: `
     <div class="page-head">
       <div>
@@ -29,7 +30,7 @@ import { fmtDate } from '../../core/format';
             <div>
               <div style="font-weight:700;font-size:15px;">{{ name }}</div>
               <div style="font-size:12px;color:var(--muted);">{{ email }}</div>
-              <span style="display:inline-block;margin-top:6px;font-size:10px;font-weight:800;background:var(--red-bg);color:var(--red);border-radius:6px;padding:3px 8px;">🔒 SUPER ADMIN</span>
+              <span style="display:inline-flex;align-items:center;gap:4px;margin-top:6px;font-size:10px;font-weight:800;background:var(--red-bg);color:var(--red);border-radius:6px;padding:3px 8px;"><app-icon name="shield" [size]="11" /> SUPER ADMIN</span>
             </div>
           </div>
           <div class="form">
@@ -82,7 +83,10 @@ import { fmtDate } from '../../core/format';
             <label class="switch"><input type="checkbox" [(ngModel)]="twoFactor" /><span class="track"></span></label>
           </div>
           @if (twoFactor) {
-            <div class="info-box ok" style="margin-top:14px;">✓ 2FA is enabled. Your account is protected with an authenticator app.</div>
+            <div class="info-box ok" style="margin-top:14px;display:flex;gap:8px;align-items:flex-start">
+              <app-icon name="checkCircle" [size]="15" style="flex-shrink:0;margin-top:1px" />
+              <span>2FA is enabled. Your account is protected with an authenticator app.</span>
+            </div>
           }
         </section>
 
@@ -99,7 +103,7 @@ import { fmtDate } from '../../core/format';
             <div style="max-height:520px;overflow-y:auto;">
               @for (log of logs(); track log._id) {
                 <div style="display:flex;align-items:center;gap:12px;padding:11px 20px;border-bottom:1px solid var(--border);">
-                  <div style="width:28px;height:28px;border-radius:50%;background:var(--brand-pale);display:grid;place-items:center;font-size:13px;flex-shrink:0;">{{ iconFor(log) }}</div>
+                  <div style="width:28px;height:28px;border-radius:50%;background:var(--brand-pale);color:var(--brand);display:grid;place-items:center;flex-shrink:0;"><app-icon [name]="iconFor(log)" [size]="13" /></div>
                   <div style="flex:1;min-width:0;">
                     <div style="font-size:12px;font-weight:700;">{{ humanize(log.action) }}</div>
                     <div style="font-size:11px;color:var(--muted);">{{ log.actorName || 'System' }} · {{ fmtDate(log.createdAt) }}</div>
@@ -172,13 +176,13 @@ export class SuperProfileComponent implements OnInit {
 
   iconFor(log: AuditEntry): string {
     const a = log.action || '';
-    if (a.startsWith('invoice')) return '◧';
-    if (a.startsWith('org')) return '🏢';
-    if (a.startsWith('plan')) return '💳';
-    if (a.startsWith('user')) return '👤';
-    if (a.startsWith('subscription')) return '⬡';
-    if (a.startsWith('payment')) return '◈';
-    return '⚙';
+    if (a.startsWith('invoice')) return 'invoice';
+    if (a.startsWith('org')) return 'package';
+    if (a.startsWith('plan')) return 'box';
+    if (a.startsWith('user')) return 'user';
+    if (a.startsWith('subscription')) return 'creditCard';
+    if (a.startsWith('payment')) return 'rupee';
+    return 'shield';
   }
 
   humanize(action: string): string {

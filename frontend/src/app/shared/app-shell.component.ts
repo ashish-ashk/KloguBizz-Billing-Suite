@@ -14,11 +14,10 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
   imports: [RouterLink, RouterLinkActive, ToastsComponent, AvatarComponent, PillComponent, IconComponent, QuickSearchComponent],
   template: `
     <button class="menu-toggle no-print" type="button" (click)="menuOpen.set(!menuOpen())" aria-label="Toggle menu">
-      <app-icon name="menu" [size]="19" />
+      <app-icon name="menu" [size]="17" />
     </button>
     <div class="shell" [class.sidebar-collapsed]="collapsed()">
       <aside class="sidebar no-print" [class.open]="menuOpen()" [class.collapsed]="collapsed()">
-        <div class="sidebar-glow" aria-hidden="true"></div>
         <div class="sidebar-logo">
           <div class="brand">
             @if (auth.organisation()?.brandingConfig?.logoUrl) {
@@ -32,27 +31,30 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
             </div>
           </div>
         </div>
-        <nav class="nav" (click)="menuOpen.set(false)">
-          <div class="nav-section">Main Menu</div>
-          <a routerLink="/dashboard" routerLinkActive="active" title="Dashboard"><span class="nav-icon"><app-icon name="dashboard" /></span><span class="nav-label">Dashboard</span></a>
-          <a routerLink="/invoices" routerLinkActive="active" title="Invoices"><span class="nav-icon"><app-icon name="invoice" /></span><span class="nav-label">Invoices</span></a>
-          <a routerLink="/bill-generator" routerLinkActive="active" title="Bill Generator"><span class="nav-icon"><app-icon name="calculator" /></span><span class="nav-label">Bill Generator</span></a>
-          <div class="nav-section">Management</div>
-          <a routerLink="/clients" routerLinkActive="active" title="Clients"><span class="nav-icon"><app-icon name="users" /></span><span class="nav-label">Clients</span></a>
-          <a routerLink="/payments" routerLinkActive="active" title="Payments"><span class="nav-icon"><app-icon name="creditCard" /></span><span class="nav-label">Payments</span></a>
-          <a routerLink="/reports" routerLinkActive="active" title="Reports"><span class="nav-icon"><app-icon name="chart" /></span><span class="nav-label">Reports</span></a>
-          <a routerLink="/users" routerLinkActive="active" title="Users &amp; Roles"><span class="nav-icon"><app-icon name="shieldUser" /></span><span class="nav-label">Users &amp; Roles</span></a>
-          <a routerLink="/subscription" routerLinkActive="active" title="Subscription"><span class="nav-icon"><app-icon name="package" /></span><span class="nav-label">Subscription</span></a>
-          @if (auth.user()?.role === 'admin') {
-            <div class="nav-section">Customize</div>
-            <a routerLink="/appearance" routerLinkActive="active" title="Appearance"><span class="nav-icon"><app-icon name="palette" /></span><span class="nav-label">Appearance</span></a>
-            <a routerLink="/invoice-templates" routerLinkActive="active" title="Invoice Templates"><span class="nav-icon"><app-icon name="template" /></span><span class="nav-label">Invoice Templates</span></a>
-          }
-          @if (auth.isSuperAdmin()) {
-            <div class="nav-section">Platform</div>
-            <a routerLink="/super-admin" routerLinkActive="active" title="Super Admin"><span class="nav-icon"><app-icon name="shield" /></span><span class="nav-label">Super Admin</span></a>
-          }
-        </nav>
+        <div class="sidebar-scroll">
+          <nav class="nav" (click)="menuOpen.set(false)">
+            <div class="nav-section">Main Menu</div>
+            <a routerLink="/dashboard" routerLinkActive="active" title="Dashboard"><span class="nav-icon"><app-icon name="dashboard" /></span><span class="nav-label">Dashboard</span></a>
+            <a routerLink="/invoices" routerLinkActive="active" title="Invoices"><span class="nav-icon"><app-icon name="invoice" /></span><span class="nav-label">Invoices</span></a>
+            <a routerLink="/bill-generator" routerLinkActive="active" title="Bill Generator"><span class="nav-icon"><app-icon name="calculator" /></span><span class="nav-label">Bill Generator</span></a>
+            <div class="nav-section">Management</div>
+            <a routerLink="/clients" routerLinkActive="active" title="Clients"><span class="nav-icon"><app-icon name="users" /></span><span class="nav-label">Clients</span></a>
+            <a routerLink="/items" routerLinkActive="active" title="Items"><span class="nav-icon"><app-icon name="box" /></span><span class="nav-label">Items</span></a>
+            <a routerLink="/payments" routerLinkActive="active" title="Payments"><span class="nav-icon"><app-icon name="creditCard" /></span><span class="nav-label">Payments</span></a>
+            <a routerLink="/reports" routerLinkActive="active" title="Reports"><span class="nav-icon"><app-icon name="chart" /></span><span class="nav-label">Reports</span></a>
+            <a routerLink="/users" routerLinkActive="active" title="Users &amp; Roles"><span class="nav-icon"><app-icon name="shieldUser" /></span><span class="nav-label">Users &amp; Roles</span></a>
+            <a routerLink="/subscription" routerLinkActive="active" title="Subscription"><span class="nav-icon"><app-icon name="package" /></span><span class="nav-label">Subscription</span></a>
+            @if (auth.user()?.role === 'admin') {
+              <div class="nav-section">Customize</div>
+              <a routerLink="/appearance" routerLinkActive="active" title="Appearance"><span class="nav-icon"><app-icon name="palette" /></span><span class="nav-label">Appearance</span></a>
+              <a routerLink="/invoice-templates" routerLinkActive="active" title="Invoice Templates"><span class="nav-icon"><app-icon name="template" /></span><span class="nav-label">Invoice Templates</span></a>
+            }
+            @if (auth.isSuperAdmin()) {
+              <div class="nav-section">Platform</div>
+              <a routerLink="/super-admin" routerLinkActive="active" title="Super Admin"><span class="nav-icon"><app-icon name="shield" /></span><span class="nav-label">Super Admin</span></a>
+            }
+          </nav>
+        </div>
         <div class="sidebar-foot">
           <div class="sidebar-user-row">
             <div class="sidebar-org" title="{{ auth.organisation()?.name || auth.user()?.name }}">
@@ -63,20 +65,20 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
               </div>
             </div>
             <button class="sidebar-icon-btn nav-label" type="button" (click)="auth.logout()" title="Sign Out" aria-label="Sign Out">
-              <app-icon name="logout" [size]="15" />
+              <app-icon name="logout" [size]="14" />
             </button>
           </div>
         </div>
       </aside>
-      <button class="collapse-toggle no-print" type="button" (click)="toggleCollapse()"
-        [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'" [title]="collapsed() ? 'Expand' : 'Collapse'">
-        <app-icon [name]="collapsed() ? 'chevronRight' : 'chevronLeft'" [size]="13" />
-      </button>
       <main class="main">
         <div class="topbar no-print">
+          <button class="icon-btn sidebar-toggle-btn" type="button" (click)="toggleCollapse()"
+            [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'" [title]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'">
+            <app-icon name="menu" [size]="17" />
+          </button>
           <div class="topbar-crumb">
             <span class="crumb-org">{{ auth.organisation()?.name || 'Workspace' }}</span>
-            <app-icon name="chevronRight" [size]="13" class="crumb-sep" />
+            <app-icon name="chevronRight" [size]="12" class="crumb-sep" />
             <span class="crumb-page">{{ title }}</span>
           </div>
           <app-quick-search class="no-print" [items]="commandItems()" (navigate)="router.navigateByUrl($event)" />
@@ -85,27 +87,27 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
               <button class="icon-btn" type="button" (click)="theme.toggleDarkMode()"
                 [attr.aria-label]="theme.isDarkActive() ? 'Switch to light mode' : 'Switch to dark mode'"
                 [title]="theme.isDarkActive() ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
-                <app-icon [name]="theme.isDarkActive() ? 'sun' : 'moon'" [size]="17" />
+                <app-icon [name]="theme.isDarkActive() ? 'sun' : 'moon'" [size]="15" />
               </button>
             }
             <div class="topbar-user" (click)="toggleUserMenu($event)">
-              <app-avatar [name]="auth.user()?.name || '?'" [size]="34" />
+              <app-avatar [name]="auth.user()?.name || '?'" [size]="30" />
               <div class="topbar-user-info">
                 <div class="topbar-user-name">{{ auth.user()?.name }}</div>
                 <app-pill [status]="auth.user()?.role || 'viewer'" />
               </div>
-              <app-icon name="chevronDown" [size]="14" class="chevron" [class.open]="userMenuOpen()" />
+              <app-icon name="chevronDown" [size]="13" class="chevron" [class.open]="userMenuOpen()" />
               @if (userMenuOpen()) {
                 <div class="user-dropdown" (click)="$event.stopPropagation()">
                   <div class="user-dropdown-head">
-                    <app-avatar [name]="auth.user()?.name || '?'" [size]="36" />
+                    <app-avatar [name]="auth.user()?.name || '?'" [size]="32" />
                     <div class="user-dropdown-id">
                       <div class="user-dropdown-name">{{ auth.user()?.name }}</div>
                       <div class="user-dropdown-email">{{ auth.user()?.email }}</div>
                     </div>
                   </div>
                   <div class="user-dropdown-divider"></div>
-                  <button type="button" (click)="auth.logout()"><app-icon name="logout" [size]="15" /> Sign Out</button>
+                  <button type="button" (click)="auth.logout()"><app-icon name="logout" [size]="14" /> Sign Out</button>
                 </div>
               }
             </div>
@@ -142,6 +144,7 @@ export class AppShellComponent {
       { label: 'Invoices', route: '/invoices', icon: 'invoice' },
       { label: 'Bill Generator', route: '/bill-generator', icon: 'calculator' },
       { label: 'Clients', route: '/clients', icon: 'users' },
+      { label: 'Items', route: '/items', icon: 'box' },
       { label: 'Payments', route: '/payments', icon: 'creditCard' },
       { label: 'Reports', route: '/reports', icon: 'chart' },
       { label: 'Users & Roles', route: '/users', icon: 'shieldUser' },

@@ -5,16 +5,18 @@ import { AuthService } from '../../core/auth.service';
 import { ApiService } from '../../core/api.service';
 import { PublicBranding } from '../../core/models';
 import { STATES, isValidEmail } from '../../core/format';
+import { IconComponent } from '../../shared/icons';
+import { AuthPreviewCardComponent } from '../../shared/auth-preview-card.component';
 
 @Component({
   selector: 'app-register',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, IconComponent, AuthPreviewCardComponent],
   template: `
     <div class="auth-page">
       <section class="auth-panel page-enter">
         <div style="max-width:380px;width:100%;margin:0 auto;">
-          <div class="brand" style="margin-bottom:28px;">
+          <div class="brand" style="margin-bottom:24px;">
             @if (branding()?.logoUrl) {
               <img [src]="branding()?.logoUrl" alt="Logo" style="width:36px;height:36px;border-radius:10px;object-fit:contain;flex-shrink:0;" />
             } @else {
@@ -25,8 +27,9 @@ import { STATES, isValidEmail } from '../../core/format';
               <div class="brand-sub" style="color:var(--muted)">{{ branding()?.tagline || 'GST Billing Suite' }}</div>
             </div>
           </div>
-          <h1 style="margin:0 0 6px;font-size:24px;letter-spacing:-0.4px;">Create your organisation</h1>
-          <p style="margin:0 0 24px;color:var(--muted);font-size:14px;">14-day free trial · No credit card required</p>
+          <div class="auth-eyebrow"><app-icon name="checkCircle" [size]="11" /> 14-Day Free Trial</div>
+          <h1 style="margin:0 0 6px;font-size:25px;letter-spacing:-0.4px;">Create your organisation</h1>
+          <p style="margin:0 0 24px;color:var(--muted);font-size:14px;">No credit card required · Cancel anytime</p>
 
           <form class="form" (ngSubmit)="submit()">
             <div class="field">
@@ -39,11 +42,22 @@ import { STATES, isValidEmail } from '../../core/format';
             </div>
             <div class="field">
               <label for="email">Work email</label>
-              <input id="email" name="email" type="email" [(ngModel)]="email" placeholder="you@company.com" required />
+              <div class="auth-field">
+                <app-icon name="mail" [size]="15" class="field-icon" />
+                <input id="email" name="email" type="email" [(ngModel)]="email" placeholder="you@company.com" required />
+              </div>
             </div>
             <div class="field">
               <label for="password">Password</label>
-              <input id="password" name="password" type="password" [(ngModel)]="password" placeholder="At least 8 characters" required />
+              <div class="auth-field">
+                <app-icon name="lock" [size]="15" class="field-icon" />
+                <input id="password" name="password" [type]="showPassword() ? 'text' : 'password'"
+                  [(ngModel)]="password" placeholder="At least 8 characters" required style="padding-right:36px;" />
+                <button type="button" class="link-btn" [attr.aria-label]="showPassword() ? 'Hide password' : 'Show password'"
+                  (click)="showPassword.set(!showPassword())">
+                  <app-icon [name]="showPassword() ? 'eyeOff' : 'eye'" [size]="15" />
+                </button>
+              </div>
               @if (password && password.length < 8) {
                 <span class="error">Password must be at least 8 characters.</span>
               }
@@ -61,7 +75,7 @@ import { STATES, isValidEmail } from '../../core/format';
               <div class="info-box danger">{{ error() }}</div>
             }
             <button class="btn primary lg block" type="submit" [disabled]="loading()">
-              @if (loading()) { <span class="spinner"></span> Creating account… } @else { Create Account }
+              @if (loading()) { <span class="spinner"></span> Creating account… } @else { Create Account <app-icon name="chevronRight" [size]="15" /> }
             </button>
           </form>
 
@@ -72,15 +86,23 @@ import { STATES, isValidEmail } from '../../core/format';
       </section>
       <section class="auth-art"
         [style.background]="'linear-gradient(135deg,' + (branding()?.primaryColor || '#1e1b4b') + ' 0%,' + (branding()?.secondaryColor || '#312e81') + ' 55%,' + (branding()?.accentColor || '#4f46e5') + ' 100%)'">
-        <h2>Launch-ready from day one.</h2>
-        <p>
-          Your organisation gets its own isolated workspace — clients, invoices, payments and team
-          roles — with GST math handled server-side, every time.
-        </p>
-        <div class="art-badges">
-          <span class="art-badge">✓ Tenant isolation</span>
-          <span class="art-badge">✓ Invoice numbering</span>
-          <span class="art-badge">✓ Free trial</span>
+        <app-auth-preview-card [accentColor]="branding()?.accentColor || '#818cf8'" />
+        <div>
+          <h2>Launch-ready from day one.</h2>
+          <p>
+            Your organisation gets its own isolated workspace — clients, invoices, payments and team
+            roles — with GST math handled server-side, every time.
+          </p>
+          <div class="art-badges">
+            <span class="art-badge"><app-icon name="check" [size]="12" /> Tenant isolation</span>
+            <span class="art-badge"><app-icon name="check" [size]="12" /> Invoice numbering</span>
+            <span class="art-badge"><app-icon name="check" [size]="12" /> Free trial</span>
+          </div>
+          <div class="auth-trust">
+            <span><app-icon name="shield" [size]="13" /> Isolated data per organisation</span>
+            <span><app-icon name="lock" [size]="13" /> Encrypted credentials</span>
+            <span><app-icon name="checkCircle" [size]="13" /> No credit card required</span>
+          </div>
         </div>
       </section>
     </div>
@@ -95,6 +117,7 @@ export class RegisterComponent implements OnInit {
   states = STATES;
   error = signal('');
   loading = signal(false);
+  showPassword = signal(false);
   branding = signal<PublicBranding | null>(null);
 
   constructor(private auth: AuthService, private api: ApiService, private router: Router) {}

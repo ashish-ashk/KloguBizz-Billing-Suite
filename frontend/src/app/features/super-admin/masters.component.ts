@@ -2,6 +2,7 @@ import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { EmptyStateComponent, SkeletonRowsComponent } from '../../shared/ui';
+import { IconComponent } from '../../shared/icons';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
 import { Master } from '../../core/models';
@@ -12,7 +13,7 @@ type MasterTab = 'gstRate' | 'hsn' | 'paymentMethod' | 'unit' | 'states';
 @Component({
   selector: 'app-super-masters',
   standalone: true,
-  imports: [CommonModule, FormsModule, EmptyStateComponent, SkeletonRowsComponent],
+  imports: [CommonModule, FormsModule, EmptyStateComponent, SkeletonRowsComponent, IconComponent],
   template: `
     <div class="page-head">
       <div>
@@ -100,11 +101,11 @@ type MasterTab = 'gstRate' | 'hsn' | 'paymentMethod' | 'unit' | 'states';
               @for (m of paymentMethods; track $index) {
                 <button type="button" (click)="m.active = !m.active"
                   [style.border]="m.active ? '2px solid var(--brand)' : '2px solid var(--border)'"
-                  [style.background]="m.active ? 'var(--brand-pale)' : '#fff'"
+                  [style.background]="m.active ? 'var(--brand-pale)' : 'var(--card)'"
                   style="border-radius:10px;padding:16px 14px;text-align:left;cursor:pointer;transition:all .15s;">
                   <div style="font-weight:700;font-size:13px;">{{ m.label }}</div>
-                  <div style="font-size:11px;margin-top:4px;" [style.color]="m.active ? 'var(--green)' : 'var(--faint)'">
-                    {{ m.active ? '✓ Enabled' : '✗ Disabled' }}
+                  <div style="font-size:11px;margin-top:4px;display:flex;align-items:center;gap:4px;" [style.color]="m.active ? 'var(--green)' : 'var(--faint)'">
+                    <app-icon [name]="m.active ? 'check' : 'x'" [size]="12" /> {{ m.active ? 'Enabled' : 'Disabled' }}
                   </div>
                 </button>
               }
@@ -121,7 +122,7 @@ type MasterTab = 'gstRate' | 'hsn' | 'paymentMethod' | 'unit' | 'states';
               @for (u of units; track $index) {
                 <button type="button" (click)="u.active = !u.active"
                   [style.border]="u.active ? '2px solid var(--brand)' : '2px solid var(--border)'"
-                  [style.background]="u.active ? 'var(--brand-pale)' : '#fff'"
+                  [style.background]="u.active ? 'var(--brand-pale)' : 'var(--card)'"
                   style="border-radius:10px;padding:16px 14px;text-align:center;cursor:pointer;transition:all .15s;">
                   <div style="font-weight:800;font-size:16px;" [style.color]="u.active ? 'var(--brand)' : 'var(--faint)'">{{ u.code }}</div>
                   <div style="font-size:11px;color:var(--muted);margin-top:3px;">{{ u.label }}</div>

@@ -3,12 +3,14 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AppShellComponent } from '../../shared/app-shell.component';
+import { IconComponent } from '../../shared/icons';
 import { SkeletonRowsComponent } from '../../shared/ui';
+import { ItemPickerComponent } from '../../shared/item-picker.component';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
-import { Client, InvoiceItem } from '../../core/models';
-import { STATES, addDays, fmtINR, numberToWords, stateName, today } from '../../core/format';
+import { Client, InvoiceItem, Item } from '../../core/models';
+import { STATES, UNITS, addDays, fmtINR, numberToWords, stateName, today } from '../../core/format';
 
 type BillMode = 'b2b-reg' | 'b2b-unreg' | 'b2c';
 
@@ -24,12 +26,12 @@ interface BillRow {
 @Component({
   selector: 'app-bill-generator',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, SkeletonRowsComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, IconComponent, SkeletonRowsComponent, ItemPickerComponent],
   template: `
     <app-shell [title]="isEdit() ? 'Edit Bill' : 'Bill Generator'"
       [subtitle]="isEdit() ? 'Update this bill’s items, buyer and totals' : 'Create GST-compliant bills for B2B and B2C'">
       @if (isEdit()) {
-        <a actions class="btn ghost" [routerLink]="['/invoices', invoiceId(), 'print']">🖨 Preview</a>
+        <a actions class="btn ghost" [routerLink]="['/invoices', invoiceId(), 'print']"><app-icon name="printer" [size]="14" /> Preview</a>
       }
       <button actions class="btn primary" type="button" [disabled]="!canSave() || saving()" (click)="save()">
         {{ saving() ? 'Saving…' : (isEdit() ? 'Update Invoice' : 'Save as Invoice') }}
@@ -106,7 +108,9 @@ interface BillRow {
                     {{ stateName(sc.stateCode) }} ({{ sc.stateCode }})
                   </div>
                   @if (isIGST()) {
-                    <div class="info-box warn">⚡ Inter-state supply — IGST will be applied</div>
+                    <div class="info-box warn" style="display:flex;gap:8px;align-items:center;">
+                      <app-icon name="alertTriangle" [size]="14" /> Inter-state supply — IGST will be applied
+                    </div>
                   }
                 }
               </div>
@@ -169,7 +173,7 @@ interface BillRow {
                 </div>
                 @for (r of rows; track $index; let i = $index) {
                   <div style="display:grid;grid-template-columns:2.2fr .8fr .7fr .55fr .85fr .7fr .95fr 30px;gap:8px;margin-bottom:8px;align-items:center">
-                    <input class="input" [(ngModel)]="r.desc" placeholder="Item or service description">
+                    <app-item-picker [items]="catalogItems()" [(value)]="r.desc" (picked)="applyItem(i, $event)" placeholder="Item or service description" />
                     <input class="input" [(ngModel)]="r.hsn" placeholder="HSN">
                     <select class="input" [(ngModel)]="r.unit">
                       @for (u of units; track u) { <option [value]="u">{{ u }}</option> }
@@ -277,9 +281,13 @@ interface BillRow {
 
           <!-- GST type -->
           @if (isIGST()) {
-            <div class="info-box warn">⚡ <strong>IGST Applied</strong> — Inter-state: {{ orgStateName() }} → {{ buyerStateName() }}</div>
+            <div class="info-box warn" style="display:flex;gap:8px;align-items:center;">
+              <app-icon name="alertTriangle" [size]="14" /> <strong>IGST Applied</strong> — Inter-state: {{ orgStateName() }} → {{ buyerStateName() }}
+            </div>
           } @else {
-            <div class="info-box ok">✓ <strong>CGST + SGST Applied</strong> — Intra-state supply</div>
+            <div class="info-box ok" style="display:flex;gap:8px;align-items:center;">
+              <app-icon name="check" [size]="14" /> <strong>CGST + SGST Applied</strong> — Intra-state supply
+            </div>
           }
         </div>
       </div>
@@ -320,7 +328,8 @@ export class BillGeneratorComponent implements OnInit {
     { key: 'b2b-unreg', label: 'B2B — Unregistered', sub: 'Business buyer without a GSTIN' },
     { key: 'b2c', label: 'B2C Consumer', sub: 'Retail sale to an individual' }
   ];
-  units = ['Nos', 'Hrs', 'Days', 'Kg', 'L', 'Pcs', 'Set'];
+  units = UNITS;
+  catalogItems = signal<Item[]>([]);
   gstRates = [0, 5, 12, 18, 28];
   itemHeads = ['Description *', 'HSN', 'Unit', 'Qty', 'Rate ₹', 'GST %', 'Taxable', ''];
   states = STATES;
@@ -347,6 +356,7 @@ export class BillGeneratorComponent implements OnInit {
       },
       error: err => this.toast.httpError(err)
     });
+    this.api.items().subscribe({ next: list => this.catalogItems.set(list), error: () => {} });
   }
 
   private loadForEdit(id: string) {
@@ -382,6 +392,14 @@ export class BillGeneratorComponent implements OnInit {
 
   removeRow(i: number) {
     if (this.rows.length > 1) this.rows.splice(i, 1);
+  }
+
+  applyItem(i: number, it: Item) {
+    const row = this.rows[i];
+    row.hsn = it.hsn || row.hsn;
+    row.unit = it.unit || row.unit;
+    row.rate = it.sellingPrice;
+    row.gstRate = it.gstRate;
   }
 
   // ── Buyer / GST type ─────────────────────────

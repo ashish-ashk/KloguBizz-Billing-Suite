@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../../shared/app-shell.component';
+import { IconComponent } from '../../shared/icons';
 import { AvatarComponent, EmptyStateComponent, ModalComponent, PillComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
@@ -14,13 +15,13 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft';
 @Component({
   selector: 'app-invoices',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, PillComponent, AvatarComponent, EmptyStateComponent, ModalComponent, SkeletonRowsComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, IconComponent, PillComponent, AvatarComponent, EmptyStateComponent, ModalComponent, SkeletonRowsComponent],
   template: `
     <app-shell title="Invoices" [subtitle]="invoices().length + ' total invoices'">
       <button actions class="btn ghost" type="button" [disabled]="exporting()" (click)="exportCsv()">
-        @if (exporting()) { <span class="spinner"></span> } ⬇ Export CSV
+        @if (exporting()) { <span class="spinner"></span> } <app-icon name="download" [size]="14" /> Export CSV
       </button>
-      <a actions class="btn secondary" routerLink="/bill-generator">⊞ Bill Generator</a>
+      <a actions class="btn secondary" routerLink="/bill-generator"><app-icon name="calculator" [size]="14" /> Bill Generator</a>
       <a actions class="btn primary" routerLink="/invoices/new">+ New Invoice</a>
 
       <div class="toolbar">
@@ -74,12 +75,12 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft';
                       <div class="actions">
                         <a class="btn ghost sm" [routerLink]="['/invoices', inv._id, 'edit']">Edit</a>
                         @if (inv.status !== 'paid') {
-                          <button class="btn success sm" type="button" (click)="markPaid(inv)">✓ Paid</button>
+                          <button class="btn success sm" type="button" (click)="markPaid(inv)"><app-icon name="check" [size]="13" /> Paid</button>
                         }
                         <button class="btn ghost sm" type="button" title="Download PDF" [disabled]="downloadingId() === inv._id" (click)="downloadPdf(inv)">
-                          @if (downloadingId() === inv._id) { <span class="spinner"></span> } @else { ⬇ }
+                          @if (downloadingId() === inv._id) { <span class="spinner"></span> } @else { <app-icon name="download" [size]="13" /> }
                         </button>
-                        <button class="btn ghost sm" type="button" title="Duplicate" (click)="duplicate(inv)">⧉</button>
+                        <button class="btn ghost sm" type="button" title="Duplicate" (click)="duplicate(inv)"><app-icon name="copy" [size]="13" /></button>
                         <button class="btn danger sm" type="button" (click)="confirmDelete.set(inv)">✕</button>
                       </div>
                     </td>
