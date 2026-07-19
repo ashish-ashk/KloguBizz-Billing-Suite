@@ -9,6 +9,7 @@ const { Payment } = require('../models/Payment');
 const { Plan } = require('../models/Plan');
 const { Subscription } = require('../models/Subscription');
 const { Reminder, InvoiceTemplate, AuditLog, Master, GlobalSetting } = require('../models/Settings');
+const { Item } = require('../models/Item');
 const { calculateInvoiceTotals } = require('../services/gstService');
 
 const plans = [
@@ -68,7 +69,8 @@ async function seed() {
     InvoiceTemplate.deleteMany({}),
     AuditLog.deleteMany({}),
     Master.deleteMany({}),
-    GlobalSetting.deleteMany({})
+    GlobalSetting.deleteMany({}),
+    Item.deleteMany({})
   ]);
 
   await Plan.insertMany(plans);
@@ -99,6 +101,19 @@ async function seed() {
     brandingConfig: { invoicePrefix: 'KLG', primaryColor: '#4f46e5' },
     invoiceSequence: 10
   });
+
+  await Item.insertMany([
+    { orgId: org._id, itemCode: 'ITM-001', name: 'Dell Latitude Laptop', description: '14-inch business laptop, i5, 16GB RAM, 512GB SSD', type: 'goods', hsn: '8471', category: 'Hardware', unit: 'Nos', gstRate: 18, sellingPrice: 62000, mrp: 68000, purchasePrice: 55000, stockQty: 12, reorderLevel: 5, barcode: '8901234500011' },
+    { orgId: org._id, itemCode: 'ITM-002', name: 'HP LaserJet Printer', description: 'Monochrome laser printer with duplex printing', type: 'goods', hsn: '8443', category: 'Hardware', unit: 'Nos', gstRate: 18, sellingPrice: 15500, mrp: 17500, purchasePrice: 13000, stockQty: 8, reorderLevel: 3, barcode: '8901234500028' },
+    { orgId: org._id, itemCode: 'ITM-003', name: '24-inch LED Monitor', description: 'Full HD IPS display monitor', type: 'goods', hsn: '8528', category: 'Hardware', unit: 'Nos', gstRate: 18, sellingPrice: 9200, mrp: 10500, purchasePrice: 7800, stockQty: 20, reorderLevel: 8, barcode: '8901234500035' },
+    { orgId: org._id, itemCode: 'ITM-004', name: 'Wireless Keyboard & Mouse Combo', description: 'Ergonomic wireless combo set', type: 'goods', hsn: '8471', category: 'Accessories', unit: 'Set', gstRate: 18, sellingPrice: 1450, mrp: 1699, purchasePrice: 1100, stockQty: 45, reorderLevel: 15, barcode: '8901234500042' },
+    { orgId: org._id, itemCode: 'ITM-005', name: 'Cat6 Ethernet Cable (305m box)', description: 'Networking cable, copper, 305 metre box', type: 'goods', hsn: '8544', category: 'Networking', unit: 'Nos', gstRate: 18, sellingPrice: 5200, mrp: 6000, purchasePrice: 4300, stockQty: 30, reorderLevel: 10, barcode: '8901234500059' },
+    { orgId: org._id, itemCode: 'ITM-006', name: '1TB External Hard Disk', description: 'USB 3.0 portable hard disk drive', type: 'goods', hsn: '8471', category: 'Storage', unit: 'Nos', gstRate: 18, sellingPrice: 4200, mrp: 4800, purchasePrice: 3500, stockQty: 25, reorderLevel: 10, barcode: '8901234500066' },
+    { orgId: org._id, itemCode: 'SVC-001', name: 'Annual AMC — Desktop Support', description: 'Annual maintenance contract for desktop/laptop support', type: 'service', hsn: '998313', category: 'Support', unit: 'Nos', gstRate: 18, sellingPrice: 8000, stockQty: 0 },
+    { orgId: org._id, itemCode: 'SVC-002', name: 'On-site Installation & Setup', description: 'On-site hardware installation and configuration service', type: 'service', hsn: '998316', category: 'Services', unit: 'Hrs', gstRate: 18, sellingPrice: 750, stockQty: 0 },
+    { orgId: org._id, itemCode: 'SVC-003', name: 'Network Configuration Service', description: 'LAN/Wi-Fi setup and configuration', type: 'service', hsn: '998316', category: 'Services', unit: 'Hrs', gstRate: 18, sellingPrice: 950, stockQty: 0 },
+    { orgId: org._id, itemCode: 'ITM-007', name: 'UPS 1KVA', description: 'Line-interactive UPS with surge protection', type: 'goods', hsn: '8504', category: 'Hardware', unit: 'Nos', gstRate: 18, sellingPrice: 6800, mrp: 7500, purchasePrice: 5600, stockQty: 15, reorderLevel: 5, barcode: '8901234500073' }
+  ]);
 
   await User.create([
     { orgId: org._id, name: 'Arjun Mehta', email: 'admin@techsoft.local', passwordHash: await bcrypt.hash('Admin@123', 12), role: 'admin', status: 'active', lastLoginAt: new Date('2026-07-04') },
