@@ -1,5 +1,6 @@
 {
-  "buildCommand": "npx ng build --configuration production",
+  "installCommand": "npm install && chmod +x node_modules/.bin/*",
+  "buildCommand": "node node_modules/@angular/cli/bin/ng.js build --configuration production",
   "outputDirectory": "dist/klogubizz-frontend/browser",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
