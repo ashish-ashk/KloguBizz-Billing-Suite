@@ -1,5 +1,5 @@
 {
-  "buildCommand": "ng build --configuration production",
+  "buildCommand": "npx ng build --configuration production",
   "outputDirectory": "dist/klogubizz-frontend/browser",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
