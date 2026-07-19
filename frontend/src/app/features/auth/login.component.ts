@@ -81,7 +81,7 @@ import { AuthPreviewCardComponent } from '../../shared/auth-preview-card.compone
         [style.background]="'linear-gradient(135deg,' + (branding()?.primaryColor || '#1e1b4b') + ' 0%,' + (branding()?.secondaryColor || '#312e81') + ' 55%,' + (branding()?.accentColor || '#4f46e5') + ' 100%)'">
         <app-auth-preview-card [accentColor]="branding()?.accentColor || '#818cf8'" />
         <div>
-          <h2>Billing your finance team will actually trust.</h2>
+          <h2>Billing software, your team will actually trust.</h2>
           <p>
             Every invoice computes CGST, SGST and IGST server-side from state codes — no manual tax
             math, no spreadsheet drift. Payments, reminders and your whole team stay on one ledger.
