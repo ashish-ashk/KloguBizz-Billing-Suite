@@ -1,5 +1,6 @@
-import { Component, EventEmitter, Input, Output, computed, input } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges, computed, input } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ToastService } from '../core/toast.service';
 import { avatarColor, initials } from '../core/format';
 
@@ -23,6 +24,8 @@ export class ToastsComponent {
   constructor(public toast: ToastService) {}
 }
 
+let openModalCount = 0;
+
 /** Modal dialog. Renders nothing while closed. */
 @Component({
   selector: 'app-modal',
@@ -32,21 +35,43 @@ export class ToastsComponent {
     @if (open) {
       <div class="modal-overlay no-print" (click)="close.emit()">
         <div class="modal-panel" [style.width.px]="width" (click)="$event.stopPropagation()">
-          <div class="modal-head">
-            <div class="modal-title">{{ title }}</div>
-            <button class="modal-close" type="button" (click)="close.emit()" aria-label="Close">✕</button>
+          <div class="modal-scroll">
+            <div class="modal-head">
+              <div class="modal-title">{{ title }}</div>
+              <button class="modal-close" type="button" (click)="close.emit()" aria-label="Close">✕</button>
+            </div>
+            <ng-content />
           </div>
-          <ng-content />
         </div>
       </div>
     }
   `
 })
-export class ModalComponent {
+export class ModalComponent implements OnChanges, OnDestroy {
   @Input() open = false;
   @Input() title = '';
   @Input() width = 480;
   @Output() close = new EventEmitter<void>();
+
+  // Locks page scroll behind the overlay while any modal is open. A counter
+  // (rather than a plain boolean) so two modals opening in quick succession
+  // — e.g. a confirm dialog over a form — don't have the first one's close
+  // unlock scroll while the second is still up.
+  ngOnChanges(changes: SimpleChanges) {
+    if (!changes['open']) return;
+    const wasOpen = !!changes['open'].previousValue;
+    const isOpen = !!changes['open'].currentValue;
+    if (isOpen === wasOpen) return;
+    openModalCount = Math.max(0, openModalCount + (isOpen ? 1 : -1));
+    document.body.style.overflow = openModalCount > 0 ? 'hidden' : '';
+  }
+
+  ngOnDestroy() {
+    if (this.open) {
+      openModalCount = Math.max(0, openModalCount - 1);
+      document.body.style.overflow = openModalCount > 0 ? 'hidden' : '';
+    }
+  }
 }
 
 /** Status pill with a colored dot. */
@@ -118,4 +143,38 @@ export class EmptyStateComponent {
 export class SkeletonRowsComponent {
   @Input() count = 4;
   rows = () => Array.from({ length: this.count });
+}
+
+/** Page-size + prev/next pager for client-side-paginated tables and lists. */
+@Component({
+  selector: 'app-pager',
+  standalone: true,
+  imports: [CommonModule, FormsModule],
+  template: `
+    @if (total > 0) {
+      <div class="pager">
+        <div class="pager-info">Showing {{ startIndex + 1 }}–{{ endIndex }} of {{ total }}</div>
+        <div class="pager-controls">
+          <select class="pager-size" [ngModel]="pageSize" (ngModelChange)="pageSizeChange.emit($event)">
+            @for (s of pageSizeOptions; track s) { <option [ngValue]="s">{{ s }} / page</option> }
+          </select>
+          <button class="btn ghost sm" type="button" [disabled]="page <= 1" (click)="pageChange.emit(page - 1)">‹ Prev</button>
+          <span class="pager-page">Page {{ page }} of {{ totalPages }}</span>
+          <button class="btn ghost sm" type="button" [disabled]="page >= totalPages" (click)="pageChange.emit(page + 1)">Next ›</button>
+        </div>
+      </div>
+    }
+  `
+})
+export class PagerComponent {
+  @Input() page = 1;
+  @Input() pageSize = 10;
+  @Input() total = 0;
+  @Input() pageSizeOptions = [10, 25, 50, 100];
+  @Output() pageChange = new EventEmitter<number>();
+  @Output() pageSizeChange = new EventEmitter<number>();
+
+  get totalPages(): number { return Math.max(1, Math.ceil(this.total / this.pageSize)); }
+  get startIndex(): number { return this.total === 0 ? 0 : (this.page - 1) * this.pageSize; }
+  get endIndex(): number { return Math.min(this.total, this.page * this.pageSize); }
 }

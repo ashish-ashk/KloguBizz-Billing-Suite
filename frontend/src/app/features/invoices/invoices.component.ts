@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../../shared/app-shell.component';
 import { IconComponent } from '../../shared/icons';
-import { AvatarComponent, EmptyStateComponent, ModalComponent, PillComponent, SkeletonRowsComponent } from '../../shared/ui';
+import { AvatarComponent, EmptyStateComponent, ModalComponent, PagerComponent, PillComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
 import { Invoice } from '../../core/models';
@@ -15,7 +15,7 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft';
 @Component({
   selector: 'app-invoices',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, IconComponent, PillComponent, AvatarComponent, EmptyStateComponent, ModalComponent, SkeletonRowsComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, IconComponent, PillComponent, AvatarComponent, EmptyStateComponent, ModalComponent, SkeletonRowsComponent, PagerComponent],
   template: `
     <app-shell title="Invoices" [subtitle]="invoices().length + ' total invoices'">
       <button actions class="btn ghost" type="button" [disabled]="exporting()" (click)="exportCsv()">
@@ -27,7 +27,7 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft';
       <div class="toolbar">
         <div class="tabs">
           @for (f of filters; track f.key) {
-            <button type="button" [class.active]="filter() === f.key" (click)="filter.set(f.key)">
+            <button type="button" [class.active]="filter() === f.key" (click)="onFilter(f.key)">
               {{ f.label }} ({{ countFor(f.key) }})
             </button>
           }
@@ -35,7 +35,7 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft';
         <div class="search-box">
           <span class="search-icon">⌕</span>
           <input class="input" type="search" placeholder="Search invoice or client…"
-            [ngModel]="query()" (ngModelChange)="query.set($event)" />
+            [ngModel]="query()" (ngModelChange)="onSearch($event)" />
         </div>
       </div>
 
@@ -44,7 +44,7 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft';
           <app-skeleton-rows [count]="6" />
         } @else if (filtered().length) {
           <div class="table-wrap">
-            <table class="table">
+            <table class="table stack-mobile">
               <thead>
                 <tr>
                   <th>Invoice #</th><th>Client</th><th>Date</th><th>Due Date</th>
@@ -52,10 +52,10 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft';
                 </tr>
               </thead>
               <tbody>
-                @for (inv of filtered(); track inv._id) {
+                @for (inv of paged(); track inv._id) {
                   <tr [class.row-danger]="inv.status === 'overdue'">
-                    <td class="num">{{ inv.invoiceNumber }}</td>
-                    <td>
+                    <td class="num" data-label="Invoice #">{{ inv.invoiceNumber }}</td>
+                    <td data-label="Client">
                       <div style="display:flex;align-items:center;gap:10px;">
                         <app-avatar [name]="clientName(inv)" [size]="28" />
                         <div>
@@ -64,14 +64,14 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft';
                         </div>
                       </div>
                     </td>
-                    <td class="muted">{{ fmtDate(inv.date) }}</td>
-                    <td [style.color]="inv.status === 'overdue' ? 'var(--red)' : ''"
+                    <td class="muted" data-label="Date">{{ fmtDate(inv.date) }}</td>
+                    <td data-label="Due Date" [style.color]="inv.status === 'overdue' ? 'var(--red)' : ''"
                         [style.fontWeight]="inv.status === 'overdue' ? '700' : ''">{{ fmtDate(inv.dueDate) }}</td>
-                    <td class="muted">{{ fmtINR(inv.totals.subtotal) }}</td>
-                    <td class="muted">{{ fmtINR(gstAmount(inv)) }}</td>
-                    <td class="strong">{{ fmtINR(inv.totals.total) }}</td>
-                    <td><app-pill [status]="inv.status" /></td>
-                    <td>
+                    <td class="muted" data-label="Subtotal">{{ fmtINR(inv.totals.subtotal) }}</td>
+                    <td class="muted" data-label="GST">{{ fmtINR(gstAmount(inv)) }}</td>
+                    <td class="strong" data-label="Total">{{ fmtINR(inv.totals.total) }}</td>
+                    <td data-label="Status"><app-pill [status]="inv.status" /></td>
+                    <td data-label="">
                       <div class="actions">
                         <a class="btn ghost sm" [routerLink]="['/invoices', inv._id, 'edit']">Edit</a>
                         @if (inv.status !== 'paid') {
@@ -89,6 +89,8 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft';
               </tbody>
             </table>
           </div>
+          <app-pager [page]="page()" [pageSize]="pageSize()" [total]="filtered().length"
+            (pageChange)="page.set($event)" (pageSizeChange)="onPageSize($event)" />
         } @else {
           <app-empty-state icon="◧" title="No invoices found"
             [message]="query() ? 'Try a different search or filter.' : 'Create your first invoice to get started.'" />
@@ -137,12 +139,24 @@ export class InvoicesComponent implements OnInit {
     });
   });
 
+  page = signal(1);
+  pageSize = signal(10);
+
+  paged = computed(() => {
+    const start = (this.page() - 1) * this.pageSize();
+    return this.filtered().slice(start, start + this.pageSize());
+  });
+
   fmtINR = fmtINR;
   fmtDate = fmtDate;
 
   constructor(private api: ApiService, private toast: ToastService) {}
 
   ngOnInit() { this.load(); }
+
+  onSearch(v: string) { this.query.set(v); this.page.set(1); }
+  onFilter(key: StatusFilter) { this.filter.set(key); this.page.set(1); }
+  onPageSize(v: number) { this.pageSize.set(v); this.page.set(1); }
 
   load() {
     this.api.invoices().subscribe({

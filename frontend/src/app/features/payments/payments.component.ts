@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { forkJoin } from 'rxjs';
 import { AppShellComponent } from '../../shared/app-shell.component';
 import { IconComponent } from '../../shared/icons';
-import { AvatarComponent, EmptyStateComponent, ModalComponent, PillComponent, SkeletonRowsComponent } from '../../shared/ui';
+import { AvatarComponent, EmptyStateComponent, ModalComponent, PagerComponent, PillComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
@@ -16,7 +16,7 @@ type PayTab = 'tracker' | 'history' | 'reminders';
 @Component({
   selector: 'app-payments',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppShellComponent, IconComponent, ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent],
+  imports: [CommonModule, FormsModule, AppShellComponent, IconComponent, ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, PagerComponent],
   template: `
     <app-shell title="Payments" subtitle="Track collections, reminders and history">
       <button actions class="btn ghost" type="button" [disabled]="exporting()" (click)="exportCsv()">
@@ -52,7 +52,7 @@ type PayTab = 'tracker' | 'history' | 'reminders';
           <div class="value" style="color:var(--red)">{{ fmtINR(overdueAmount()) }}</div>
           <div class="sub">{{ overdueInvoices().length }} invoice{{ overdueInvoices().length === 1 ? '' : 's' }} past due</div>
         </div>
-        <div class="card metric brand">
+        <div class="card metric indigo">
           <div class="accent"></div>
           <div class="metric-row">
             <span class="label">Avg. Collection</span>
@@ -74,14 +74,23 @@ type PayTab = 'tracker' | 'history' | 'reminders';
 
       <!-- Tracker -->
       @if (tab() === 'tracker') {
+        <div class="toolbar">
+          <div class="search-box">
+            <span class="search-icon">⌕</span>
+            <input class="input" type="search" placeholder="Search invoice or client…"
+              [ngModel]="trackerQuery()" (ngModelChange)="onTrackerSearch($event)">
+          </div>
+        </div>
         <div class="card flush">
           @if (loading()) {
             <app-skeleton-rows [count]="5" />
           } @else if (dueInvoices().length === 0) {
             <app-empty-state icon="✓" title="All invoices are paid" message="No pending, partial or overdue invoices right now." />
+          } @else if (filteredDue().length === 0) {
+            <app-empty-state icon="⌕" title="No matching invoices" message="Try a different search term." />
           } @else {
             <div class="table-wrap">
-              <table class="table">
+              <table class="table stack-mobile">
                 <thead>
                   <tr>
                     <th>Invoice #</th>
@@ -95,10 +104,10 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                   </tr>
                 </thead>
                 <tbody>
-                  @for (inv of dueInvoices(); track inv._id) {
+                  @for (inv of pagedDue(); track inv._id) {
                     <tr [class.row-danger]="inv.status === 'overdue'">
-                      <td class="num">{{ inv.invoiceNumber }}</td>
-                      <td>
+                      <td class="num" data-label="Invoice #">{{ inv.invoiceNumber }}</td>
+                      <td data-label="Client">
                         <div style="display:flex;align-items:center;gap:10px">
                           <app-avatar [name]="clientName(inv.clientId)" [size]="30" />
                           <div>
@@ -107,11 +116,11 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                           </div>
                         </div>
                       </td>
-                      <td>{{ fmtDate(inv.date) }}</td>
-                      <td>{{ fmtDate(inv.dueDate) }}</td>
-                      <td class="strong">{{ fmtINR(inv.totals.total) }}</td>
-                      <td><app-pill [status]="inv.status" /></td>
-                      <td>
+                      <td data-label="Invoice Date">{{ fmtDate(inv.date) }}</td>
+                      <td data-label="Due Date">{{ fmtDate(inv.dueDate) }}</td>
+                      <td class="strong" data-label="Amount">{{ fmtINR(inv.totals.total) }}</td>
+                      <td data-label="Status"><app-pill [status]="inv.status" /></td>
+                      <td data-label="Days Due">
                         @if (overdueDays(inv) > 0) {
                           <span style="color:var(--red);font-weight:700">+{{ overdueDays(inv) }}d overdue</span>
                         } @else if (overdueDays(inv) === 0) {
@@ -120,7 +129,7 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                           <span style="color:var(--green)">{{ -overdueDays(inv) }} days left</span>
                         }
                       </td>
-                      <td>
+                      <td data-label="">
                         <div class="actions">
                           <button class="btn primary sm" type="button" (click)="openPay(inv)">Record Payment</button>
                           <button class="btn ghost sm" type="button" (click)="openRemind(inv)"><app-icon name="mail" [size]="13" /> Remind</button>
@@ -131,20 +140,31 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                 </tbody>
               </table>
             </div>
+            <app-pager [page]="trackerPage()" [pageSize]="trackerPageSize()" [total]="filteredDue().length"
+              (pageChange)="trackerPage.set($event)" (pageSizeChange)="onTrackerPageSize($event)" />
           }
         </div>
       }
 
       <!-- History -->
       @if (tab() === 'history') {
+        <div class="toolbar">
+          <div class="search-box">
+            <span class="search-icon">⌕</span>
+            <input class="input" type="search" placeholder="Search invoice, client, method or reference…"
+              [ngModel]="historyQuery()" (ngModelChange)="onHistorySearch($event)">
+          </div>
+        </div>
         <div class="card flush">
           @if (loading()) {
             <app-skeleton-rows [count]="5" />
           } @else if (payments().length === 0) {
             <app-empty-state icon="◈" title="No payments recorded yet" message="Payments you record will show up here." />
+          } @else if (filteredPayments().length === 0) {
+            <app-empty-state icon="⌕" title="No matching payments" message="Try a different search term." />
           } @else {
             <div class="table-wrap">
-              <table class="table">
+              <table class="table stack-mobile">
                 <thead>
                   <tr>
                     <th>Date</th>
@@ -158,24 +178,26 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                   </tr>
                 </thead>
                 <tbody>
-                  @for (p of sortedPayments(); track p._id) {
+                  @for (p of pagedPayments(); track p._id) {
                     <tr>
-                      <td>{{ fmtDate(p.date) }}</td>
-                      <td class="num">{{ invoiceNo(p) }}</td>
-                      <td>{{ clientName(p.clientId) }}</td>
-                      <td class="strong" style="color:var(--green)">{{ fmtINR(p.amount) }}</td>
-                      <td><span class="pill">{{ p.method }}</span></td>
-                      <td>
+                      <td data-label="Date">{{ fmtDate(p.date) }}</td>
+                      <td class="num" data-label="Invoice #">{{ invoiceNo(p) }}</td>
+                      <td data-label="Client">{{ clientName(p.clientId) }}</td>
+                      <td class="strong" data-label="Amount" style="color:var(--green)">{{ fmtINR(p.amount) }}</td>
+                      <td data-label="Method"><span class="pill">{{ p.method }}</span></td>
+                      <td data-label="Reference">
                         @if (p.reference) { <span class="mono">{{ p.reference }}</span> }
                         @else { <span class="muted">—</span> }
                       </td>
-                      <td><app-pill [status]="p.status" /></td>
-                      <td class="muted">{{ p.note || '—' }}</td>
+                      <td data-label="Status"><app-pill [status]="p.status" /></td>
+                      <td class="muted" data-label="Note">{{ p.note || '—' }}</td>
                     </tr>
                   }
                 </tbody>
               </table>
             </div>
+            <app-pager [page]="historyPage()" [pageSize]="historyPageSize()" [total]="filteredPayments().length"
+              (pageChange)="historyPage.set($event)" (pageSizeChange)="onHistoryPageSize($event)" />
           }
         </div>
       }
@@ -378,7 +400,48 @@ export class PaymentsComponent implements OnInit {
     [...this.payments()].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
   );
 
+  // ── Tracker search/pagination ─────────────────
+  trackerQuery = signal('');
+  trackerPage = signal(1);
+  trackerPageSize = signal(10);
+
+  filteredDue = computed(() => {
+    const q = this.trackerQuery().trim().toLowerCase();
+    if (!q) return this.dueInvoices();
+    return this.dueInvoices().filter(inv =>
+      `${inv.invoiceNumber} ${this.clientName(inv.clientId)}`.toLowerCase().includes(q)
+    );
+  });
+
+  pagedDue = computed(() => {
+    const start = (this.trackerPage() - 1) * this.trackerPageSize();
+    return this.filteredDue().slice(start, start + this.trackerPageSize());
+  });
+
+  // ── History search/pagination ─────────────────
+  historyQuery = signal('');
+  historyPage = signal(1);
+  historyPageSize = signal(10);
+
+  filteredPayments = computed(() => {
+    const q = this.historyQuery().trim().toLowerCase();
+    if (!q) return this.sortedPayments();
+    return this.sortedPayments().filter(p =>
+      `${this.invoiceNo(p)} ${this.clientName(p.clientId)} ${p.method} ${p.reference || ''}`.toLowerCase().includes(q)
+    );
+  });
+
+  pagedPayments = computed(() => {
+    const start = (this.historyPage() - 1) * this.historyPageSize();
+    return this.filteredPayments().slice(start, start + this.historyPageSize());
+  });
+
   constructor(private api: ApiService, private toast: ToastService, private auth: AuthService) {}
+
+  onTrackerSearch(v: string) { this.trackerQuery.set(v); this.trackerPage.set(1); }
+  onTrackerPageSize(v: number) { this.trackerPageSize.set(v); this.trackerPage.set(1); }
+  onHistorySearch(v: string) { this.historyQuery.set(v); this.historyPage.set(1); }
+  onHistoryPageSize(v: number) { this.historyPageSize.set(v); this.historyPage.set(1); }
 
   ngOnInit() { this.load(); }
 

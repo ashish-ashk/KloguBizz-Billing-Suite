@@ -87,6 +87,19 @@ export interface Item {
   status?: 'active' | 'inactive';
 }
 
+export interface ItemBulkUploadFailure {
+  row: number;
+  itemCode?: string;
+  name?: string;
+  errors: string[];
+}
+
+export interface ItemBulkUploadResult {
+  totalRows: number;
+  created: number;
+  failed: ItemBulkUploadFailure[];
+}
+
 export interface InvoiceTotals {
   subtotal: number;
   cgst: number;

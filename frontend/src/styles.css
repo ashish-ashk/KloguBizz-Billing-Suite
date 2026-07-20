@@ -542,7 +542,15 @@ textarea { resize: vertical; font-family: inherit; }
   font-size: 13px;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
 }
-.metric .value { font-family: var(--font-display); font-size: 21px; font-weight: 800; letter-spacing: -0.5px; }
+.metric .value {
+  font-family: var(--font-display);
+  font-size: clamp(16px, 1.6vw + 10px, 21px);
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 .metric .sub { font-size: 11.5px; margin-top: 5px; font-weight: 500; color: var(--muted); }
 
 /* Metric color modifiers — set accent bar + icon tint from the shared status tokens,
@@ -555,8 +563,12 @@ textarea { resize: vertical; font-family: inherit; }
 .metric.danger .m-icon { background: var(--red-bg); color: var(--red); }
 .metric.info .accent { background: var(--blue); }
 .metric.info .m-icon { background: var(--blue-bg); color: var(--blue); }
-.metric.brand .accent { background: var(--brand); }
-.metric.brand .m-icon { background: var(--brand-pale); color: var(--brand); }
+/* Named "indigo", not "brand" — a bare `.brand` class is also used (unrelated)
+   for the sidebar logo lockup's flex layout; reusing that name here made any
+   `.metric.brand` card pick up `display:flex` from that other rule and silently
+   break its stacked label/value/sub layout into a squashed single row. */
+.metric.indigo .accent { background: var(--brand); }
+.metric.indigo .m-icon { background: var(--brand-pale); color: var(--brand); }
 .metric.purple .accent { background: var(--purple); }
 .metric.purple .m-icon { background: var(--purple-bg); color: var(--purple); }
 
@@ -590,6 +602,19 @@ textarea { resize: vertical; font-family: inherit; }
 .table .muted { color: var(--muted); }
 .table .actions { display: flex; gap: 6px; justify-content: flex-end; }
 .row-danger { background: rgba(220, 38, 38, 0.025); }
+
+/* ── Pager ───────────────────────────────────── */
+.pager {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--border);
+}
+.pager-info { font-size: 12px; color: var(--muted); }
+.pager-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pager-size {
+  padding: 5px 8px; font-size: 12px; border-radius: 6px; border: 1px solid var(--border-hard);
+  background: var(--card); color: var(--text); width: auto;
+}
+.pager-page { font-size: 12px; color: var(--muted); white-space: nowrap; }
 
 /* ── Pills / badges ──────────────────────────── */
 .pill {
@@ -645,35 +670,86 @@ textarea { resize: vertical; font-family: inherit; }
 /* ── Modal ───────────────────────────────────── */
 .modal-overlay {
   position: fixed; inset: 0;
-  background: rgba(30, 27, 75, 0.5);
-  backdrop-filter: blur(2px);
+  background: rgba(24, 22, 60, 0.56);
+  backdrop-filter: blur(3px);
   display: flex; align-items: center; justify-content: center;
   z-index: 1000;
-  padding: 20px;
+  padding: 24px;
   animation: fadeIn 0.18s var(--ease);
 }
 .modal-panel {
   background: var(--card);
-  border-radius: 14px;
-  padding: 20px 22px;
+  border-radius: 18px;
   width: 460px;
   max-width: 95vw;
   max-height: 90vh;
-  overflow-y: auto;
-  box-shadow: var(--shadow-lg);
-  animation: scaleIn 0.18s ease;
+  /* This element owns the rounded corners but never scrolls itself — overflow:
+     hidden here (not on the scrolling element below) is what guarantees the
+     scrollbar and its content are cropped to the curve instead of a native
+     scrollbar track squaring off past the rounded corner. */
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 68px rgba(30, 27, 75, 0.28), 0 2px 10px rgba(30, 27, 75, 0.08);
+  animation: scaleIn 0.18s var(--ease-spring);
 }
-.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; }
-.modal-title { font-size: 15px; font-weight: 700; }
+.modal-scroll {
+  --modal-pad-x: 28px;
+  --modal-pad-y: 26px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 var(--modal-pad-x);
+}
+/* Title bar and action bar stay pinned while the body between them scrolls —
+   long forms (and the bulk-upload results table) no longer hide Save/Cancel
+   or the close button off the bottom/top of the viewport. */
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  position: sticky; top: 0; z-index: 2;
+  margin: 0 calc(-1 * var(--modal-pad-x)) 20px;
+  padding: var(--modal-pad-y) var(--modal-pad-x) 18px;
+  background: var(--card);
+}
+.modal-title { font-size: 17px; font-weight: 800; letter-spacing: -0.3px; color: var(--text); }
 .modal-close {
   background: var(--bg); border: 0;
-  width: 26px; height: 26px; border-radius: 50%;
+  width: 30px; height: 30px; border-radius: 50%;
   display: grid; place-items: center;
   cursor: pointer; color: var(--muted); font-size: 14px;
-  transition: background 0.15s;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
 }
-.modal-close:hover { background: var(--border); }
-.modal-foot { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
+.modal-close:hover { background: var(--red-bg); color: var(--red); }
+.modal-foot {
+  display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap;
+  position: sticky; bottom: 0; z-index: 2;
+  margin: 24px calc(-1 * var(--modal-pad-x)) 0;
+  padding: 18px var(--modal-pad-x) var(--modal-pad-y);
+  background: var(--card);
+}
+
+/* Groups related fields inside a long dialog form (Add Item, Add Organization…)
+   under a small labeled heading instead of one undifferentiated wall of fields. */
+.form-section + .form-section { margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--border); }
+.form-section-title {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
+  color: var(--brand); margin-bottom: 14px;
+}
+
+.modal-scroll .form { gap: 18px; }
+.modal-scroll .grid { gap: 16px; }
+.modal-scroll .field { gap: 6px; }
+
+.modal-scroll, .qsearch-dropdown, .upload-errors {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-hard) transparent;
+}
+.modal-scroll::-webkit-scrollbar, .qsearch-dropdown::-webkit-scrollbar, .upload-errors::-webkit-scrollbar { width: 8px; }
+.modal-scroll::-webkit-scrollbar-track, .qsearch-dropdown::-webkit-scrollbar-track, .upload-errors::-webkit-scrollbar-track { background: transparent; }
+.modal-scroll::-webkit-scrollbar-thumb, .qsearch-dropdown::-webkit-scrollbar-thumb, .upload-errors::-webkit-scrollbar-thumb { background: var(--border-hard); border-radius: 8px; }
+.modal-scroll::-webkit-scrollbar-thumb:hover, .qsearch-dropdown::-webkit-scrollbar-thumb:hover, .upload-errors::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
 /* ── Quick-search dropdown items (used inside .qsearch-dropdown) ──── */
 .cmdk-item {
@@ -757,6 +833,15 @@ textarea { resize: vertical; font-family: inherit; }
 .info-box.warn { background: var(--amber-bg); border-color: var(--amber-border); color: var(--amber); }
 .info-box.ok { background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
 .info-box.danger { background: var(--red-bg); border-color: var(--red-border); color: var(--red); }
+
+.bulk-upload { display: grid; gap: 14px; }
+.bulk-steps { margin: 0; padding-left: 20px; display: grid; gap: 14px; font-size: 13px; color: var(--text-mid); }
+.bulk-steps li { padding-left: 2px; }
+.bulk-steps li > div { margin-bottom: 8px; }
+.file-picker { display: flex; align-items: center; gap: 10px; }
+.upload-errors { max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+.err-list { margin: 0; padding-left: 16px; }
+.err-list li { color: var(--red); font-size: 11.5px; line-height: 1.5; }
 
 .divider { height: 1px; background: var(--border); margin: 16px 0; border: 0; }
 .kbd {
@@ -969,4 +1054,43 @@ textarea { resize: vertical; font-family: inherit; }
   .grid-2, .grid-3, .grid-4, .grid-5 { grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); }
   .search-box input { width: 100%; }
   .page-head h1 { font-size: 19px; }
+}
+
+@media (max-width: 640px) {
+  .page-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .page-actions { width: 100%; }
+  .page-actions, .toolbar, .tabs { flex-wrap: wrap; }
+  .toolbar .search-box, .toolbar .search-box input { width: 100%; }
+  .grid-2, .grid-3, .grid-4, .grid-5 { grid-template-columns: 1fr; }
+  .modal-panel { width: 100%; max-height: 88vh; }
+  .modal-scroll { --modal-pad-y: 16px; --modal-pad-x: 16px; }
+
+  /* Opt-in: plain data-display tables (not editable grids like the invoice
+     line-item editor) get their rows stacked into label/value cards instead
+     of scrolling horizontally. Cells carry a data-label attribute read by
+     the ::before rule below. */
+  table.table.stack-mobile thead { display: none; }
+  table.table.stack-mobile, table.table.stack-mobile tbody,
+  table.table.stack-mobile tr, table.table.stack-mobile td {
+    display: block; width: 100%;
+  }
+  table.table.stack-mobile tr {
+    border: 1px solid var(--border); border-radius: 10px; margin: 0 0 10px; overflow: hidden;
+  }
+  table.table.stack-mobile tr:last-child { margin-bottom: 0; }
+  table.table.stack-mobile td {
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    text-align: right; border-bottom: 1px solid var(--border); white-space: normal;
+  }
+  table.table.stack-mobile td:last-child { border-bottom: 0; }
+  table.table.stack-mobile td::before {
+    content: attr(data-label); flex-shrink: 0; text-align: left;
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--faint);
+  }
+  table.table.stack-mobile td[data-label=""]::before { display: none; }
+  table.table.stack-mobile td[data-label=""] { justify-content: flex-end; }
+  table.table.stack-mobile td .actions { flex-wrap: wrap; justify-content: flex-end; }
+
+  .pager { flex-direction: column; align-items: stretch; text-align: center; }
+  .pager-controls { justify-content: center; }
 }

@@ -2,7 +2,7 @@ import { Component, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AppShellComponent } from '../../shared/app-shell.component';
-import { AvatarComponent, EmptyStateComponent, ModalComponent, SkeletonRowsComponent } from '../../shared/ui';
+import { AvatarComponent, EmptyStateComponent, ModalComponent, PagerComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
 import { Client } from '../../core/models';
@@ -20,7 +20,7 @@ interface ClientForm {
 @Component({
   selector: 'app-clients',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppShellComponent, ModalComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent],
+  imports: [CommonModule, FormsModule, AppShellComponent, ModalComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, PagerComponent],
   template: `
     <app-shell title="Clients" [subtitle]="clients().length + ' clients on file'">
       <button actions class="btn primary" type="button" (click)="openAdd()">+ Add Client</button>
@@ -29,7 +29,7 @@ interface ClientForm {
         <div class="search-box">
           <span class="search-icon">⌕</span>
           <input class="input" type="text" placeholder="Search name, GSTIN or email"
-            [ngModel]="search()" (ngModelChange)="search.set($event)">
+            [ngModel]="search()" (ngModelChange)="onSearch($event)">
         </div>
       </div>
 
@@ -42,7 +42,7 @@ interface ClientForm {
           <app-empty-state icon="⌕" title="No matching clients" message="Try a different search term." />
         } @else {
           <div class="table-wrap">
-            <table class="table">
+            <table class="table stack-mobile">
               <thead>
                 <tr>
                   <th>Client</th>
@@ -53,9 +53,9 @@ interface ClientForm {
                 </tr>
               </thead>
               <tbody>
-                @for (c of filtered(); track c._id) {
+                @for (c of paged(); track c._id) {
                   <tr>
-                    <td>
+                    <td data-label="Client">
                       <div style="display:flex;align-items:center;gap:10px">
                         <app-avatar [name]="c.companyName" [size]="32" />
                         <div>
@@ -64,13 +64,13 @@ interface ClientForm {
                         </div>
                       </div>
                     </td>
-                    <td>
+                    <td data-label="GSTIN">
                       @if (c.gstin) { <span class="mono">{{ c.gstin }}</span> }
                       @else { <span class="muted">—</span> }
                     </td>
-                    <td>{{ c.phone || '—' }}</td>
-                    <td>{{ stateName(c.stateCode) }} <span class="muted">({{ c.stateCode }})</span></td>
-                    <td>
+                    <td data-label="Phone">{{ c.phone || '—' }}</td>
+                    <td data-label="State">{{ stateName(c.stateCode) }} <span class="muted">({{ c.stateCode }})</span></td>
+                    <td data-label="">
                       <div class="actions">
                         <button class="btn ghost sm" type="button" (click)="openEdit(c)">Edit</button>
                         <button class="btn danger sm" type="button" (click)="deleteTarget.set(c)">Delete</button>
@@ -81,6 +81,8 @@ interface ClientForm {
               </tbody>
             </table>
           </div>
+          <app-pager [page]="page()" [pageSize]="pageSize()" [total]="filtered().length"
+            (pageChange)="page.set($event)" (pageSizeChange)="onPageSize($event)" />
         }
       </div>
 
@@ -168,6 +170,9 @@ export class ClientsComponent implements OnInit {
   states = STATES;
   stateName = stateName;
 
+  page = signal(1);
+  pageSize = signal(10);
+
   filtered = computed(() => {
     const q = this.search().trim().toLowerCase();
     if (!q) return this.clients();
@@ -178,7 +183,15 @@ export class ClientsComponent implements OnInit {
     );
   });
 
+  paged = computed(() => {
+    const start = (this.page() - 1) * this.pageSize();
+    return this.filtered().slice(start, start + this.pageSize());
+  });
+
   constructor(private api: ApiService, private toast: ToastService) {}
+
+  onSearch(v: string) { this.search.set(v); this.page.set(1); }
+  onPageSize(v: number) { this.pageSize.set(v); this.page.set(1); }
 
   ngOnInit() { this.load(); }
 

@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../environments/environment';
 import {
-  AuditEntry, Client, GstSummary, Invoice, InvoiceStats, InvoiceTemplate, Item, Master, MastersResponse,
+  AuditEntry, Client, GstSummary, Invoice, InvoiceStats, InvoiceTemplate, Item, ItemBulkUploadResult, Master, MastersResponse,
   Organisation, OrgSummary, OrgUser, Payment, Plan, PlanUsage, PublicBranding, Reminder, Subscription, SuperOverview
 } from './models';
 
@@ -23,6 +23,12 @@ export class ApiService {
   createItem(payload: Partial<Item>) { return this.http.post<Item>(`${this.api}/items`, payload); }
   updateItem(id: string, payload: Partial<Item>) { return this.http.put<Item>(`${this.api}/items/${id}`, payload); }
   deleteItem(id: string) { return this.http.delete(`${this.api}/items/${id}`); }
+  downloadItemsTemplate() { return this.http.get(`${this.api}/items/bulk-upload/template`, { responseType: 'blob' }); }
+  bulkUploadItems(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http.post<ItemBulkUploadResult>(`${this.api}/items/bulk-upload`, formData);
+  }
 
   // ── Invoices ─────────────────────────────────
   invoices(status = '') {

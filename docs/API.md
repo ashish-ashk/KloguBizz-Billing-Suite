@@ -46,6 +46,12 @@ Auth responses include:
 - `POST /clients` (admin, accountant)
 - `PUT /clients/:id` (admin, accountant)
 - `DELETE /clients/:id` (admin)
+- `GET /items`
+- `POST /items` (admin, accountant)
+- `PUT /items/:id` (admin, accountant)
+- `DELETE /items/:id` (admin)
+- `GET /items/bulk-upload/template` (admin, accountant) — downloads a `.xlsx` template (an "Items" sheet with dropdowns/validation for Type, Unit, GST Rate, Tax Inclusive and Status, plus a "Read Me" sheet) for bulk item import
+- `POST /items/bulk-upload` (admin, accountant) — `multipart/form-data` with a `file` field (`.xlsx`, max 5MB). Each row is validated independently; valid rows are inserted, invalid rows are reported back with the reason. Returns `{ totalRows, created, failed: [{ row, itemCode?, name?, errors: string[] }] }` (200 even on partial failure — a row-level `failed` entry is not a request error)
 - `GET /invoices` — optional `?status=` and `?q=` (search by invoice number) filters; auto-marks overdue pending invoices past their due date
 - `GET /invoices/stats` — dashboard metrics: revenue/pending/overdue totals, 12-month revenue trend, top clients
 - `GET /invoices/export.csv` — CSV download of the invoice list (respects `?status=`)
