@@ -2,7 +2,7 @@ import { Component, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { forkJoin } from 'rxjs';
-import { ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, PagerComponent } from '../../shared/ui';
+import { ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { IconComponent } from '../../shared/icons';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
@@ -22,7 +22,7 @@ interface OrgEditForm {
 @Component({
   selector: 'app-super-organisations',
   standalone: true,
-  imports: [CommonModule, FormsModule, ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, IconComponent, PagerComponent],
+  imports: [CommonModule, FormsModule, ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, IconComponent],
   template: `
     <div class="page-head">
       <div>
@@ -35,7 +35,7 @@ interface OrgEditForm {
     </div>
 
     <section class="grid grid-5" style="margin-bottom:20px">
-      <div class="card metric indigo">
+      <div class="card metric brand">
         <div class="accent"></div>
         <div class="metric-row"><span class="label">Total Orgs</span><span class="m-icon"><app-icon name="package" [size]="15" /></span></div>
         <div class="value">{{ overview()?.organisations || 0 }}</div>
@@ -64,14 +64,14 @@ interface OrgEditForm {
 
     <div class="toolbar">
       <div class="tabs">
-        <button type="button" [class.active]="tab() === 'all'" (click)="onTab('all')">All ({{ orgs().length }})</button>
-        <button type="button" [class.active]="tab() === 'active'" (click)="onTab('active')">Active ({{ countOf('active') }})</button>
-        <button type="button" [class.active]="tab() === 'trial'" (click)="onTab('trial')">Trial ({{ countOf('trial') }})</button>
-        <button type="button" [class.active]="tab() === 'suspended'" (click)="onTab('suspended')">Suspended ({{ countOf('suspended') }})</button>
+        <button type="button" [class.active]="tab() === 'all'" (click)="tab.set('all')">All ({{ orgs().length }})</button>
+        <button type="button" [class.active]="tab() === 'active'" (click)="tab.set('active')">Active ({{ countOf('active') }})</button>
+        <button type="button" [class.active]="tab() === 'trial'" (click)="tab.set('trial')">Trial ({{ countOf('trial') }})</button>
+        <button type="button" [class.active]="tab() === 'suspended'" (click)="tab.set('suspended')">Suspended ({{ countOf('suspended') }})</button>
       </div>
       <div class="search-box">
         <span class="search-icon">⌕</span>
-        <input class="input" placeholder="Search name, email or GSTIN" [ngModel]="search()" (ngModelChange)="onSearch($event)">
+        <input class="input" placeholder="Search name, email or GSTIN" [ngModel]="search()" (ngModelChange)="search.set($event)">
       </div>
     </div>
 
@@ -82,16 +82,16 @@ interface OrgEditForm {
         <app-empty-state icon="🏢" title="No organizations found" message="Try a different filter or add a new organization." />
       } @else {
         <div class="table-wrap">
-          <table class="table stack-mobile">
+          <table class="table">
             <thead>
               <tr>
                 <th>Organization</th><th>Admin</th><th>Plan</th><th>Users</th><th>Invoices</th><th>Created</th><th>Status</th><th style="text-align:right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              @for (o of paged(); track o._id) {
+              @for (o of filtered(); track o._id) {
                 <tr>
-                  <td data-label="Organization">
+                  <td>
                     <div style="display:flex;align-items:center;gap:10px">
                       <app-avatar [name]="o.name" [size]="32" />
                       <div>
@@ -100,16 +100,16 @@ interface OrgEditForm {
                       </div>
                     </div>
                   </td>
-                  <td data-label="Admin">
+                  <td>
                     <div>{{ o.admin?.name || '—' }}</div>
                     <div class="muted" style="font-size:11px">{{ o.admin?.email || o.adminEmail }}</div>
                   </td>
-                  <td data-label="Plan"><span [class]="'pill ' + planClass(o.plan)">{{ planLabel(o.plan) }}</span></td>
-                  <td class="num" data-label="Users">{{ o.userCount }}</td>
-                  <td class="num" data-label="Invoices">{{ o.invoiceCount }}</td>
-                  <td class="muted" data-label="Created">{{ fmtDate(o.createdAt) }}</td>
-                  <td data-label="Status"><app-pill [status]="o.status" /></td>
-                  <td data-label="">
+                  <td><span [class]="'pill ' + planClass(o.plan)">{{ planLabel(o.plan) }}</span></td>
+                  <td class="num">{{ o.userCount }}</td>
+                  <td class="num">{{ o.invoiceCount }}</td>
+                  <td class="muted">{{ fmtDate(o.createdAt) }}</td>
+                  <td><app-pill [status]="o.status" /></td>
+                  <td>
                     <div class="actions">
                       <button class="btn ghost sm" type="button" (click)="openView(o)">View</button>
                       <button class="btn secondary sm" type="button" (click)="openEdit(o)">Edit</button>
@@ -126,66 +126,49 @@ interface OrgEditForm {
             </tbody>
           </table>
         </div>
-        <app-pager [page]="page()" [pageSize]="pageSize()" [total]="filtered().length"
-          (pageChange)="page.set($event)" (pageSizeChange)="onPageSize($event)" />
       }
     </div>
 
     <!-- Add organization -->
-    <app-modal [open]="showAdd()" title="Add Organization" [width]="580" (close)="showAdd.set(false)">
-      <div class="form-section">
-        <div class="form-section-title">Organization Details</div>
-        <div class="grid grid-2">
-          <div class="field">
-            <label>Organization Name *</label>
-            <input [(ngModel)]="addForm.name" placeholder="Acme Traders Pvt Ltd">
-          </div>
-          <div class="field">
-            <label>GSTIN</label>
-            <input class="mono" [(ngModel)]="addForm.gstin" placeholder="27AAAAA0000A1Z5">
-          </div>
+    <app-modal [open]="showAdd()" title="Add Organization" [width]="560" (close)="showAdd.set(false)">
+      <div class="grid grid-2" style="gap:14px">
+        <div class="field">
+          <label>Organization Name *</label>
+          <input [(ngModel)]="addForm.name" placeholder="Acme Traders Pvt Ltd">
         </div>
-      </div>
-
-      <div class="form-section">
-        <div class="form-section-title">Admin Contact</div>
-        <div class="grid grid-2">
-          <div class="field">
-            <label>Admin Name</label>
-            <input [(ngModel)]="addForm.adminName" placeholder="Full name">
-          </div>
-          <div class="field">
-            <label>Admin Email *</label>
-            <input type="email" [(ngModel)]="addForm.adminEmail" placeholder="admin@company.com">
-            @if (addForm.adminEmail && !isValidEmail(addForm.adminEmail)) { <div class="error">Enter a valid email address</div> }
-          </div>
+        <div class="field">
+          <label>GSTIN</label>
+          <input class="mono" [(ngModel)]="addForm.gstin" placeholder="27AAAAA0000A1Z5">
+        </div>
+        <div class="field">
+          <label>Admin Name</label>
+          <input [(ngModel)]="addForm.adminName" placeholder="Full name">
+        </div>
+        <div class="field">
+          <label>Admin Email *</label>
+          <input type="email" [(ngModel)]="addForm.adminEmail" placeholder="admin@company.com">
+          @if (addForm.adminEmail && !isValidEmail(addForm.adminEmail)) { <div class="error">Enter a valid email address</div> }
         </div>
         <div class="field">
           <label>Phone</label>
           <input [(ngModel)]="addForm.phone" placeholder="+91 98xxxxxx00">
         </div>
-      </div>
-
-      <div class="form-section">
-        <div class="form-section-title">Location &amp; Plan</div>
-        <div class="grid grid-2">
-          <div class="field">
-            <label>State</label>
-            <select [(ngModel)]="addForm.stateCode">
-              <option value="">Select state</option>
-              @for (s of states; track s.code) { <option [value]="s.code">{{ s.name }} ({{ s.code }})</option> }
-            </select>
-          </div>
-          <div class="field">
-            <label>Plan</label>
-            <select [(ngModel)]="addForm.plan">
-              @for (p of planOptions(); track p.code) { <option [value]="p.code">{{ p.name }}</option> }
-            </select>
-          </div>
-        </div>
         <div class="field">
+          <label>State</label>
+          <select [(ngModel)]="addForm.stateCode">
+            <option value="">Select state</option>
+            @for (s of states; track s.code) { <option [value]="s.code">{{ s.name }} ({{ s.code }})</option> }
+          </select>
+        </div>
+        <div class="field" style="grid-column:1/-1">
           <label>Address</label>
           <input [(ngModel)]="addForm.address" placeholder="Registered address">
+        </div>
+        <div class="field">
+          <label>Plan</label>
+          <select [(ngModel)]="addForm.plan">
+            @for (p of planOptions(); track p.code) { <option [value]="p.code">{{ p.name }}</option> }
+          </select>
         </div>
       </div>
       <div class="modal-foot">
@@ -218,59 +201,44 @@ interface OrgEditForm {
     </app-modal>
 
     <!-- Edit organization -->
-    <app-modal [open]="showEdit()" title="Edit Organization" [width]="580" (close)="showEdit.set(false)">
-      <div class="form-section">
-        <div class="form-section-title">Organization Details</div>
-        <div class="grid grid-2">
-          <div class="field">
-            <label>Organization Name</label>
-            <input [(ngModel)]="editForm.name">
-          </div>
-          <div class="field">
-            <label>GSTIN</label>
-            <input class="mono" [(ngModel)]="editForm.gstin">
-          </div>
+    <app-modal [open]="showEdit()" title="Edit Organization" [width]="560" (close)="showEdit.set(false)">
+      <div class="grid grid-2" style="gap:14px">
+        <div class="field">
+          <label>Organization Name</label>
+          <input [(ngModel)]="editForm.name">
+        </div>
+        <div class="field">
+          <label>GSTIN</label>
+          <input class="mono" [(ngModel)]="editForm.gstin">
         </div>
         <div class="field">
           <label>Phone</label>
           <input [(ngModel)]="editForm.phone">
         </div>
-      </div>
-
-      <div class="form-section">
-        <div class="form-section-title">Location</div>
-        <div class="grid grid-2">
-          <div class="field">
-            <label>State</label>
-            <select [(ngModel)]="editForm.stateCode">
-              <option value="">Select state</option>
-              @for (s of states; track s.code) { <option [value]="s.code">{{ s.name }} ({{ s.code }})</option> }
-            </select>
-          </div>
-          <div class="field">
-            <label>Address</label>
-            <input [(ngModel)]="editForm.address">
-          </div>
+        <div class="field">
+          <label>State</label>
+          <select [(ngModel)]="editForm.stateCode">
+            <option value="">Select state</option>
+            @for (s of states; track s.code) { <option [value]="s.code">{{ s.name }} ({{ s.code }})</option> }
+          </select>
         </div>
-      </div>
-
-      <div class="form-section">
-        <div class="form-section-title">Plan &amp; Status</div>
-        <div class="grid grid-2">
-          <div class="field">
-            <label>Plan</label>
-            <select [(ngModel)]="editForm.plan">
-              @for (p of planOptions(); track p.code) { <option [value]="p.code">{{ p.name }}</option> }
-            </select>
-          </div>
-          <div class="field">
-            <label>Status</label>
-            <select [(ngModel)]="editForm.status">
-              <option value="active">Active</option>
-              <option value="trial">Trial</option>
-              <option value="suspended">Suspended</option>
-            </select>
-          </div>
+        <div class="field" style="grid-column:1/-1">
+          <label>Address</label>
+          <input [(ngModel)]="editForm.address">
+        </div>
+        <div class="field">
+          <label>Plan</label>
+          <select [(ngModel)]="editForm.plan">
+            @for (p of planOptions(); track p.code) { <option [value]="p.code">{{ p.name }}</option> }
+          </select>
+        </div>
+        <div class="field">
+          <label>Status</label>
+          <select [(ngModel)]="editForm.status">
+            <option value="active">Active</option>
+            <option value="trial">Trial</option>
+            <option value="suspended">Suspended</option>
+          </select>
         </div>
       </div>
       <div class="modal-foot">
@@ -410,14 +378,6 @@ export class SuperOrganisationsComponent implements OnInit {
     });
   });
 
-  page = signal(1);
-  pageSize = signal(10);
-
-  paged = computed(() => {
-    const start = (this.page() - 1) * this.pageSize();
-    return this.filtered().slice(start, start + this.pageSize());
-  });
-
   planOptions = computed<Array<{ code: string; name: string }>>(() => {
     const loaded = this.plans();
     if (loaded.length) return loaded.map(p => ({ code: p.code, name: p.name }));
@@ -451,10 +411,6 @@ export class SuperOrganisationsComponent implements OnInit {
   countOf(status: string): number {
     return this.orgs().filter(o => o.status === status).length;
   }
-
-  onSearch(v: string) { this.search.set(v); this.page.set(1); }
-  onTab(t: 'all' | 'active' | 'trial' | 'suspended') { this.tab.set(t); this.page.set(1); }
-  onPageSize(v: number) { this.pageSize.set(v); this.page.set(1); }
 
   planClass(plan: string): string {
     const map: Record<string, string> = { starter: 'partial', growth: '', business: 'purple', enterprise: 'draft' };

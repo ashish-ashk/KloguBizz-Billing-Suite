@@ -8,7 +8,7 @@ import { BarChartComponent, BarChartPoint } from '../../shared/bar-chart.compone
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
 import { Invoice, InvoiceStats } from '../../core/models';
-import { fmtINR, fmtINRCompact, fmtDate, monthLabel } from '../../core/format';
+import { fmtINR, fmtDate, monthLabel } from '../../core/format';
 import { forkJoin } from 'rxjs';
 
 @Component({
@@ -25,22 +25,22 @@ import { forkJoin } from 'rxjs';
       @if (stats(); as s) {
         <!-- Metrics -->
         <section class="grid grid-4" style="margin-bottom:20px;">
-          <div class="card metric indigo hoverable">
+          <div class="card metric brand hoverable">
             <div class="accent"></div>
             <div class="metric-row"><span class="label">Total Revenue</span><span class="m-icon"><app-icon name="rupee" [size]="15" /></span></div>
-            <div class="value" [title]="fmtINR(s.totalRevenue, true)">{{ fmtINRCompact(s.totalRevenue) }}</div>
+            <div class="value">{{ fmtINR(s.totalRevenue, true) }}</div>
             <div class="sub" style="color:var(--green)">{{ s.counts.paid }} paid invoices</div>
           </div>
           <div class="card metric warning hoverable">
             <div class="accent"></div>
             <div class="metric-row"><span class="label">Pending</span><span class="m-icon"><app-icon name="clock" [size]="15" /></span></div>
-            <div class="value" [title]="fmtINR(s.pendingAmount, true)">{{ fmtINRCompact(s.pendingAmount) }}</div>
+            <div class="value">{{ fmtINR(s.pendingAmount, true) }}</div>
             <div class="sub" style="color:var(--amber)">{{ s.counts.pending }} awaiting payment</div>
           </div>
           <div class="card metric danger hoverable">
             <div class="accent"></div>
             <div class="metric-row"><span class="label">Overdue</span><span class="m-icon"><app-icon name="alertTriangle" [size]="15" /></span></div>
-            <div class="value" [title]="fmtINR(s.overdueAmount, true)">{{ fmtINRCompact(s.overdueAmount) }}</div>
+            <div class="value">{{ fmtINR(s.overdueAmount, true) }}</div>
             <div class="sub" style="color:var(--red)">{{ s.counts.overdue }} require attention</div>
           </div>
           <div class="card metric purple hoverable">
@@ -91,25 +91,25 @@ import { forkJoin } from 'rxjs';
           </div>
           @if (recent().length) {
             <div class="table-wrap">
-              <table class="table stack-mobile">
+              <table class="table">
                 <thead>
                   <tr><th>Invoice #</th><th>Client</th><th>Date</th><th>Due Date</th><th>Amount</th><th>Status</th><th></th></tr>
                 </thead>
                 <tbody>
                   @for (inv of recent(); track inv._id) {
                     <tr>
-                      <td class="num" data-label="Invoice #">{{ inv.invoiceNumber }}</td>
-                      <td data-label="Client">
+                      <td class="num">{{ inv.invoiceNumber }}</td>
+                      <td>
                         <div style="display:flex;align-items:center;gap:10px;">
                           <app-avatar [name]="clientName(inv)" [size]="28" />
                           <span style="font-weight:600;">{{ clientName(inv) }}</span>
                         </div>
                       </td>
-                      <td class="muted" data-label="Date">{{ fmtDate(inv.date) }}</td>
-                      <td class="muted" data-label="Due Date">{{ fmtDate(inv.dueDate) }}</td>
-                      <td class="strong" data-label="Amount">{{ fmtINR(inv.totals.total) }}</td>
-                      <td data-label="Status"><app-pill [status]="inv.status" /></td>
-                      <td class="actions" data-label=""><a class="btn ghost sm" [routerLink]="['/invoices', inv._id, 'edit']">Edit</a></td>
+                      <td class="muted">{{ fmtDate(inv.date) }}</td>
+                      <td class="muted">{{ fmtDate(inv.dueDate) }}</td>
+                      <td class="strong">{{ fmtINR(inv.totals.total) }}</td>
+                      <td><app-pill [status]="inv.status" /></td>
+                      <td class="actions"><a class="btn ghost sm" [routerLink]="['/invoices', inv._id, 'edit']">Edit</a></td>
                     </tr>
                   }
                 </tbody>
@@ -128,7 +128,6 @@ export class DashboardComponent implements OnInit {
   stats = signal<InvoiceStats | null>(null);
   recent = signal<Invoice[]>([]);
   fmtINR = fmtINR;
-  fmtINRCompact = fmtINRCompact;
   fmtDate = fmtDate;
   monthLabel = monthLabel;
 

@@ -7,18 +7,6 @@ export function fmtINR(n: number | null | undefined, round = false): string {
   return (round ? inrRound : inr).format(n || 0);
 }
 
-/** Abbreviated Indian currency (₹8.4 L, ₹1.5 Cr) for headline metric tiles,
- * where a full grouped figure (₹14,56,79,011) would overflow a narrow card. */
-export function fmtINRCompact(n: number | null | undefined): string {
-  const v = n || 0;
-  const abs = Math.abs(v);
-  const sign = v < 0 ? '-' : '';
-  const scaled = (divisor: number) => (abs / divisor).toFixed(1).replace(/\.0$/, '');
-  if (abs >= 1_00_00_000) return `${sign}₹${scaled(1_00_00_000)} Cr`;
-  if (abs >= 1_00_000) return `${sign}₹${scaled(1_00_000)} L`;
-  return fmtINR(v, true);
-}
-
 export function fmtDate(d: string | Date | null | undefined): string {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });

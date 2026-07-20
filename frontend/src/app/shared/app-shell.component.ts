@@ -39,7 +39,7 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
             <a routerLink="/bill-generator" routerLinkActive="active" title="Bill Generator"><span class="nav-icon"><app-icon name="calculator" /></span><span class="nav-label">Bill Generator</span></a>
             <div class="nav-section">Management</div>
             <a routerLink="/clients" routerLinkActive="active" title="Clients"><span class="nav-icon"><app-icon name="users" /></span><span class="nav-label">Clients</span></a>
-            <a routerLink="/items" routerLinkActive="active" title="Inventory"><span class="nav-icon"><app-icon name="box" /></span><span class="nav-label">Inventory</span></a>
+            <a routerLink="/items" routerLinkActive="active" title="Items"><span class="nav-icon"><app-icon name="box" /></span><span class="nav-label">Items</span></a>
             <a routerLink="/payments" routerLinkActive="active" title="Payments"><span class="nav-icon"><app-icon name="creditCard" /></span><span class="nav-label">Payments</span></a>
             <a routerLink="/reports" routerLinkActive="active" title="Reports"><span class="nav-icon"><app-icon name="chart" /></span><span class="nav-label">Reports</span></a>
             <a routerLink="/users" routerLinkActive="active" title="Users &amp; Roles"><span class="nav-icon"><app-icon name="shieldUser" /></span><span class="nav-label">Users &amp; Roles</span></a>
@@ -144,7 +144,7 @@ export class AppShellComponent {
       { label: 'Invoices', route: '/invoices', icon: 'invoice' },
       { label: 'Bill Generator', route: '/bill-generator', icon: 'calculator' },
       { label: 'Clients', route: '/clients', icon: 'users' },
-      { label: 'Inventory', route: '/items', icon: 'box' },
+      { label: 'Items', route: '/items', icon: 'box' },
       { label: 'Payments', route: '/payments', icon: 'creditCard' },
       { label: 'Reports', route: '/reports', icon: 'chart' },
       { label: 'Users & Roles', route: '/users', icon: 'shieldUser' },

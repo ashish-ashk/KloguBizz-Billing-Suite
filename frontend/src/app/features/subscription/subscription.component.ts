@@ -151,7 +151,7 @@ const PRICE_COLORS: Record<string, string> = {
             </div>
             @if (sub(); as s) {
               <div class="table-wrap">
-                <table class="table stack-mobile">
+                <table class="table">
                   <thead>
                     <tr>
                       <th>Date</th>
@@ -163,11 +163,11 @@ const PRICE_COLORS: Record<string, string> = {
                   </thead>
                   <tbody>
                     <tr>
-                      <td data-label="Date">{{ fmtDate(s.createdAt || s.startDate) }}</td>
-                      <td class="strong" data-label="Description">{{ historyPlanName() }} — {{ cycleTitle(s.billingCycle) }}</td>
-                      <td class="num" data-label="Amount">{{ historyAmount() === null ? '—' : fmtINR(historyAmount(), true) }}</td>
-                      <td data-label="Status"><app-pill [status]="s.status" [label]="statusLabel(s.status)" /></td>
-                      <td data-label="">
+                      <td>{{ fmtDate(s.createdAt || s.startDate) }}</td>
+                      <td class="strong">{{ historyPlanName() }} — {{ cycleTitle(s.billingCycle) }}</td>
+                      <td class="num">{{ historyAmount() === null ? '—' : fmtINR(historyAmount(), true) }}</td>
+                      <td><app-pill [status]="s.status" [label]="statusLabel(s.status)" /></td>
+                      <td>
                         <div class="actions">
                           <button class="btn ghost sm" type="button" (click)="downloadPdf()"><app-icon name="download" [size]="13" /> PDF</button>
                         </div>

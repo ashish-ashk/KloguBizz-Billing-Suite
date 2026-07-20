@@ -29,7 +29,7 @@ import { downloadBlob, fmtINR, monthLabel } from '../../core/format';
           </div>
         } @else {
           <section class="grid grid-3" style="margin-bottom:20px;">
-            <div class="card metric indigo">
+            <div class="card metric brand">
               <div class="accent"></div>
               <div class="metric-row"><span class="label">Taxable Value</span><span class="m-icon"><app-icon name="rupee" [size]="15" /></span></div>
               <div class="value">{{ fmtINR(s.totals.taxable, true) }}</div>
@@ -64,20 +64,20 @@ import { downloadBlob, fmtINR, monthLabel } from '../../core/format';
               </div>
             </div>
             <div class="table-wrap">
-              <table class="table stack-mobile">
+              <table class="table">
                 <thead>
                   <tr><th>Month</th><th>Invoices</th><th>Taxable Value</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th></tr>
                 </thead>
                 <tbody>
                   @for (m of s.byMonth; track m.month) {
                     <tr>
-                      <td class="strong" data-label="Month">{{ monthLabel(m.month) }} {{ m.month.slice(0, 4) }}</td>
-                      <td class="muted" data-label="Invoices">{{ m.invoiceCount }}</td>
-                      <td data-label="Taxable Value">{{ fmtINR(m.taxable) }}</td>
-                      <td class="muted" data-label="CGST">{{ fmtINR(m.cgst) }}</td>
-                      <td class="muted" data-label="SGST">{{ fmtINR(m.sgst) }}</td>
-                      <td class="muted" data-label="IGST">{{ fmtINR(m.igst) }}</td>
-                      <td class="num" data-label="Total">{{ fmtINR(m.total) }}</td>
+                      <td class="strong">{{ monthLabel(m.month) }} {{ m.month.slice(0, 4) }}</td>
+                      <td class="muted">{{ m.invoiceCount }}</td>
+                      <td>{{ fmtINR(m.taxable) }}</td>
+                      <td class="muted">{{ fmtINR(m.cgst) }}</td>
+                      <td class="muted">{{ fmtINR(m.sgst) }}</td>
+                      <td class="muted">{{ fmtINR(m.igst) }}</td>
+                      <td class="num">{{ fmtINR(m.total) }}</td>
                     </tr>
                   }
                 </tbody>
@@ -93,14 +93,14 @@ import { downloadBlob, fmtINR, monthLabel } from '../../core/format';
               </div>
             </div>
             <div class="table-wrap">
-              <table class="table stack-mobile">
+              <table class="table">
                 <thead><tr><th>Rate</th><th>Taxable Value</th><th>Tax Collected</th></tr></thead>
                 <tbody>
                   @for (r of s.byRate; track r.rate) {
                     <tr>
-                      <td data-label="Rate"><span class="pill">{{ r.rate }}%</span></td>
-                      <td data-label="Taxable Value">{{ fmtINR(r.taxable) }}</td>
-                      <td class="strong" data-label="Tax Collected">{{ fmtINR(r.tax) }}</td>
+                      <td><span class="pill">{{ r.rate }}%</span></td>
+                      <td>{{ fmtINR(r.taxable) }}</td>
+                      <td class="strong">{{ fmtINR(r.tax) }}</td>
                     </tr>
                   }
                 </tbody>
