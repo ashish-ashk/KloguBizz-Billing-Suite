@@ -261,16 +261,16 @@ interface BillRow {
               <div style="padding:16px 20px;color:var(--muted);font-size:12.5px">Add items to see the tax breakdown.</div>
             } @else {
               <div class="table-wrap">
-                <table class="table">
+                <table class="table stack-mobile">
                   <thead>
                     <tr><th>Rate</th><th>Taxable</th><th>Tax</th></tr>
                   </thead>
                   <tbody>
                     @for (t of taxRows(); track t.rate) {
                       <tr>
-                        <td class="num">{{ t.rate }}%</td>
-                        <td>{{ fmtINR(t.taxable) }}</td>
-                        <td class="strong">{{ fmtINR(t.tax) }}</td>
+                        <td class="num" data-label="Rate">{{ t.rate }}%</td>
+                        <td data-label="Taxable">{{ fmtINR(t.taxable) }}</td>
+                        <td class="strong" data-label="Tax">{{ fmtINR(t.tax) }}</td>
                       </tr>
                     }
                   </tbody>

@@ -38,7 +38,7 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
         <!-- Role summary cards -->
         <section class="grid grid-3" style="margin-bottom:16px">
           @for (r of roles; track r) {
-            <div class="card metric" [class.brand]="r === 'admin'" [class.info]="r === 'accountant'">
+            <div class="card metric" [class.indigo]="r === 'admin'" [class.info]="r === 'accountant'">
               <div class="accent" [style.background]="r === 'viewer' ? 'var(--slate)' : null"></div>
               <div class="metric-row">
                 <span class="label">{{ roleLabel(r) }}</span>
@@ -59,10 +59,21 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
                 <div class="card-sub">People with access to this organisation</div>
               </div>
             </div>
+            @if (visibleUsers().length > 5) {
+              <div style="padding:0 20px 14px">
+                <div class="search-box" style="width:100%">
+                  <span class="search-icon">⌕</span>
+                  <input class="input" type="search" style="width:100%" placeholder="Search name, email or role"
+                    [ngModel]="search()" (ngModelChange)="search.set($event)">
+                </div>
+              </div>
+            }
             @if (visibleUsers().length === 0) {
               <app-empty-state icon="◉" title="No team members yet" message="Invite your accountant or a viewer to start collaborating." />
+            } @else if (filteredUsers().length === 0) {
+              <app-empty-state icon="⌕" title="No matching team members" message="Try a different search term." />
             } @else {
-              @for (u of visibleUsers(); track u._id) {
+              @for (u of filteredUsers(); track u._id) {
                 <div class="member-row" style="display:flex;align-items:center;gap:12px;padding:14px 20px">
                   <app-avatar [name]="u.name" [size]="40" />
                   <div style="flex:1;min-width:0">
@@ -261,7 +272,17 @@ export class UsersComponent implements OnInit {
   fmtDate = fmtDate;
   isValidEmail = isValidEmail;
 
+  search = signal('');
+
   visibleUsers = computed(() => this.users().filter(u => u.status !== 'disabled'));
+
+  filteredUsers = computed(() => {
+    const q = this.search().trim().toLowerCase();
+    if (!q) return this.visibleUsers();
+    return this.visibleUsers().filter(u =>
+      u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || u.role.toLowerCase().includes(q)
+    );
+  });
   subtitleText = computed(() => {
     if (this.loading()) return 'Loading team…';
     const list = this.visibleUsers();

@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["angular:styles/component:css;45d2dbde1b11246c9df90d36a91dc85b611fcedcbf54551f89f919ff839663fa;E:/Application/KloguBizz-Billing-Suite-master/KloguBizz-Billing-Suite/frontend/src/app/features/invoice-templates/invoice-templates.component.ts"],
+  "sourcesContent": ["\n    .it-layout { display: grid; grid-template-columns: minmax(320px, 380px) 1fr; gap: 24px; align-items: start; }\n    @media (max-width: 880px) { .it-layout { grid-template-columns: 1fr; } }\n  "],
+  "mappings": ";AACI,CAAC;AAAY,WAAS;AAAM,yBAAuB,OAAO,KAAK,EAAE,OAAO;AAAK,OAAK;AAAM,eAAa;AAAO;AAC5G,OAAO,CAAC,SAAS,EAAE;AAAS,GAD3B;AACwC,2BAAuB;AAAK;AAAE;",
+  "names": []
+}

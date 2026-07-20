@@ -1,11 +1,36 @@
+const multer = require('multer');
 const router = require('express').Router();
-const { listItems, createItem, updateItem, deleteItem } = require('../controllers/itemController');
+const { listItems, createItem, updateItem, deleteItem, downloadItemTemplate, bulkUploadItems } = require('../controllers/itemController');
 const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { requireTenant } = require('../middleware/tenantMiddleware');
+const { httpError } = require('../utils/httpError');
+
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype !== XLSX_MIME && !/\.xlsx$/i.test(file.originalname)) {
+      return cb(httpError(400, 'Only .xlsx Excel files are supported. Please use the provided template.'));
+    }
+    cb(null, true);
+  }
+});
+
+// Normalizes multer's own errors (e.g. file-too-large) into the app's { message } error shape.
+function excelUpload(req, res, next) {
+  upload.single('file')(req, res, err => {
+    if (!err) return next();
+    if (err.code === 'LIMIT_FILE_SIZE') return next(httpError(400, 'File is too large. Maximum size is 5MB.'));
+    return next(err.statusCode ? err : httpError(400, err.message || 'File upload failed.'));
+  });
+}
 
 router.use(protect, requireTenant);
 router.get('/', listItems);
+router.get('/bulk-upload/template', requireRole('admin', 'accountant'), downloadItemTemplate);
+router.post('/bulk-upload', requireRole('admin', 'accountant'), excelUpload, bulkUploadItems);
 router.post('/', requireRole('admin', 'accountant'), createItem);
 router.put('/:id', requireRole('admin', 'accountant'), updateItem);
 router.delete('/:id', requireRole('admin'), deleteItem);
