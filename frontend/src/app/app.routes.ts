@@ -4,6 +4,8 @@ import { authGuard, superAdminGuard, tenantAdminGuard } from './core/auth.guard'
 export const routes: Routes = [
   { path: 'login', loadComponent: () => import('./features/auth/login.component').then(m => m.LoginComponent) },
   { path: 'register', loadComponent: () => import('./features/auth/register.component').then(m => m.RegisterComponent) },
+  { path: 'terms', data: { type: 'terms' }, loadComponent: () => import('./features/legal/legal-page.component').then(m => m.LegalPageComponent) },
+  { path: 'sla', data: { type: 'sla' }, loadComponent: () => import('./features/legal/legal-page.component').then(m => m.LegalPageComponent) },
   {
     path: '',
     canActivate: [authGuard],

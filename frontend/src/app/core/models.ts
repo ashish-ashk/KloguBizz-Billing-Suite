@@ -10,6 +10,7 @@ export interface Organisation {
   _id: string;
   name: string;
   adminEmail: string;
+  ownerId?: string;
   gstin?: string;
   pan?: string;
   phone?: string;

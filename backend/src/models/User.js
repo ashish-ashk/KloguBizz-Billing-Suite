@@ -12,7 +12,12 @@ const userSchema = new mongoose.Schema({
   },
   status: { type: String, enum: ['active', 'invited', 'disabled'], default: 'active' },
   inviteToken: String,
-  lastLoginAt: Date
+  lastLoginAt: Date,
+  termsAcceptedAt: Date,
+  termsVersion: String,
+  // Bumped on every login (and password change) to invalidate JWTs issued
+  // before the bump — enforces a single active session per user.
+  sessionVersion: { type: Number, default: 0 }
 }, { timestamps: true });
 
 userSchema.index({ email: 1 }, { unique: true });

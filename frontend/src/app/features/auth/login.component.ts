@@ -1,17 +1,19 @@
 import { Component, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
 import { ApiService } from '../../core/api.service';
 import { PublicBranding } from '../../core/models';
 import { IconComponent } from '../../shared/icons';
 import { AuthPreviewCardComponent } from '../../shared/auth-preview-card.component';
+import { ToastsComponent } from '../../shared/ui';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [FormsModule, RouterLink, IconComponent, AuthPreviewCardComponent],
+  imports: [FormsModule, RouterLink, IconComponent, AuthPreviewCardComponent, ToastsComponent],
   template: `
+    <app-toasts />
     <div class="auth-page">
       <section class="auth-panel page-enter">
         <div style="max-width:360px;width:100%;margin:0 auto;">
@@ -29,6 +31,13 @@ import { AuthPreviewCardComponent } from '../../shared/auth-preview-card.compone
           <div class="auth-eyebrow"><app-icon name="lock" [size]="11" /> Secure Sign In</div>
           <h1 style="margin:0 0 6px;font-size:25px;letter-spacing:-0.4px;">Welcome back</h1>
           <p style="margin:0 0 26px;color:var(--muted);font-size:14px;">Sign in to manage your invoices and payments.</p>
+
+          @if (justRegistered()) {
+            <div class="info-box ok" style="margin-bottom:18px;display:flex;gap:8px;align-items:flex-start;">
+              <app-icon name="checkCircle" [size]="15" style="flex-shrink:0;margin-top:1px" />
+              <span>Account created successfully — sign in to continue.</span>
+            </div>
+          }
 
           <form class="form" (ngSubmit)="submit()">
             <div class="field">
@@ -63,11 +72,10 @@ import { AuthPreviewCardComponent } from '../../shared/auth-preview-card.compone
             New to {{ branding()?.appName || 'Klogu Bizz' }}? <a routerLink="/register" style="color:var(--brand);font-weight:600;">Create an account</a>
           </p>
 
-          <div style="margin-top:18px;text-align:center;">
-            <button type="button" class="link-btn" style="font-size:12px;color:var(--muted);" (click)="showDemo.set(!showDemo())">
-              {{ showDemo() ? 'Hide demo credentials' : 'View demo credentials' }}
-            </button>
-          </div>
+          <button type="button" class="btn ghost block sm" style="margin-top:14px;" (click)="showDemo.set(!showDemo())">
+            <app-icon name="lock" [size]="14" />
+            {{ showDemo() ? 'Hide demo credentials' : 'View demo credentials' }}
+          </button>
           @if (showDemo()) {
             <div class="info-box" style="margin-top:10px;font-size:11.5px;">
               <strong>Demo logins</strong><br />
@@ -108,12 +116,18 @@ export class LoginComponent implements OnInit {
   loading = signal(false);
   showPassword = signal(false);
   showDemo = signal(false);
+  justRegistered = signal(false);
   branding = signal<PublicBranding | null>(null);
 
-  constructor(private auth: AuthService, private api: ApiService, private router: Router) {}
+  constructor(private auth: AuthService, private api: ApiService, private router: Router, private route: ActivatedRoute) {}
 
   ngOnInit() {
     this.api.publicBranding().subscribe({ next: b => this.branding.set(b), error: () => {} });
+    const params = this.route.snapshot.queryParamMap;
+    if (params.get('registered')) {
+      this.justRegistered.set(true);
+      this.email = params.get('email') || '';
+    }
   }
 
   submit() {

@@ -8,6 +8,7 @@ function errorHandler(error, req, res, next) {
   const statusCode = error.statusCode || 500;
   res.status(statusCode).json({
     message: error.message || 'Internal server error',
+    code: error.code,
     details: process.env.NODE_ENV === 'production' ? undefined : error.details
   });
 }

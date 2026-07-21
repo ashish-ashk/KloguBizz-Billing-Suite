@@ -84,6 +84,9 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
                     </div>
                   </div>
                   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+                    @if (isOwner(u)) {
+                      <app-pill status="purple" label="Owner" />
+                    }
                     <app-pill [status]="u.role" />
                     @if (u.status === 'invited') {
                       <app-pill status="invited" />
@@ -139,6 +142,26 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
             </div>
           </div>
         </section>
+
+        @if (auth.isOwner()) {
+          <section class="card" style="margin-top:16px;padding:20px">
+            <div class="card-title">Organisation Ownership</div>
+            <div class="card-sub" style="margin-bottom:14px">Transfer the owner designation to another active teammate. The owner is the only person who can transfer ownership again.</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:10px">
+                <app-avatar [name]="auth.user()?.name || ''" [size]="36" />
+                <div>
+                  <div style="font-weight:700;font-size:13px">{{ auth.user()?.name }} <span style="color:var(--muted);font-weight:500">(you)</span></div>
+                  <div style="font-size:12px;color:var(--muted)">Current owner</div>
+                </div>
+              </div>
+              <button class="btn ghost" type="button" (click)="openTransfer()" [disabled]="transferTargets().length === 0">Transfer Ownership</button>
+            </div>
+            @if (transferTargets().length === 0) {
+              <div class="hint" style="margin-top:10px">Invite at least one more active teammate before you can transfer ownership.</div>
+            }
+          </section>
+        }
       }
 
       <!-- Invite modal -->
@@ -233,6 +256,40 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
           </button>
         </div>
       </app-modal>
+
+      <!-- Transfer ownership modal -->
+      <app-modal [open]="transferOpen()" title="Transfer Ownership" [width]="440" (close)="transferOpen.set(false)">
+        <div class="info-box danger" style="display:flex;gap:8px;align-items:flex-start;margin-bottom:16px">
+          <app-icon name="alertTriangle" [size]="15" style="flex-shrink:0;margin-top:1px" />
+          <span>This immediately makes the selected teammate the organisation owner. You'll remain an admin, but only the new owner can transfer ownership again.</span>
+        </div>
+        <div class="form">
+          <div class="field">
+            <label>Transfer to *</label>
+            <select [(ngModel)]="newOwnerId">
+              <option value="" disabled>Select a teammate</option>
+              @for (u of transferTargets(); track u._id) {
+                <option [value]="u._id">{{ u.name }} · {{ u.email }}</option>
+              }
+            </select>
+          </div>
+          <div class="field">
+            <label>Your password *</label>
+            <input type="password" [(ngModel)]="transferPassword" placeholder="Confirm it's you">
+          </div>
+          <div class="field">
+            <label>Type TRANSFER to confirm *</label>
+            <input [(ngModel)]="transferConfirmText" placeholder="TRANSFER">
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn ghost" type="button" (click)="transferOpen.set(false)">Cancel</button>
+          <button class="btn danger solid" type="button" [disabled]="saving() || !transferValid()" (click)="confirmTransfer()">
+            @if (saving()) { <span class="spinner"></span> }
+            Transfer Ownership
+          </button>
+        </div>
+      </app-modal>
     </app-shell>
   `,
   styles: [`
@@ -247,6 +304,7 @@ export class UsersComponent implements OnInit {
   inviteOpen = signal(false);
   editOpen = signal(false);
   removeOpen = signal(false);
+  transferOpen = signal(false);
   editTarget = signal<OrgUser | null>(null);
   removeTarget = signal<OrgUser | null>(null);
 
@@ -255,6 +313,9 @@ export class UsersComponent implements OnInit {
   inviteRole = 'accountant';
   editRole: OrgUser['role'] = 'accountant';
   editStatus: OrgUser['status'] = 'active';
+  newOwnerId = '';
+  transferPassword = '';
+  transferConfirmText = '';
 
   readonly roles: Array<'admin' | 'accountant' | 'viewer'> = ['admin', 'accountant', 'viewer'];
   readonly roleDescriptions = ROLE_DESCRIPTIONS;
@@ -275,6 +336,10 @@ export class UsersComponent implements OnInit {
   search = signal('');
 
   visibleUsers = computed(() => this.users().filter(u => u.status !== 'disabled'));
+
+  transferTargets = computed(() =>
+    this.visibleUsers().filter(u => u.status === 'active' && !this.isSelf(u))
+  );
 
   filteredUsers = computed(() => {
     const q = this.search().trim().toLowerCase();
@@ -315,6 +380,37 @@ export class UsersComponent implements OnInit {
   isSelf(u: OrgUser): boolean {
     const myEmail = this.auth.user()?.email;
     return !!myEmail && u.email.toLowerCase() === myEmail.toLowerCase();
+  }
+
+  isOwner(u: OrgUser): boolean {
+    return !!this.auth.organisation()?.ownerId && u._id === this.auth.organisation()?.ownerId;
+  }
+
+  // ── Ownership transfer ──────────────────────────
+  openTransfer() {
+    this.newOwnerId = '';
+    this.transferPassword = '';
+    this.transferConfirmText = '';
+    this.transferOpen.set(true);
+  }
+
+  transferValid(): boolean {
+    return !!this.newOwnerId && this.transferPassword.length > 0 && this.transferConfirmText.trim().toUpperCase() === 'TRANSFER';
+  }
+
+  confirmTransfer() {
+    if (!this.transferValid() || this.saving()) return;
+    this.saving.set(true);
+    this.api.transferOwnership({ newOwnerId: this.newOwnerId, password: this.transferPassword }).subscribe({
+      next: org => {
+        this.saving.set(false);
+        this.transferOpen.set(false);
+        this.auth.setOrganisation(org);
+        this.toast.success('Ownership transferred');
+        this.load();
+      },
+      error: err => { this.saving.set(false); this.toast.httpError(err); }
+    });
   }
 
   // ── Invite ─────────────────────────────────────

@@ -13,6 +13,12 @@ const protect = asyncHandler(async (req, res, next) => {
   const user = await User.findById(payload.sub).select('-passwordHash');
   if (!user || user.status !== 'active') throw httpError(401, 'Invalid or inactive user');
 
+  // `payload.sv` is absent on tokens issued before this field existed —
+  // treat that as version 0 so pre-existing sessions aren't force-logged-out.
+  if ((payload.sv ?? 0) !== (user.sessionVersion || 0)) {
+    throw httpError(401, 'Your session has ended because this account signed in on another device.', 'SESSION_REVOKED');
+  }
+
   req.user = user;
   req.orgId = user.orgId ? String(user.orgId) : null;
   next();

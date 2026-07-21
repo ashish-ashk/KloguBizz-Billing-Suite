@@ -85,6 +85,9 @@ export class ApiService {
   updateOrganisation(payload: Partial<Organisation>) {
     return this.http.put<Organisation>(`${this.api}/organisations/current`, payload);
   }
+  transferOwnership(payload: { newOwnerId: string; password: string }) {
+    return this.http.post<Organisation>(`${this.api}/organisations/current/transfer-ownership`, payload);
+  }
 
   // ── Super admin ──────────────────────────────
   superOverview() { return this.http.get<SuperOverview>(`${this.api}/superadmin/overview`); }

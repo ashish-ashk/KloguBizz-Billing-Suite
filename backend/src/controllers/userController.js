@@ -42,6 +42,8 @@ const changePassword = asyncHandler(async (req, res) => {
   const valid = await bcrypt.compare(currentPassword, user.passwordHash);
   if (!valid) throw httpError(401, 'Current password is incorrect');
   user.passwordHash = await bcrypt.hash(newPassword, 12);
+  // Invalidate other active sessions in case the password was compromised.
+  user.sessionVersion = (user.sessionVersion || 0) + 1;
   await user.save();
   logAudit({ req, action: 'user.password_changed', entity: 'user', entityId: user._id });
   res.json({ ok: true });

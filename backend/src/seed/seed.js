@@ -115,13 +115,15 @@ async function seed() {
     { orgId: org._id, itemCode: 'ITM-007', name: 'UPS 1KVA', description: 'Line-interactive UPS with surge protection', type: 'goods', hsn: '8504', category: 'Hardware', unit: 'Nos', gstRate: 18, sellingPrice: 6800, mrp: 7500, purchasePrice: 5600, stockQty: 15, reorderLevel: 5, barcode: '8901234500073' }
   ]);
 
-  await User.create([
+  const [orgAdmin] = await User.create([
     { orgId: org._id, name: 'Arjun Mehta', email: 'admin@techsoft.local', passwordHash: await bcrypt.hash('Admin@123', 12), role: 'admin', status: 'active', lastLoginAt: new Date('2026-07-04') },
     { orgId: org._id, name: 'Sneha Kapoor', email: 'sneha@techsoft.local', passwordHash: await bcrypt.hash('Admin@123', 12), role: 'accountant', status: 'active', lastLoginAt: new Date('2026-07-02') },
     { orgId: org._id, name: 'Rohan Das', email: 'rohan@techsoft.local', passwordHash: await bcrypt.hash('Admin@123', 12), role: 'viewer', status: 'active', lastLoginAt: new Date('2026-06-28') },
     { orgId: org._id, name: 'Priya Nair', email: 'priya@techsoft.local', passwordHash: await bcrypt.hash('Admin@123', 12), role: 'accountant', status: 'invited' },
     { name: 'Super Admin', email: env.SUPER_ADMIN_EMAIL, passwordHash: await bcrypt.hash(env.SUPER_ADMIN_PASSWORD, 12), role: 'superadmin', status: 'active' }
   ]);
+  org.ownerId = orgAdmin._id;
+  await org.save();
 
   const clients = await Client.create([
     { orgId: org._id, companyName: 'Reliance Tech Pvt Ltd', email: 'billing@reliancetech.in', phone: '+91 98200 12345', gstin: '27AABCU9603R1ZX', address: 'BKC, Mumbai, Maharashtra 400051', state: 'Maharashtra', stateCode: '27' },

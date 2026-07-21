@@ -62,6 +62,9 @@ const themeConfigSchema = new mongoose.Schema({
 const organisationSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
   adminEmail: { type: String, required: true, lowercase: true, trim: true },
+  // Canonical owner of the org — distinct from the 'admin' role, which any
+  // number of users may hold. Only the owner may transfer ownership.
+  ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   gstin: String,
   pan: String,
   phone: String,

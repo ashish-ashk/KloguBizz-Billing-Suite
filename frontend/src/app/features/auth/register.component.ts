@@ -71,10 +71,17 @@ import { AuthPreviewCardComponent } from '../../shared/auth-preview-card.compone
               </select>
               <span class="hint">Used to decide CGST/SGST vs IGST on your invoices.</span>
             </div>
+            <label class="checkbox" style="align-items:flex-start;flex-wrap:wrap;line-height:1.5;">
+              <input type="checkbox" name="acceptTerms" [(ngModel)]="acceptTerms" style="margin-top:2px;">
+              <span>
+                I agree to the <a routerLink="/terms" target="_blank" style="color:var(--brand);font-weight:600;">Terms &amp; Conditions</a>
+                and <a routerLink="/sla" target="_blank" style="color:var(--brand);font-weight:600;">Service Level Agreement</a>
+              </span>
+            </label>
             @if (error()) {
               <div class="info-box danger">{{ error() }}</div>
             }
-            <button class="btn primary lg block" type="submit" [disabled]="loading()">
+            <button class="btn primary lg block" type="submit" [disabled]="loading() || !acceptTerms">
               @if (loading()) { <span class="spinner"></span> Creating account… } @else { Create Account <app-icon name="chevronRight" [size]="15" /> }
             </button>
           </form>
@@ -114,6 +121,7 @@ export class RegisterComponent implements OnInit {
   email = '';
   password = '';
   stateCode = '27';
+  acceptTerms = false;
   states = STATES;
   error = signal('');
   loading = signal(false);
@@ -130,16 +138,19 @@ export class RegisterComponent implements OnInit {
     if (!this.name.trim() || !this.orgName.trim()) { this.error.set('Enter your name and company name.'); return; }
     if (!isValidEmail(this.email)) { this.error.set('Enter a valid email address.'); return; }
     if (this.password.length < 8) { this.error.set('Password must be at least 8 characters.'); return; }
+    if (!this.acceptTerms) { this.error.set('Please accept the Terms & Conditions and SLA to continue.'); return; }
     this.error.set('');
     this.loading.set(true);
+    const email = this.email.trim();
     this.auth.register({
       name: this.name.trim(),
       orgName: this.orgName.trim(),
-      email: this.email.trim(),
+      email,
       password: this.password,
-      stateCode: this.stateCode
+      stateCode: this.stateCode,
+      acceptTerms: this.acceptTerms
     }).subscribe({
-      next: () => this.router.navigateByUrl('/dashboard'),
+      next: () => this.router.navigate(['/login'], { queryParams: { registered: 1, email } }),
       error: err => {
         this.loading.set(false);
         this.error.set(err?.error?.message || 'Registration failed. Please try again.');

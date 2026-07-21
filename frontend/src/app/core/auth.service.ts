@@ -21,6 +21,12 @@ export class AuthService {
   readonly organisation = signal<Organisation | null>(this.readJson<Organisation>(this.orgKey));
   readonly isLoggedIn = computed(() => !!this.token);
   readonly isSuperAdmin = computed(() => this.user()?.role === 'superadmin');
+  /** Whether the current user is the organisation's canonical owner (not just an 'admin'). */
+  readonly isOwner = computed(() => {
+    const org = this.organisation();
+    const user = this.user();
+    return !!org?.ownerId && !!user && String(org.ownerId) === String(user.id);
+  });
 
   constructor(private http: HttpClient, private router: Router) {}
 
@@ -33,9 +39,10 @@ export class AuthService {
       .pipe(tap(res => this.store(res)));
   }
 
-  register(payload: { name: string; email: string; password: string; orgName: string; stateCode: string }) {
-    return this.http.post<AuthResponse>(`${environment.apiUrl}/auth/register`, payload)
-      .pipe(tap(res => this.store(res)));
+  /** Creates the organisation + admin account. Does NOT auto-authenticate —
+   *  the user is sent to /login to sign in explicitly after registering. */
+  register(payload: { name: string; email: string; password: string; orgName: string; stateCode: string; acceptTerms: boolean }) {
+    return this.http.post<AuthResponse>(`${environment.apiUrl}/auth/register`, payload);
   }
 
   /** Updates the cached organisation (e.g. after saving branding/theme changes). */
