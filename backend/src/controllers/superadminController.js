@@ -39,10 +39,12 @@ const overview = asyncHandler(async (req, res) => {
 const listOrganisations = asyncHandler(async (req, res) => {
   const orgs = await Organisation.find().sort({ createdAt: -1 }).lean();
   const orgIds = orgs.map(o => o._id);
-  const [userCounts, invoiceCounts, admins, subs] = await Promise.all([
+  const ownerIds = orgs.map(o => o.ownerId).filter(Boolean);
+  const [userCounts, invoiceCounts, admins, owners, subs] = await Promise.all([
     User.aggregate([{ $match: { orgId: { $in: orgIds } } }, { $group: { _id: '$orgId', count: { $sum: 1 } } }]),
     Invoice.aggregate([{ $match: { orgId: { $in: orgIds } } }, { $group: { _id: '$orgId', count: { $sum: 1 } } }]),
     User.find({ orgId: { $in: orgIds }, role: 'admin' }).select('orgId name email').lean(),
+    User.find({ _id: { $in: ownerIds } }).select('name email').lean(),
     Subscription.find({ orgId: { $in: orgIds } }).sort({ createdAt: -1 }).lean()
   ]);
   const countMap = list => Object.fromEntries(list.map(e => [String(e._id), e.count]));
@@ -50,6 +52,10 @@ const listOrganisations = asyncHandler(async (req, res) => {
   const invoiceMap = countMap(invoiceCounts);
   const adminMap = {};
   admins.forEach(a => { if (!adminMap[String(a.orgId)]) adminMap[String(a.orgId)] = a; });
+  // Owner is resolved live from Organisation.ownerId (the source of truth used
+  // by transferOwnership) rather than an arbitrary role:'admin' user, so this
+  // can never drift after an ownership transfer.
+  const ownerMap = Object.fromEntries(owners.map(u => [String(u._id), { name: u.name, email: u.email }]));
   const subMap = {};
   subs.forEach(s => { if (!subMap[String(s.orgId)]) subMap[String(s.orgId)] = s; });
 
@@ -58,6 +64,7 @@ const listOrganisations = asyncHandler(async (req, res) => {
     userCount: userMap[String(o._id)] || 0,
     invoiceCount: invoiceMap[String(o._id)] || 0,
     admin: adminMap[String(o._id)] || null,
+    owner: o.ownerId ? (ownerMap[String(o.ownerId)] || null) : null,
     subscription: subMap[String(o._id)] || null
   })));
 });
@@ -80,6 +87,10 @@ const createOrganisation = asyncHandler(async (req, res) => {
     role: 'admin',
     status: 'active'
   });
+  // The org has no owner concept until this point — the admin created here
+  // becomes the canonical owner, mirroring the self-serve registration flow.
+  org.ownerId = admin._id;
+  await org.save();
   await Subscription.create({ orgId: org._id, planCode: plan, status: 'active', billingCycle: 'monthly' });
   logAudit({ req, action: 'org.created', entity: 'organisation', entityId: org._id, meta: { name, plan } });
   res.status(201).json({ organisation: org, admin: { ...admin.toObject(), passwordHash: undefined }, tempPassword });

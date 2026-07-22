@@ -107,8 +107,8 @@ import { forkJoin } from 'rxjs';
                       </td>
                       <td class="muted" data-label="Date">{{ fmtDate(inv.date) }}</td>
                       <td class="muted" data-label="Due Date">{{ fmtDate(inv.dueDate) }}</td>
-                      <td class="strong" data-label="Amount">{{ fmtINR(inv.totals.total) }}</td>
-                      <td data-label="Status"><app-pill [status]="inv.status" /></td>
+                      <td class="strong" data-label="Amount" data-priority="high">{{ fmtINR(inv.totals.total) }}</td>
+                      <td data-label="Status" data-priority="high"><app-pill [status]="inv.status" /></td>
                       <td class="actions" data-label=""><a class="btn ghost sm" [routerLink]="['/invoices', inv._id, 'edit']">Edit</a></td>
                     </tr>
                   }

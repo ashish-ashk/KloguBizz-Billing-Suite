@@ -165,8 +165,8 @@ const PRICE_COLORS: Record<string, string> = {
                     <tr>
                       <td data-label="Date">{{ fmtDate(s.createdAt || s.startDate) }}</td>
                       <td class="strong" data-label="Description">{{ historyPlanName() }} — {{ cycleTitle(s.billingCycle) }}</td>
-                      <td class="num" data-label="Amount">{{ historyAmount() === null ? '—' : fmtINR(historyAmount(), true) }}</td>
-                      <td data-label="Status"><app-pill [status]="s.status" [label]="statusLabel(s.status)" /></td>
+                      <td class="num" data-label="Amount" data-priority="high">{{ historyAmount() === null ? '—' : fmtINR(historyAmount(), true) }}</td>
+                      <td data-label="Status" data-priority="high"><app-pill [status]="s.status" [label]="statusLabel(s.status)" /></td>
                       <td data-label="">
                         <div class="actions">
                           <button class="btn ghost sm" type="button" (click)="downloadPdf()"><app-icon name="download" [size]="13" /> PDF</button>

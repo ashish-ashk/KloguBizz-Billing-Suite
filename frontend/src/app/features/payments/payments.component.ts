@@ -118,8 +118,8 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                       </td>
                       <td data-label="Invoice Date">{{ fmtDate(inv.date) }}</td>
                       <td data-label="Due Date">{{ fmtDate(inv.dueDate) }}</td>
-                      <td class="strong" data-label="Amount">{{ fmtINR(inv.totals.total) }}</td>
-                      <td data-label="Status"><app-pill [status]="inv.status" /></td>
+                      <td class="strong" data-label="Amount" data-priority="high">{{ fmtINR(inv.totals.total) }}</td>
+                      <td data-label="Status" data-priority="high"><app-pill [status]="inv.status" /></td>
                       <td data-label="Days Due">
                         @if (overdueDays(inv) > 0) {
                           <span style="color:var(--red);font-weight:700">+{{ overdueDays(inv) }}d overdue</span>
@@ -183,13 +183,13 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                       <td data-label="Date">{{ fmtDate(p.date) }}</td>
                       <td class="num" data-label="Invoice #">{{ invoiceNo(p) }}</td>
                       <td data-label="Client">{{ clientName(p.clientId) }}</td>
-                      <td class="strong" data-label="Amount" style="color:var(--green)">{{ fmtINR(p.amount) }}</td>
+                      <td class="strong" data-label="Amount" data-priority="high" style="color:var(--green)">{{ fmtINR(p.amount) }}</td>
                       <td data-label="Method"><span class="pill">{{ p.method }}</span></td>
                       <td data-label="Reference">
                         @if (p.reference) { <span class="mono">{{ p.reference }}</span> }
                         @else { <span class="muted">—</span> }
                       </td>
-                      <td data-label="Status"><app-pill [status]="p.status" /></td>
+                      <td data-label="Status" data-priority="high"><app-pill [status]="p.status" /></td>
                       <td class="muted" data-label="Note">{{ p.note || '—' }}</td>
                     </tr>
                   }

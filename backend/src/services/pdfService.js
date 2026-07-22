@@ -59,6 +59,10 @@ function drawDivider(doc, style, x1, x2, y, color) {
     doc.moveTo(x1, y + 3).lineTo(x2, y + 3).lineWidth(0.75).strokeColor(color).stroke();
   } else if (style === 'dotted') {
     doc.save().dash(2, { space: 2 }).moveTo(x1, y).lineTo(x2, y).lineWidth(1).strokeColor(color).stroke().undash().restore();
+  } else if (style === 'perforated') {
+    for (let x = x1; x <= x2; x += 8) {
+      doc.circle(x, y, 1).fill(color);
+    }
   } else {
     doc.moveTo(x1, y).lineTo(x2, y).lineWidth(2).strokeColor(color).stroke();
   }
@@ -157,6 +161,51 @@ function drawHeader(doc, { template, org, invoice, brand, left, right, width, fo
     return ty + 76;
   }
 
+  if (template.headerStyle === 'ribbon') {
+    if (logo) drawLogoAt(left, y, 30);
+    const textX = logo ? left + 40 : left;
+    doc.fillColor(DARK).font(fontBold).fontSize(16).text(orgName, textX, y, { width: width * 0.6 });
+    doc.font(font).fontSize(9).fillColor(MUTED);
+    if (org?.address) doc.text(org.address, textX, y + 20, { width: width * 0.55 });
+    const flagW = 90, flagH = 20;
+    doc.rect(right - flagW, y, flagW, flagH).fill(brand);
+    doc.fillColor('#fff').font(fontBold).fontSize(9).text('INVOICE', right - flagW, y + 6, { width: flagW, align: 'center' });
+    doc.fillColor(MUTED).font(font).fontSize(9).text(invoice.invoiceNumber, right - flagW, y + flagH + 6, { width: flagW, align: 'right' });
+    doc.fillColor(RED).text(`Due ${fmtDate(invoice.dueDate)}`, right - flagW, y + flagH + 20, { width: flagW, align: 'right' });
+    return y + 70;
+  }
+
+  if (template.headerStyle === 'letterhead') {
+    doc.moveTo(left, y).lineTo(right, y).lineWidth(2).strokeColor(DARK).stroke();
+    let ty = y + 12;
+    if (logo) { drawLogoAt(left + width / 2 - 20, ty, 30); ty += 36; }
+    doc.fillColor(DARK).font(fontBold).fontSize(15).text(orgName, left, ty, { width, align: 'center' });
+    ty += 18;
+    if (org?.address) { doc.font(font).fontSize(9).fillColor(MUTED).text(org.address, left, ty, { width, align: 'center' }); ty += 14; }
+    doc.font(font).fontSize(9).fillColor(brand)
+      .text(`TAX INVOICE · ${invoice.invoiceNumber} · Due ${fmtDate(invoice.dueDate)}`, left, ty, { width, align: 'center' });
+    ty += 16;
+    doc.moveTo(left, ty).lineTo(right, ty).lineWidth(1).strokeColor(DARK).stroke();
+    return ty + 14;
+  }
+
+  if (template.headerStyle === 'stub') {
+    const boxH = 76;
+    const stubW = 150;
+    doc.rect(left, y, width, boxH).strokeColor('#d1d5db').lineWidth(1.5).stroke();
+    doc.moveTo(right - stubW, y).lineTo(right - stubW, y + boxH).strokeColor('#d1d5db').lineWidth(1.5).stroke();
+    if (logo) drawLogoAt(left + 10, y + 10, 26);
+    const textX = logo ? left + 44 : left + 10;
+    doc.fillColor(DARK).font(fontBold).fontSize(13).text(orgName, textX, y + 12, { width: right - stubW - textX - 10 });
+    doc.font(font).fontSize(8.5).fillColor(MUTED);
+    if (org?.address) doc.text(org.address, textX, y + 30, { width: right - stubW - textX - 10 });
+    const rx = right - stubW + 12;
+    doc.fillColor(brand).font(fontBold).fontSize(12).text('INVOICE', rx, y + 12, { width: stubW - 24, align: 'right' });
+    doc.fillColor(DARK).font(font).fontSize(9).text(invoice.invoiceNumber, rx, y + 32, { width: stubW - 24, align: 'right' });
+    doc.fillColor(RED).text(`Due ${fmtDate(invoice.dueDate)}`, rx, y + 46, { width: stubW - 24, align: 'right' });
+    return y + boxH + 16;
+  }
+
   // 'plain' — simple two-column header, the default look.
   if (logo) drawLogoAt(left, y, 32);
   const textX = logo ? left + 42 : left;
@@ -244,6 +293,10 @@ function renderInvoicePdf({ invoice, client, org }) {
         doc.rect(left, y, width, 20).fill(template.tableStyle === 'boxed' ? brand : DARK);
         doc.fillColor('#fff').font(fontBold).fontSize(8);
         cols.forEach((c, i) => doc.text(c.label, c.x + 5, y + 6, { width: c.w - 8, align: i >= 3 ? 'right' : 'left' }));
+        if (template.tableStyle === 'ledger') {
+          cols.forEach(c => doc.moveTo(c.x, y).lineTo(c.x, y + 20).strokeColor(FAINT).lineWidth(0.5).stroke());
+          doc.moveTo(right, y).lineTo(right, y + 20).strokeColor(FAINT).lineWidth(0.5).stroke();
+        }
         y += 20;
       }
     };
@@ -253,7 +306,11 @@ function renderInvoicePdf({ invoice, client, org }) {
     invoice.items.forEach((item, i) => {
       if (y > 700) { doc.addPage(); y = 50; drawTableHeader(); doc.font(font).fontSize(fontSize); }
       if (template.tableStyle === 'zebra' && i % 2 === 1) doc.rect(left, y, width, rowH).fill('#fafbff');
-      if (template.tableStyle === 'bordered' || template.tableStyle === 'boxed') doc.rect(left, y, width, rowH).strokeColor('#e5e7eb').lineWidth(0.5).stroke();
+      if (template.tableStyle === 'bordered' || template.tableStyle === 'boxed' || template.tableStyle === 'ledger') doc.rect(left, y, width, rowH).strokeColor('#e5e7eb').lineWidth(0.5).stroke();
+      if (template.tableStyle === 'ledger') {
+        cols.forEach(c => doc.moveTo(c.x, y).lineTo(c.x, y + rowH).strokeColor('#e5e7eb').lineWidth(0.5).stroke());
+        doc.moveTo(right, y).lineTo(right, y + rowH).strokeColor('#e5e7eb').lineWidth(0.5).stroke();
+      }
       const qty = Number(item.qty) || 0, rate = Number(item.rate) || 0, gstRate = Number(item.gstRate) || 0;
       const lineAmt = qty * rate, tax = lineAmt * gstRate / 100, total = lineAmt + tax;
       const values = [String(i + 1), item.desc || '', item.hsn || '—', String(qty), fmt(rate), `${gstRate}%`, fmt(tax), fmt(total)];

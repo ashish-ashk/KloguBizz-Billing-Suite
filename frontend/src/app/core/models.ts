@@ -52,6 +52,7 @@ export interface OrgSummary extends Organisation {
   userCount: number;
   invoiceCount: number;
   admin: { name: string; email: string } | null;
+  owner: { name: string; email: string } | null;
   subscription: Subscription | null;
 }
 

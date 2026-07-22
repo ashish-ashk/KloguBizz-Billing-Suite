@@ -1,12 +1,29 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { User } = require('../models/User');
+const { Organisation } = require('../models/Organisation');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { sendInviteEmail } = require('../services/emailService');
 const { assertUserQuota } = require('../services/planService');
 const { logAudit } = require('../services/auditService');
+
+// An admin may not change the role/status of, or remove, the user who
+// currently holds Organisation.ownerId — ownership must be transferred
+// (see organisationController.transferOwnership) before that user's
+// account can be touched. If the org has no ownerId yet (legacy/pre-
+// migration), org?.ownerId is falsy and this is a no-op.
+async function assertNotProtectedOwner(req, targetUserId) {
+  const org = await Organisation.findById(req.orgId).select('ownerId').lean();
+  if (org?.ownerId && String(org.ownerId) === String(targetUserId)) {
+    throw httpError(
+      403,
+      'This user is the organisation owner and cannot be edited or removed. Transfer ownership to another teammate first.',
+      'OWNER_PROTECTED'
+    );
+  }
+}
 
 const listUsers = asyncHandler(async (req, res) => {
   const users = await User.find(tenantFilter(req)).select('-passwordHash').sort({ createdAt: -1 });
@@ -50,6 +67,7 @@ const changePassword = asyncHandler(async (req, res) => {
 });
 
 const updateUser = asyncHandler(async (req, res) => {
+  await assertNotProtectedOwner(req, req.params.id);
   const user = await User.findOneAndUpdate(
     { _id: req.params.id, ...tenantFilter(req) },
     req.body,
@@ -60,6 +78,7 @@ const updateUser = asyncHandler(async (req, res) => {
 });
 
 const removeUser = asyncHandler(async (req, res) => {
+  await assertNotProtectedOwner(req, req.params.id);
   const user = await User.findOneAndUpdate(
     { _id: req.params.id, ...tenantFilter(req) },
     { status: 'disabled' },

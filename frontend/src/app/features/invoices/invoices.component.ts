@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../../shared/app-shell.component';
 import { IconComponent } from '../../shared/icons';
-import { AvatarComponent, EmptyStateComponent, ModalComponent, PagerComponent, PillComponent, SkeletonRowsComponent } from '../../shared/ui';
+import { AvatarComponent, EmptyStateComponent, ModalComponent, OverflowMenuComponent, PagerComponent, PillComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
 import { Invoice } from '../../core/models';
@@ -15,7 +15,7 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft';
 @Component({
   selector: 'app-invoices',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, IconComponent, PillComponent, AvatarComponent, EmptyStateComponent, ModalComponent, SkeletonRowsComponent, PagerComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, IconComponent, PillComponent, AvatarComponent, EmptyStateComponent, ModalComponent, SkeletonRowsComponent, PagerComponent, OverflowMenuComponent],
   template: `
     <app-shell title="Invoices" [subtitle]="invoices().length + ' total invoices'">
       <button actions class="btn ghost" type="button" [disabled]="exporting()" (click)="exportCsv()">
@@ -59,7 +59,7 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft';
                       <div style="display:flex;align-items:center;gap:10px;">
                         <app-avatar [name]="clientName(inv)" [size]="28" />
                         <div>
-                          <div style="font-weight:600;">{{ clientName(inv) }}</div>
+                          <div class="strong">{{ clientName(inv) }}</div>
                           <div class="muted mono" style="font-size:11px;">{{ clientGstin(inv) }}</div>
                         </div>
                       </div>
@@ -69,19 +69,21 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft';
                         [style.fontWeight]="inv.status === 'overdue' ? '700' : ''">{{ fmtDate(inv.dueDate) }}</td>
                     <td class="muted" data-label="Subtotal">{{ fmtINR(inv.totals.subtotal) }}</td>
                     <td class="muted" data-label="GST">{{ fmtINR(gstAmount(inv)) }}</td>
-                    <td class="strong" data-label="Total">{{ fmtINR(inv.totals.total) }}</td>
-                    <td data-label="Status"><app-pill [status]="inv.status" /></td>
+                    <td class="strong" data-label="Total" data-priority="high">{{ fmtINR(inv.totals.total) }}</td>
+                    <td data-label="Status" data-priority="high"><app-pill [status]="inv.status" /></td>
                     <td data-label="">
                       <div class="actions">
                         <a class="btn ghost sm" [routerLink]="['/invoices', inv._id, 'edit']">Edit</a>
                         @if (inv.status !== 'paid') {
                           <button class="btn success sm" type="button" (click)="markPaid(inv)"><app-icon name="check" [size]="13" /> Paid</button>
                         }
-                        <button class="btn ghost sm" type="button" title="Download PDF" [disabled]="downloadingId() === inv._id" (click)="downloadPdf(inv)">
-                          @if (downloadingId() === inv._id) { <span class="spinner"></span> } @else { <app-icon name="download" [size]="13" /> }
-                        </button>
-                        <button class="btn ghost sm" type="button" title="Duplicate" (click)="duplicate(inv)"><app-icon name="copy" [size]="13" /></button>
-                        <button class="btn danger sm" type="button" (click)="confirmDelete.set(inv)">✕</button>
+                        <app-overflow-menu>
+                          <button class="btn ghost sm" type="button" [disabled]="downloadingId() === inv._id" (click)="downloadPdf(inv)">
+                            @if (downloadingId() === inv._id) { <span class="spinner"></span> } @else { <app-icon name="download" [size]="13" /> } Download PDF
+                          </button>
+                          <button class="btn ghost sm" type="button" (click)="duplicate(inv)"><app-icon name="copy" [size]="13" /> Duplicate</button>
+                          <button class="btn danger sm" type="button" (click)="confirmDelete.set(inv)"><app-icon name="trash" [size]="13" /> Delete</button>
+                        </app-overflow-menu>
                       </div>
                     </td>
                   </tr>

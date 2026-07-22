@@ -1,12 +1,12 @@
 /**
- * Ten business-authentic invoice/bill layouts, mirrored from
+ * Business-authentic invoice/bill layouts, mirrored from
  * backend/src/services/invoiceTemplates.js so the on-screen print/preview
  * view and the tenant template picker match what the downloaded PDF shows.
  */
 
-export type HeaderStyle = 'band' | 'bandLarge' | 'plain' | 'centered' | 'split' | 'sidebar' | 'gradient' | 'boxed' | 'diagonal';
-export type TableStyle = 'bordered' | 'zebra' | 'minimal' | 'boxed';
-export type DividerStyle = 'solid' | 'double' | 'dotted' | 'none';
+export type HeaderStyle = 'band' | 'bandLarge' | 'plain' | 'centered' | 'split' | 'sidebar' | 'gradient' | 'boxed' | 'diagonal' | 'ribbon' | 'letterhead' | 'stub';
+export type TableStyle = 'bordered' | 'zebra' | 'minimal' | 'boxed' | 'ledger';
+export type DividerStyle = 'solid' | 'double' | 'dotted' | 'none' | 'perforated';
 export type PaperTone = 'white' | 'cream' | 'graypaper';
 
 export interface InvoiceTemplate {
@@ -46,7 +46,25 @@ export const INVOICE_TEMPLATES: InvoiceTemplate[] = [
   { id: 'gradient-accent', name: 'Gradient Accent', description: 'Layered two-tone header band for a modern, design-forward first impression.', font: 'Helvetica', headerStyle: 'gradient', titleAlign: 'center', tableStyle: 'bordered', dividerStyle: 'solid', paperTone: 'white' },
   { id: 'professional-blue', name: 'Professional Blue', description: 'Boxed sections and a steady grid — the reassuring look of an enterprise invoice.', font: 'Helvetica', headerStyle: 'boxed', titleAlign: 'right', tableStyle: 'boxed', dividerStyle: 'solid', paperTone: 'white' },
   { id: 'creative-bold', name: 'Creative Bold', description: 'An angled color block and confident negative space for agencies and studios.', font: 'Helvetica-Bold', headerStyle: 'diagonal', titleAlign: 'right', tableStyle: 'zebra', dividerStyle: 'none', paperTone: 'white' },
-  { id: 'simple-receipt', name: 'Simple Receipt', description: 'Monospace, centered, narrow — reads like a point-of-sale receipt.', font: 'Courier', headerStyle: 'centered', titleAlign: 'center', tableStyle: 'minimal', dividerStyle: 'dotted', paperTone: 'white', narrow: true }
+  { id: 'simple-receipt', name: 'Simple Receipt', description: 'Monospace, centered, narrow — reads like a point-of-sale receipt.', font: 'Courier', headerStyle: 'centered', titleAlign: 'center', tableStyle: 'minimal', dividerStyle: 'dotted', paperTone: 'white', narrow: true },
+
+  // 15 additional layouts, each inspired by a common market/industry
+  // convention (not a copy of any specific vendor's proprietary design).
+  { id: 'minimal-whitespace', name: 'Whitespace', description: 'Minimalist and modern — generous margins, quiet type, nothing but the essentials.', font: 'Helvetica', headerStyle: 'plain', titleAlign: 'right', tableStyle: 'minimal', dividerStyle: 'none', paperTone: 'white' },
+  { id: 'statutory-classic', name: 'Statutory Classic', description: 'Classic corporate register look — framing rules and a bordered ledger table.', font: 'Times-Roman', headerStyle: 'letterhead', titleAlign: 'left', tableStyle: 'bordered', dividerStyle: 'solid', paperTone: 'graypaper' },
+  { id: 'studio-block', name: 'Studio Block', description: 'Creative agency energy — a bold two-tone header and confident zebra rows.', font: 'Helvetica-Bold', headerStyle: 'gradient', titleAlign: 'left', tableStyle: 'zebra', dividerStyle: 'none', paperTone: 'white' },
+  { id: 'till-receipt', name: 'Till Receipt', description: 'Retail point-of-sale style — monospace, centered, with a perforated tear line.', font: 'Courier', headerStyle: 'centered', titleAlign: 'center', tableStyle: 'minimal', dividerStyle: 'perforated', paperTone: 'white', narrow: true, compact: true },
+  { id: 'advisory-brief', name: 'Advisory Brief', description: 'Consulting and professional services — a quiet sidebar accent, minimal table.', font: 'Times-Roman', headerStyle: 'sidebar', titleAlign: 'right', tableStyle: 'minimal', dividerStyle: 'solid', paperTone: 'graypaper' },
+  { id: 'gst-formal-register', name: 'GST Register', description: 'Government/GST-formal — a framed letterhead and full ledger rulings.', font: 'Times-Roman', headerStyle: 'letterhead', titleAlign: 'center', tableStyle: 'ledger', dividerStyle: 'double', paperTone: 'white' },
+  { id: 'product-invoice-tech', name: 'Product Invoice', description: 'SaaS/tech style — a small corner ribbon and clean minimal table.', font: 'Helvetica', headerStyle: 'ribbon', titleAlign: 'right', tableStyle: 'minimal', dividerStyle: 'solid', paperTone: 'white' },
+  { id: 'site-work-order', name: 'Site Work Order', description: 'Construction and trades — a bordered docket header and ruled ledger table.', font: 'Helvetica-Bold', headerStyle: 'stub', titleAlign: 'left', tableStyle: 'ledger', dividerStyle: 'solid', paperTone: 'white' },
+  { id: 'solo-studio-freelancer', name: 'Solo Studio', description: 'Warm and approachable — friendly centered header for independent freelancers.', font: 'Helvetica', headerStyle: 'centered', titleAlign: 'center', tableStyle: 'zebra', dividerStyle: 'dotted', paperTone: 'cream' },
+  { id: 'order-confirmation', name: 'Order Confirmation', description: 'E-commerce order-slip style — compact ribbon header, zebra line items.', font: 'Helvetica', headerStyle: 'ribbon', titleAlign: 'left', tableStyle: 'zebra', dividerStyle: 'none', paperTone: 'white', compact: true },
+  { id: 'guest-folio-hospitality', name: 'Guest Folio', description: 'Hospitality guest-folio style — a large centered band and boxed charges table.', font: 'Times-Roman', headerStyle: 'bandLarge', titleAlign: 'center', tableStyle: 'boxed', dividerStyle: 'dotted', paperTone: 'cream' },
+  { id: 'clinic-statement', name: 'Clinic Statement', description: 'Medical/clinic statement — a calm split header and bordered charges table.', font: 'Helvetica', headerStyle: 'split', titleAlign: 'left', tableStyle: 'bordered', dividerStyle: 'solid', paperTone: 'graypaper' },
+  { id: 'property-statement', name: 'Property Statement', description: 'Real estate statement — boxed panels and a double rule for a formal finish.', font: 'Times-Roman', headerStyle: 'boxed', titleAlign: 'right', tableStyle: 'bordered', dividerStyle: 'double', paperTone: 'cream' },
+  { id: 'shipment-manifest', name: 'Shipment Manifest', description: 'Import-export/logistics manifest — a docket header and ruled ledger table.', font: 'Courier', headerStyle: 'stub', titleAlign: 'left', tableStyle: 'ledger', dividerStyle: 'solid', paperTone: 'graypaper', compact: true },
+  { id: 'boutique-label', name: 'Boutique Label', description: 'Boutique retail-brand feel — an angled accent block on warm cream paper.', font: 'Times-Roman', headerStyle: 'diagonal', titleAlign: 'left', tableStyle: 'boxed', dividerStyle: 'dotted', paperTone: 'cream' }
 ];
 
 export function getInvoiceTemplate(id: string | undefined): InvoiceTemplate {
@@ -90,7 +108,10 @@ export const HEADER_STYLE_OPTIONS: Array<{ value: HeaderStyle; label: string }> 
   { value: 'sidebar', label: 'Sidebar — colored vertical bar' },
   { value: 'gradient', label: 'Gradient — layered two-tone band' },
   { value: 'boxed', label: 'Boxed — bordered info panels' },
-  { value: 'diagonal', label: 'Diagonal — angled color block' }
+  { value: 'diagonal', label: 'Diagonal — angled color block' },
+  { value: 'ribbon', label: 'Ribbon — small corner flag' },
+  { value: 'letterhead', label: 'Letterhead — framing rules, ink-on-paper' },
+  { value: 'stub', label: 'Stub — bordered two-box docket' }
 ];
 
 export const TITLE_ALIGN_OPTIONS: Array<{ value: 'left' | 'right' | 'center'; label: string }> = [
@@ -103,14 +124,16 @@ export const TABLE_STYLE_OPTIONS: Array<{ value: TableStyle; label: string }> = 
   { value: 'bordered', label: 'Bordered — grid lines around every cell' },
   { value: 'zebra', label: 'Zebra — alternating row shading' },
   { value: 'minimal', label: 'Minimal — no borders, just a header rule' },
-  { value: 'boxed', label: 'Boxed — accent-colored header row' }
+  { value: 'boxed', label: 'Boxed — accent-colored header row' },
+  { value: 'ledger', label: 'Ledger — vertical column rules, register style' }
 ];
 
 export const DIVIDER_STYLE_OPTIONS: Array<{ value: DividerStyle; label: string }> = [
   { value: 'solid', label: 'Solid line' },
   { value: 'double', label: 'Double line' },
   { value: 'dotted', label: 'Dotted line' },
-  { value: 'none', label: 'None' }
+  { value: 'none', label: 'None' },
+  { value: 'perforated', label: 'Perforated — tear-off dots' }
 ];
 
 export const PAPER_TONE_OPTIONS: Array<{ value: PaperTone; label: string }> = [

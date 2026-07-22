@@ -1034,14 +1034,12 @@ textarea { resize: vertical; font-family: inherit; }
   box-shadow: 0 4px 24px rgba(79, 70, 229, 0.1);
   font-size: 13px;
 }
-/* On-screen mobile viewing (not print — see @media print below): the
-   document itself keeps its real layout so the line-item table stays
-   legible, but it scrolls horizontally inside a tighter card instead of
-   crushing every column into a ~300px phone width. */
-@media (max-width: 640px) {
-  .invoice-doc-wrap { overflow-x: auto; }
-  .invoice-doc { padding: 20px 16px; min-width: 640px; }
-}
+/* .invoice-doc-wrap establishes a size-containment context so the document
+   inside (InvoiceDocumentComponent) can reflow via @container queries based
+   on its own rendered width — not the viewport's — since it's shown both
+   full-width (print/view page) and squeezed into a narrow sticky-preview
+   column (template picker) even on a wide desktop screen. */
+.invoice-doc-wrap { container-type: inline-size; container-name: invoice-doc; }
 @media print {
   .no-print { display: none !important; }
   body { background: #fff; }
@@ -1049,6 +1047,11 @@ textarea { resize: vertical; font-family: inherit; }
   .sidebar, .menu-toggle, .toast-region { display: none !important; }
   .page { padding: 0; }
   .invoice-doc { border: 0; border-radius: 0; box-shadow: none; max-width: none; padding: 24px 8px; }
+  /* Print must always render the full desktop layout, regardless of the
+     physical page width — sever the container-query context so none of
+     InvoiceDocumentComponent's @container (max-width:640px) mobile rules
+     can match. */
+  .invoice-doc-wrap { container-type: normal !important; }
 }
 
 /* ── Responsive ──────────────────────────────── */
@@ -1123,29 +1126,58 @@ textarea { resize: vertical; font-family: inherit; }
   .modal-scroll { --modal-pad-y: 16px; --modal-pad-x: 16px; }
 
   /* Opt-in: plain data-display tables (not editable grids like the invoice
-     line-item editor) get their rows stacked into label/value cards instead
-     of scrolling horizontally. Cells carry a data-label attribute read by
-     the ::before rule below. */
+     line-item editor) get their rows stacked into compact cards instead of
+     scrolling horizontally, rather than a long list of label:value lines.
+     Cells carry a data-label attribute read by the ::before rule below; the
+     first column is always the row's "identity" (avatar+name) and the last
+     is always its actions — already consistent everywhere this class is
+     used. A feature component can additionally mark its 2-3 most important
+     remaining fields with data-priority="high" so they render as a compact
+     highlights row instead of one full-width label:value line each;
+     everything else still shows, just smaller and quieter. */
   table.table.stack-mobile thead { display: none; }
   table.table.stack-mobile, table.table.stack-mobile tbody,
   table.table.stack-mobile tr, table.table.stack-mobile td {
     display: block; width: 100%;
   }
   table.table.stack-mobile tr {
-    border: 1px solid var(--border); border-radius: 10px; margin: 0 0 10px; overflow: hidden;
+    border: 1px solid var(--border); border-radius: 10px; margin: 0 0 10px; overflow: hidden; padding: 12px 14px;
   }
   table.table.stack-mobile tr:last-child { margin-bottom: 0; }
+
   table.table.stack-mobile td {
     display: flex; align-items: center; justify-content: space-between; gap: 14px;
-    text-align: right; border-bottom: 1px solid var(--border); white-space: normal;
+    text-align: right; white-space: normal; padding: 4px 0;
   }
-  table.table.stack-mobile td:last-child { border-bottom: 0; }
   table.table.stack-mobile td::before {
     content: attr(data-label); flex-shrink: 0; text-align: left;
     font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--faint);
   }
+
+  /* Identity cell: reads as the card's header, not another label:value row. */
+  table.table.stack-mobile td:first-child {
+    display: block; text-align: left; padding: 0 0 10px; font-size: 14px;
+  }
+  table.table.stack-mobile td:first-child::before { content: none; }
+
+  /* The 2-3 fields a feature marks as most important render as small inline
+     chips right under the identity block instead of full-width lines. */
+  table.table.stack-mobile td[data-priority="high"] {
+    display: inline-flex; width: auto; text-align: left; gap: 5px;
+    background: var(--surface-alt); border-radius: 6px; padding: 4px 9px; margin: 0 8px 8px 0;
+  }
+  table.table.stack-mobile td[data-priority="high"]::before { font-size: 9.5px; }
+
+  /* Every other field: still visible, just denser/quieter than the
+     identity + highlighted fields above. */
+  table.table.stack-mobile td:not(:first-child):not([data-priority="high"]):not([data-label=""]) {
+    font-size: 11.5px; color: var(--muted);
+  }
+
+  table.table.stack-mobile td[data-label=""] {
+    justify-content: flex-end; border-top: 1px solid var(--border); margin-top: 4px; padding-top: 10px;
+  }
   table.table.stack-mobile td[data-label=""]::before { display: none; }
-  table.table.stack-mobile td[data-label=""] { justify-content: flex-end; }
   table.table.stack-mobile td .actions { flex-wrap: wrap; justify-content: flex-end; }
 
   .pager { flex-direction: column; align-items: stretch; text-align: center; }

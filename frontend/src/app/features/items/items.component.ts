@@ -83,8 +83,8 @@ interface ItemForm {
                     <td data-label="Unit">{{ it.unit }}</td>
                     <td data-label="Rate" style="text-align:right;">{{ fmtINR(it.sellingPrice) }}</td>
                     <td data-label="GST%">{{ it.gstRate }}%</td>
-                    <td data-label="Stock" style="text-align:right;">{{ it.stockQty ?? 0 }}</td>
-                    <td data-label="Status"><app-pill [status]="it.status || 'active'" /></td>
+                    <td data-label="Stock" data-priority="high" style="text-align:right;">{{ it.stockQty ?? 0 }}</td>
+                    <td data-label="Status" data-priority="high"><app-pill [status]="it.status || 'active'" /></td>
                     <td data-label="">
                       <div class="actions">
                         <button class="btn ghost sm" type="button" (click)="openEdit(it)">Edit</button>

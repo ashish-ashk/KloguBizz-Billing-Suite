@@ -51,6 +51,13 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
   styles: [`
     .it-layout { display: grid; grid-template-columns: minmax(320px, 380px) 1fr; gap: 24px; align-items: start; }
     @media (max-width: 880px) { .it-layout { grid-template-columns: 1fr; } }
+
+    .accent-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .accent-row input.mono { min-width: 0; flex: 1; }
+    .checkbox.wrap-hint { flex-wrap: wrap; }
+    @media (max-width: 360px) {
+      .accent-row input[type="color"] { width: 100%; height: 36px; }
+    }
   `],
   template: `
     <app-shell title="Invoice Templates" subtitle="Choose how your invoices and bills look, and add your company logo">
@@ -61,7 +68,7 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
 
       <div class="info-box" style="margin-bottom:20px;display:flex;gap:8px;align-items:flex-start;">
         <app-icon name="template" [size]="14" style="margin-top:1px;flex-shrink:0;" />
-        <span>Pick from 10 authentic layouts, or build your own from scratch below. Add your logo and toggle what appears
+        <span>Pick from 25 authentic layouts, or build your own from scratch below. Add your logo and toggle what appears
         on the document. The preview on the right updates instantly — nothing changes for your real invoices until
         you hit <strong>Save Template</strong>.</span>
       </div>
@@ -91,7 +98,7 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
 
           <section class="card">
             <div class="card-title" style="margin-bottom:12px;">Accent Color</div>
-            <div style="display:flex;align-items:center;gap:10px;">
+            <div class="accent-row">
               <input type="color" [ngModel]="accentColor()" (ngModelChange)="accentColor.set($event)"
                 style="width:42px;height:42px;border:1px solid var(--border);border-radius:8px;padding:2px;background:var(--card);cursor:pointer;flex-shrink:0;" />
               <input class="mono" [ngModel]="accentColor()" (ngModelChange)="accentColor.set($event)" />
@@ -128,7 +135,7 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
             <div class="card-head">
               <div>
                 <div class="card-title">Choose a Template</div>
-                <div class="card-sub">10 authentic layouts — click to preview instantly</div>
+                <div class="card-sub">25 authentic layouts — click to preview instantly</div>
               </div>
               @if (mode() === 'preset') { <span class="pill active">✓ Active</span> }
             </div>
@@ -198,11 +205,11 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
                   @for (p of paperToneOptions; track p.value) { <option [value]="p.value">{{ p.label }}</option> }
                 </select>
               </div>
-              <label class="checkbox" style="justify-content:space-between;">
+              <label class="checkbox wrap-hint" style="justify-content:space-between;">
                 <span>Compact rows <span class="hint" style="text-transform:none;">— tighter spacing for invoices with many line items</span></span>
                 <span class="switch"><input type="checkbox" [ngModel]="customTemplate().compact" (ngModelChange)="setCustom('compact', $event)" /><span class="track"></span></span>
               </label>
-              <label class="checkbox" style="justify-content:space-between;">
+              <label class="checkbox wrap-hint" style="justify-content:space-between;">
                 <span>Narrow margins <span class="hint" style="text-transform:none;">— receipt-style content width</span></span>
                 <span class="switch"><input type="checkbox" [ngModel]="customTemplate().narrow" (ngModelChange)="setCustom('narrow', $event)" /><span class="track"></span></span>
               </label>

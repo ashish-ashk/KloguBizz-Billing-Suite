@@ -1,8 +1,9 @@
-import { Component, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges, computed, input } from '@angular/core';
+import { Component, ElementRef, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges, computed, input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ToastService } from '../core/toast.service';
 import { avatarColor, initials } from '../core/format';
+import { IconComponent } from './icons';
 
 /** Global toast region — include once in each top-level layout. */
 @Component({
@@ -184,4 +185,56 @@ export class PagerComponent {
   get totalPages(): number { return Math.max(1, Math.ceil(this.total / this.pageSize)); }
   get startIndex(): number { return this.total === 0 ? 0 : (this.page - 1) * this.pageSize; }
   get endIndex(): number { return Math.min(this.total, this.page * this.pageSize); }
+}
+
+/**
+ * Compact "⋮" action menu for table rows with more actions than comfortably
+ * fit inline on a mobile card — keep the single most-used action visible
+ * next to this, and tuck the rest inside via <ng-content>.
+ */
+@Component({
+  selector: 'app-overflow-menu',
+  standalone: true,
+  imports: [CommonModule, IconComponent],
+  template: `
+    <div class="overflow-menu">
+      <button class="btn ghost sm" type="button" aria-label="More actions" (click)="toggle($event)">
+        <app-icon name="moreVertical" [size]="16" />
+      </button>
+      @if (open) {
+        <div class="overflow-menu-panel" (click)="onPanelClick()">
+          <ng-content />
+        </div>
+      }
+    </div>
+  `,
+  styles: [`
+    .overflow-menu { position: relative; display: inline-block; }
+    .overflow-menu-panel {
+      position: absolute; right: 0; top: calc(100% + 6px); z-index: 30;
+      min-width: 160px; background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; box-shadow: var(--shadow-md); padding: 6px; display: grid; gap: 2px;
+    }
+  `],
+  host: { '(document:click)': 'onDocumentClick($event)' }
+})
+export class OverflowMenuComponent {
+  open = false;
+
+  constructor(private el: ElementRef<HTMLElement>) {}
+
+  toggle(event: MouseEvent) {
+    event.stopPropagation();
+    this.open = !this.open;
+  }
+
+  // Any click on an action inside the panel closes the menu after that
+  // action's own click handler has already run (event bubbles target-first).
+  onPanelClick() {
+    this.open = false;
+  }
+
+  onDocumentClick(event: MouseEvent) {
+    if (this.open && !this.el.nativeElement.contains(event.target as Node)) this.open = false;
+  }
 }

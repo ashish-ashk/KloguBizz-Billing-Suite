@@ -2,7 +2,7 @@ import { Component, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { forkJoin } from 'rxjs';
-import { ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, PagerComponent } from '../../shared/ui';
+import { ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, PagerComponent, OverflowMenuComponent } from '../../shared/ui';
 import { IconComponent } from '../../shared/icons';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
@@ -22,7 +22,7 @@ interface OrgEditForm {
 @Component({
   selector: 'app-super-organisations',
   standalone: true,
-  imports: [CommonModule, FormsModule, ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, IconComponent, PagerComponent],
+  imports: [CommonModule, FormsModule, ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, IconComponent, PagerComponent, OverflowMenuComponent],
   template: `
     <div class="page-head">
       <div>
@@ -85,7 +85,7 @@ interface OrgEditForm {
           <table class="table stack-mobile">
             <thead>
               <tr>
-                <th>Organization</th><th>Admin</th><th>Plan</th><th>Users</th><th>Invoices</th><th>Created</th><th>Status</th><th style="text-align:right">Actions</th>
+                <th>Organization</th><th>Owner</th><th>Plan</th><th>Users</th><th>Invoices</th><th>Created</th><th>Status</th><th style="text-align:right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -100,25 +100,27 @@ interface OrgEditForm {
                       </div>
                     </div>
                   </td>
-                  <td data-label="Admin">
-                    <div>{{ o.admin?.name || '—' }}</div>
-                    <div class="muted" style="font-size:11px">{{ o.admin?.email || o.adminEmail }}</div>
+                  <td data-label="Owner">
+                    <div>{{ o.owner?.name || '—' }}</div>
+                    <div class="muted" style="font-size:11px">{{ o.owner?.email || o.adminEmail }}</div>
                   </td>
-                  <td data-label="Plan"><span [class]="'pill ' + planClass(o.plan)">{{ planLabel(o.plan) }}</span></td>
+                  <td data-label="Plan" data-priority="high"><span [class]="'pill ' + planClass(o.plan)">{{ planLabel(o.plan) }}</span></td>
                   <td class="num" data-label="Users">{{ o.userCount }}</td>
                   <td class="num" data-label="Invoices">{{ o.invoiceCount }}</td>
                   <td class="muted" data-label="Created">{{ fmtDate(o.createdAt) }}</td>
-                  <td data-label="Status"><app-pill [status]="o.status" /></td>
+                  <td data-label="Status" data-priority="high"><app-pill [status]="o.status" /></td>
                   <td data-label="">
                     <div class="actions">
                       <button class="btn ghost sm" type="button" (click)="openView(o)">View</button>
                       <button class="btn secondary sm" type="button" (click)="openEdit(o)">Edit</button>
-                      @if (o.status !== 'suspended') {
-                        <button class="btn danger sm" type="button" (click)="askStatus(o, 'suspend')">Suspend</button>
-                      } @else {
-                        <button class="btn success sm" type="button" (click)="askStatus(o, 'activate')">Activate</button>
-                      }
-                      <button class="btn danger sm" type="button" (click)="askDelete(o)" aria-label="Delete">✕</button>
+                      <app-overflow-menu>
+                        @if (o.status !== 'suspended') {
+                          <button class="btn danger sm" type="button" (click)="askStatus(o, 'suspend')">Suspend</button>
+                        } @else {
+                          <button class="btn success sm" type="button" (click)="askStatus(o, 'activate')">Activate</button>
+                        }
+                        <button class="btn danger sm" type="button" (click)="askDelete(o)"><app-icon name="trash" [size]="13" /> Delete</button>
+                      </app-overflow-menu>
                     </div>
                   </td>
                 </tr>
@@ -294,12 +296,12 @@ interface OrgEditForm {
         </div>
         <div class="grid grid-2" style="gap:10px">
           <div class="stat-block">
-            <div class="sb-label">Admin</div>
-            <div class="sb-value">{{ o.admin?.name || '—' }}</div>
+            <div class="sb-label">Owner</div>
+            <div class="sb-value">{{ o.owner?.name || '—' }}</div>
           </div>
           <div class="stat-block">
             <div class="sb-label">Email</div>
-            <div class="sb-value" style="overflow:hidden;text-overflow:ellipsis">{{ o.admin?.email || o.adminEmail }}</div>
+            <div class="sb-value" style="overflow:hidden;text-overflow:ellipsis">{{ o.owner?.email || o.adminEmail }}</div>
           </div>
           <div class="stat-block">
             <div class="sb-label">Phone</div>
@@ -405,7 +407,7 @@ export class SuperOrganisationsComponent implements OnInit {
       if (!q) return true;
       return o.name.toLowerCase().includes(q)
         || (o.adminEmail || '').toLowerCase().includes(q)
-        || (o.admin?.email || '').toLowerCase().includes(q)
+        || (o.owner?.email || '').toLowerCase().includes(q)
         || (o.gstin || '').toLowerCase().includes(q);
     });
   });

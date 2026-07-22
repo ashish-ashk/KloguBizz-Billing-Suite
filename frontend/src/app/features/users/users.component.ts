@@ -91,9 +91,13 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
                     @if (u.status === 'invited') {
                       <app-pill status="invited" />
                     }
-                    <button class="btn ghost sm" type="button" (click)="openEdit(u)">Edit</button>
+                    <button class="btn ghost sm" type="button" [disabled]="isOwner(u)"
+                      [title]="isOwner(u) ? 'Transfer ownership before you can edit the owner' : ''"
+                      (click)="openEdit(u)">Edit</button>
                     @if (!isSelf(u)) {
-                      <button class="btn danger sm" type="button" (click)="openRemove(u)">Remove</button>
+                      <button class="btn danger sm" type="button" [disabled]="isOwner(u)"
+                        [title]="isOwner(u) ? 'Transfer ownership before you can remove the owner' : ''"
+                        (click)="openRemove(u)">Remove</button>
                     }
                   </div>
                 </div>
@@ -442,6 +446,7 @@ export class UsersComponent implements OnInit {
 
   // ── Edit ───────────────────────────────────────
   openEdit(u: OrgUser) {
+    if (this.isOwner(u)) return;
     this.editTarget.set(u);
     this.editRole = u.role;
     this.editStatus = u.status;
@@ -465,6 +470,7 @@ export class UsersComponent implements OnInit {
 
   // ── Remove ─────────────────────────────────────
   openRemove(u: OrgUser) {
+    if (this.isOwner(u)) return;
     this.removeTarget.set(u);
     this.removeOpen.set(true);
   }

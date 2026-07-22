@@ -88,24 +88,24 @@ import { fmtINR, fmtDate, today, addDays, numberToWords, stateName } from '../..
                 <button class="btn secondary sm" type="button" (click)="addItem()">+ Add item</button>
               </div>
               <div class="table-wrap">
-                <table class="table" style="min-width:640px;">
+                <table class="table line-items-table" style="min-width:640px;">
                   <thead>
                     <tr><th style="min-width:200px;">Description</th><th>HSN/SAC</th><th>Qty</th><th>Rate (₹)</th><th>GST %</th><th style="text-align:right;">Amount</th><th></th></tr>
                   </thead>
                   <tbody>
                     @for (item of items; track $index; let i = $index) {
                       <tr>
-                        <td><app-item-picker [items]="catalogItems()" [(value)]="item.desc" (picked)="applyItem(i, $event)" /></td>
-                        <td><input class="input mono" style="width:88px;" [(ngModel)]="item.hsn" placeholder="9983xx" /></td>
-                        <td><input class="input" style="width:64px;" type="number" min="0" [(ngModel)]="item.qty" /></td>
-                        <td><input class="input" style="width:104px;" type="number" min="0" [(ngModel)]="item.rate" /></td>
-                        <td>
-                          <select class="input" style="width:76px;" [(ngModel)]="item.gstRate">
+                        <td data-label="Description"><app-item-picker [items]="catalogItems()" [(value)]="item.desc" (picked)="applyItem(i, $event)" /></td>
+                        <td data-label="HSN/SAC"><input class="input mono li-w-hsn" [(ngModel)]="item.hsn" placeholder="9983xx" /></td>
+                        <td data-label="Qty"><input class="input li-w-qty" type="number" min="0" [(ngModel)]="item.qty" /></td>
+                        <td data-label="Rate (₹)"><input class="input li-w-rate" type="number" min="0" [(ngModel)]="item.rate" /></td>
+                        <td data-label="GST %">
+                          <select class="input li-w-gst" [(ngModel)]="item.gstRate">
                             @for (r of gstRates; track r) { <option [ngValue]="r">{{ r }}%</option> }
                           </select>
                         </td>
-                        <td style="text-align:right;font-weight:600;">{{ fmtINR(lineAmount(item)) }}</td>
-                        <td style="text-align:right;">
+                        <td data-label="Amount" style="text-align:right;font-weight:600;">{{ fmtINR(lineAmount(item)) }}</td>
+                        <td data-label="" style="text-align:right;">
                           @if (items.length > 1) {
                             <button class="btn danger sm" type="button" (click)="removeItem(i)">✕</button>
                           }
@@ -192,7 +192,40 @@ import { fmtINR, fmtDate, today, addDays, numberToWords, stateName } from '../..
         </div>
       }
     </app-shell>
-  `
+  `,
+  styles: [`
+    .li-w-hsn { width: 88px; }
+    .li-w-qty { width: 64px; }
+    .li-w-rate { width: 104px; }
+    .li-w-gst { width: 76px; }
+
+    /* This grid is an editable form, not a read-only list — it deliberately
+       does not use the app-wide .stack-mobile card convention (that's for
+       display-only cells; here every cell is an input/select). Instead each
+       row becomes its own card with full-width fields, since editing one
+       field at a time on a phone already shifts the viewport per keyboard
+       focus change — a horizontally-scrolling grid on top of that loses the
+       user's place in the list. */
+    @media (max-width: 640px) {
+      .line-items-table { min-width: 0 !important; }
+      .line-items-table thead { display: none; }
+      .line-items-table, .line-items-table tbody, .line-items-table tr, .line-items-table td { display: block; width: 100%; }
+      .line-items-table tr { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; padding: 12px; }
+      .line-items-table td { padding: 6px 0; border: none; }
+      .line-items-table td[data-label]:not([data-label=""])::before {
+        content: attr(data-label); display: block; font-size: 10.5px; color: var(--muted);
+        font-weight: 600; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px;
+      }
+      .line-items-table .li-w-hsn, .line-items-table .li-w-qty,
+      .line-items-table .li-w-rate, .line-items-table .li-w-gst { width: 100% !important; }
+      .line-items-table td[data-label="Amount"] {
+        display: flex; justify-content: space-between; align-items: baseline;
+        border-top: 1px dashed var(--border); margin-top: 4px; padding-top: 10px; font-size: 15px;
+      }
+      .line-items-table td[data-label="Amount"]::before { margin-bottom: 0; }
+      .line-items-table td[data-label=""] { text-align: right; padding-top: 4px; }
+    }
+  `]
 })
 export class InvoiceEditorComponent implements OnInit {
   readonly gstRates = [0, 5, 12, 18, 28];
