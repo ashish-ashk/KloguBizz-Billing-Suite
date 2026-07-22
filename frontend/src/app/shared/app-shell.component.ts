@@ -1,8 +1,8 @@
-import { Component, HostListener, Input, computed, signal, viewChild } from '@angular/core';
+import { Component, HostListener, Input, computed, effect, signal, viewChild } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthService } from '../core/auth.service';
 import { ThemeService } from '../core/theme.service';
-import { AvatarComponent, PillComponent, ToastsComponent } from './ui';
+import { AvatarComponent, PillComponent, ToastsComponent, popScrollLock, pushScrollLock } from './ui';
 import { IconComponent } from './icons';
 import { CommandItem, QuickSearchComponent } from './quick-search.component';
 
@@ -16,6 +16,7 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
     <button class="menu-toggle no-print" type="button" (click)="menuOpen.set(!menuOpen())" aria-label="Toggle menu">
       <app-icon name="menu" [size]="17" />
     </button>
+    <div class="drawer-backdrop no-print" [class.show]="menuOpen()" (click)="menuOpen.set(false)"></div>
     <div class="shell" [class.sidebar-collapsed]="collapsed()">
       <aside class="sidebar no-print" [class.open]="menuOpen()" [class.collapsed]="collapsed()">
         <div class="sidebar-logo">
@@ -162,7 +163,13 @@ export class AppShellComponent {
     return items;
   });
 
-  constructor(public auth: AuthService, public theme: ThemeService, public router: Router) {}
+  constructor(public auth: AuthService, public theme: ThemeService, public router: Router) {
+    // Locks background scroll while the full-width mobile drawer is open —
+    // otherwise the page behind it keeps scrolling under the fixed overlay.
+    effect(() => {
+      if (this.menuOpen()) pushScrollLock(); else popScrollLock();
+    });
+  }
 
   orgInitials(): string {
     const name = this.auth.organisation()?.name || this.auth.user()?.name || '?';

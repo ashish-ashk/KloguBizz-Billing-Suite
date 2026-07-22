@@ -55,7 +55,7 @@ interface BillRow {
         }
       </div>
 
-      <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:20px;align-items:start">
+      <div class="grid grid-wide" style="gap:20px;align-items:start">
 
         <!-- ── Left column ─────────────────────── -->
         <div style="display:grid;gap:16px">
@@ -213,7 +213,7 @@ interface BillRow {
         </div>
 
         <!-- ── Right column ────────────────────── -->
-        <div style="display:grid;gap:16px;position:sticky;top:20px">
+        <div class="sticky-preview-col" style="display:grid;gap:16px;position:sticky;top:20px">
 
           <!-- Bill summary -->
           <div class="card">

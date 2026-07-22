@@ -403,10 +403,10 @@ textarea { resize: vertical; font-family: inherit; }
   border-bottom: 1px solid var(--border);
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
-.topbar-crumb { display: flex; align-items: center; gap: 6px; font-size: 12.5px; min-width: 0; flex-shrink: 0; }
+.topbar-crumb { display: flex; align-items: center; gap: 6px; font-size: 12.5px; min-width: 0; flex-shrink: 1; }
 .crumb-org { color: var(--muted); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
 .crumb-sep { color: var(--faint); flex-shrink: 0; }
-.crumb-page { color: var(--text); font-weight: 700; white-space: nowrap; }
+.crumb-page { color: var(--text); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 /* Inline topbar quick-search: a real input, not a button that opens a
    dialog — typing filters an anchored dropdown right underneath it. */
 .qsearch {
@@ -838,7 +838,8 @@ textarea { resize: vertical; font-family: inherit; }
 .bulk-steps { margin: 0; padding-left: 20px; display: grid; gap: 14px; font-size: 13px; color: var(--text-mid); }
 .bulk-steps li { padding-left: 2px; }
 .bulk-steps li > div { margin-bottom: 8px; }
-.file-picker { display: flex; align-items: center; gap: 10px; }
+.file-picker { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.file-picker .file-name { overflow-wrap: anywhere; min-width: 0; }
 .upload-errors { max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
 .err-list { margin: 0; padding-left: 16px; }
 .err-list li { color: var(--red); font-size: 11.5px; line-height: 1.5; }
@@ -887,7 +888,7 @@ textarea { resize: vertical; font-family: inherit; }
   position: relative;
 }
 .bar-chart .bar:hover { filter: brightness(1.12); }
-.bar-chart .bar-label { font-size: 10.5px; color: var(--faint); white-space: nowrap; }
+.bar-chart .bar-label { font-size: 10.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .hbar { height: 7px; border-radius: 6px; background: linear-gradient(90deg, var(--brand-light), var(--brand)); min-width: 3px; transition: width 0.4s ease; }
 
 /* ── Appearance page ─────────────────────────── */
@@ -923,6 +924,7 @@ textarea { resize: vertical; font-family: inherit; }
   width: 40px; height: 36px; padding: 2px; border-radius: 8px;
   border: 1.5px solid var(--border); cursor: pointer; background: var(--card); flex-shrink: 0;
 }
+.color-field input.mono { flex: 1; min-width: 0; }
 .preview-frame { border-radius: 12px; padding: 18px; border: 1px solid var(--border); }
 .appearance-layout { display: grid; grid-template-columns: 1fr 380px; gap: 20px; align-items: start; }
 
@@ -1009,7 +1011,17 @@ textarea { resize: vertical; font-family: inherit; }
 .auth-field { position: relative; }
 .auth-field input { padding-left: 36px; }
 .auth-field .field-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
-.auth-field .link-btn { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); }
+/* Padding + negative margin grows the tap target well past the visible icon
+   without shifting the icon's position inside the input. */
+.auth-field .link-btn { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); padding: 12px; margin: -12px -12px -12px 0; }
+
+/* ── Legal pages (Terms/SLA) ─────────────────── */
+.legal-shell { padding: 40px 20px; }
+.legal-card { padding: 32px 36px; }
+@media (max-width: 640px) {
+  .legal-shell { padding: 24px 12px; }
+  .legal-card { padding: 20px 18px; }
+}
 
 /* ── Print (invoice document) ────────────────── */
 .invoice-doc {
@@ -1021,6 +1033,14 @@ textarea { resize: vertical; font-family: inherit; }
   margin: 0 auto;
   box-shadow: 0 4px 24px rgba(79, 70, 229, 0.1);
   font-size: 13px;
+}
+/* On-screen mobile viewing (not print — see @media print below): the
+   document itself keeps its real layout so the line-item table stays
+   legible, but it scrolls horizontally inside a tighter card instead of
+   crushing every column into a ~300px phone width. */
+@media (max-width: 640px) {
+  .invoice-doc-wrap { overflow-x: auto; }
+  .invoice-doc { padding: 20px 16px; min-width: 640px; }
 }
 @media print {
   .no-print { display: none !important; }
@@ -1038,6 +1058,7 @@ textarea { resize: vertical; font-family: inherit; }
 @media (max-width: 880px) {
   .auth-page { grid-template-columns: 1fr; }
   .auth-art { display: none; }
+  .auth-panel { padding: 32px clamp(20px, 6vw, 40px); }
   .sidebar { transition: transform 0.25s ease; }
   .sidebar { transform: translateX(-100%); }
   .sidebar.open { transform: translateX(0); box-shadow: 0 0 60px rgba(15, 13, 42, 0.5); }
@@ -1054,6 +1075,42 @@ textarea { resize: vertical; font-family: inherit; }
   .grid-2, .grid-3, .grid-4, .grid-5 { grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); }
   .search-box input { width: 100%; }
   .page-head h1 { font-size: 19px; }
+
+  /* Live preview panels (Appearance, Invoice Templates) only make sense
+     pinned alongside their controls in the two-column desktop layout — once
+     that layout collapses to 1fr above, a sticky panel would float mid-scroll
+     and cover the section below it instead of just flowing after it. */
+  .sticky-preview-col { position: static !important; top: auto !important; }
+
+  /* Full-width drawer nav is the only navigation on mobile, so rows need a
+     real touch target — the desktop density (28px) invites mis-taps. */
+  .nav a, .nav button.nav-link { padding: 11px 10px 11px 4px; font-size: 13px; }
+  .nav-icon { width: 24px; height: 24px; }
+  /* Same reasoning for the chrome buttons a thumb has to hit directly:
+     hamburger, sidebar sign-out, theme toggle. */
+  .menu-toggle, .icon-btn { width: 40px; height: 40px; }
+  .sidebar-icon-btn { width: 36px; height: 36px; }
+
+  /* iOS PWA safe-area: index.html sets viewport-fit=cover so the fixed
+     hamburger and sticky topbar must clear a notch/status bar; env()
+     resolves to 0 on non-notched devices so this is a no-op elsewhere. */
+  .menu-toggle { top: max(13px, calc(env(safe-area-inset-top) + 10px)); left: max(13px, env(safe-area-inset-left)); }
+  .topbar { padding-top: env(safe-area-inset-top); height: calc(var(--topbar-h) + env(safe-area-inset-top)); }
+  .sidebar { padding-left: env(safe-area-inset-left); }
+
+  /* Dimmed scrim behind the full-width drawer — tap-outside-to-close and a
+     visual cue that content behind it is inert (body scroll is also locked
+     from app-shell.component.ts while this is open). */
+  .drawer-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 45;
+    background: rgba(15, 13, 42, 0.5);
+    opacity: 0; pointer-events: none; transition: opacity 0.25s ease;
+  }
+  .drawer-backdrop.show { opacity: 1; pointer-events: auto; }
+}
+
+@media (min-width: 881px) {
+  .drawer-backdrop { display: none; }
 }
 
 @media (max-width: 640px) {
@@ -1093,4 +1150,30 @@ textarea { resize: vertical; font-family: inherit; }
 
   .pager { flex-direction: column; align-items: stretch; text-align: center; }
   .pager-controls { justify-content: center; }
+
+  /* Row actions (Edit/Delete/etc.) render at `.btn.sm` everywhere in the app;
+     that density is fine on a desktop table but is the primary tap target in
+     the stacked mobile card view, so it needs to clear a real touch target. */
+  table.table.stack-mobile td .actions .btn.sm { padding: 8px 12px; font-size: 12px; min-height: 34px; }
+
+  /* Below ~480px the always-visible quick-search input has to share the
+     topbar with the crumb title and right-side icons — collapse it to an
+     icon that expands to a full-width overlay input once focused (the
+     `.open` class is already toggled on focus by quick-search.component.ts). */
+  @media (max-width: 480px) {
+    .qsearch { flex: 0 0 34px; width: 34px; padding: 0; border-color: transparent; background: transparent; overflow: hidden; }
+    .qsearch-input { width: 0; padding: 0; }
+    .qsearch.open {
+      flex: 1 1 auto; width: auto; padding: 6px 10px;
+      background: var(--surface-alt); border-color: var(--border);
+      position: absolute; left: 8px; right: 8px; top: 8px; z-index: 41;
+      box-shadow: var(--shadow-md);
+    }
+    .qsearch.open .qsearch-input { width: auto; padding: 0; }
+  }
+
+  /* Bar chart: fixed-width scrollable columns beat squeezed, overlapping
+     labels once there are ~6+ months of data on a narrow screen. */
+  .bar-chart { overflow-x: auto; padding-bottom: 2px; }
+  .bar-chart .bar-col { flex: 0 0 44px; min-width: 44px; }
 }

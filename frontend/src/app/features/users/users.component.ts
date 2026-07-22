@@ -74,7 +74,7 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
               <app-empty-state icon="⌕" title="No matching team members" message="Try a different search term." />
             } @else {
               @for (u of filteredUsers(); track u._id) {
-                <div class="member-row" style="display:flex;align-items:center;gap:12px;padding:14px 20px">
+                <div class="member-row" style="display:flex;align-items:center;gap:12px;padding:14px 20px;flex-wrap:wrap">
                   <app-avatar [name]="u.name" [size]="40" />
                   <div style="flex:1;min-width:0">
                     <div style="font-weight:700;font-size:14px">{{ u.name }}</div>
@@ -110,7 +110,7 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
               </div>
             </div>
             <div class="table-wrap">
-              <table class="table">
+              <table class="table stack-mobile">
                 <thead>
                   <tr>
                     <th>Permission</th>
@@ -122,16 +122,16 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
                 <tbody>
                   @for (p of permissions; track p.name) {
                     <tr>
-                      <td>{{ p.name }}</td>
-                      <td style="text-align:center">
+                      <td data-label="Permission">{{ p.name }}</td>
+                      <td data-label="Admin" style="text-align:center">
                         @if (p.admin) { <app-icon name="check" [size]="14" style="color:var(--green)" /> }
                         @else { <span style="color:var(--faint)">—</span> }
                       </td>
-                      <td style="text-align:center">
+                      <td data-label="Accountant" style="text-align:center">
                         @if (p.accountant) { <app-icon name="check" [size]="14" style="color:var(--green)" /> }
                         @else { <span style="color:var(--faint)">—</span> }
                       </td>
-                      <td style="text-align:center">
+                      <td data-label="Viewer" style="text-align:center">
                         @if (p.viewer) { <app-icon name="check" [size]="14" style="color:var(--green)" /> }
                         @else { <span style="color:var(--faint)">—</span> }
                       </td>

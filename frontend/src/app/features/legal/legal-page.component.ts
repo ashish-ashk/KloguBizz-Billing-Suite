@@ -79,12 +79,12 @@ const DOCS: Record<string, LegalDoc> = { terms: TERMS, sla: SLA };
   standalone: true,
   imports: [RouterLink, IconComponent],
   template: `
-    <div style="min-height:100vh;background:var(--bg);padding:40px 20px;">
+    <div class="legal-shell" style="min-height:100vh;background:var(--bg);">
       <div style="max-width:720px;margin:0 auto;">
         <a routerLink="/register" style="display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;font-weight:600;text-decoration:none;margin-bottom:20px;">
           <app-icon name="chevronLeft" [size]="14" /> Back
         </a>
-        <div class="card page-enter" style="padding:32px 36px;">
+        <div class="card legal-card page-enter">
           <h1 style="margin:0 0 4px;font-size:24px;letter-spacing:-0.3px;color:var(--text);">{{ doc().title }}</h1>
           <p style="margin:0 0 24px;font-size:12.5px;color:var(--faint,var(--muted));">{{ doc().updated }}</p>
           <p style="margin:0 0 24px;font-size:14px;line-height:1.7;color:var(--text);">{{ doc().intro }}</p>

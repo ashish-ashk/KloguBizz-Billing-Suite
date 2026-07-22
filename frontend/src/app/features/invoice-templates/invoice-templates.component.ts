@@ -210,12 +210,12 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
           </section>
         </div>
 
-        <div style="position:sticky;top:20px;">
+        <div class="sticky-preview-col" style="position:sticky;top:20px;">
           <div class="card-sub" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
             <span>Live Preview — sample invoice</span>
             <span class="pill">{{ mode() === 'custom' ? 'Custom Template' : selectedTemplateName() }}</span>
           </div>
-          <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-md);">
+          <div class="invoice-doc-wrap" style="border:1px solid var(--border);border-radius:14px;overflow-x:auto;overflow-y:hidden;box-shadow:var(--shadow-md);">
             <app-invoice-document
               [invoice]="sampleInvoice"
               [client]="sampleClient"

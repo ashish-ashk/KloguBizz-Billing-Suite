@@ -236,7 +236,7 @@ interface ItemForm {
               <div class="file-picker">
                 <input #fileInput type="file" accept=".xlsx" style="display:none" (change)="onFileSelected($event)">
                 <button class="btn secondary sm" type="button" (click)="fileInput.click()">Choose File</button>
-                <span class="muted" style="font-size:12.5px;">{{ selectedFile()?.name || 'No file chosen' }}</span>
+                <span class="muted file-name" style="font-size:12.5px;">{{ selectedFile()?.name || 'No file chosen' }}</span>
               </div>
             </li>
           </ol>

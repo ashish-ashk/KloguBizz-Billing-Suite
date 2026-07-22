@@ -27,7 +27,7 @@ import { downloadBlob } from '../../core/format';
       </div>
 
       @if (invoice(); as inv) {
-        <div id="print-area">
+        <div id="print-area" class="invoice-doc-wrap">
           <app-invoice-document
             [invoice]="inv"
             [client]="client()"

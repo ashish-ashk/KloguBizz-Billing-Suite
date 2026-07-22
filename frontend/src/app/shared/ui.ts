@@ -24,7 +24,18 @@ export class ToastsComponent {
   constructor(public toast: ToastService) {}
 }
 
-let openModalCount = 0;
+// Shared body-scroll lock, counter-based so a modal opening while the mobile
+// nav drawer is still up (or vice versa) doesn't have one's close unlock
+// scroll while the other is still open.
+let scrollLockCount = 0;
+export function pushScrollLock() {
+  scrollLockCount++;
+  document.body.style.overflow = 'hidden';
+}
+export function popScrollLock() {
+  scrollLockCount = Math.max(0, scrollLockCount - 1);
+  if (scrollLockCount === 0) document.body.style.overflow = '';
+}
 
 /** Modal dialog. Renders nothing while closed. */
 @Component({
@@ -53,24 +64,20 @@ export class ModalComponent implements OnChanges, OnDestroy {
   @Input() width = 480;
   @Output() close = new EventEmitter<void>();
 
-  // Locks page scroll behind the overlay while any modal is open. A counter
-  // (rather than a plain boolean) so two modals opening in quick succession
-  // — e.g. a confirm dialog over a form — don't have the first one's close
-  // unlock scroll while the second is still up.
+  // Locks page scroll behind the overlay while any modal is open. Shared
+  // counter (rather than a plain boolean) so two modals opening in quick
+  // succession — e.g. a confirm dialog over a form — don't have the first
+  // one's close unlock scroll while the second is still up.
   ngOnChanges(changes: SimpleChanges) {
     if (!changes['open']) return;
     const wasOpen = !!changes['open'].previousValue;
     const isOpen = !!changes['open'].currentValue;
     if (isOpen === wasOpen) return;
-    openModalCount = Math.max(0, openModalCount + (isOpen ? 1 : -1));
-    document.body.style.overflow = openModalCount > 0 ? 'hidden' : '';
+    if (isOpen) pushScrollLock(); else popScrollLock();
   }
 
   ngOnDestroy() {
-    if (this.open) {
-      openModalCount = Math.max(0, openModalCount - 1);
-      document.body.style.overflow = openModalCount > 0 ? 'hidden' : '';
-    }
+    if (this.open) popScrollLock();
   }
 }
 

@@ -168,7 +168,7 @@ const ROLE_META: Record<TenantRole, { label: string; description: string }> = {
         </div>
 
         <!-- ── Right: single unified live preview ───── -->
-        <div style="position:sticky;top:20px;">
+        <div class="sticky-preview-col" style="position:sticky;top:20px;">
           <div class="card-sub" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
             <span>Live Preview — {{ roleMeta[selectedRole()].label }}'s screen</span>
             <span class="pill">{{ mode() === 'custom' ? 'Custom' : selectedPresetName() }}</span>
