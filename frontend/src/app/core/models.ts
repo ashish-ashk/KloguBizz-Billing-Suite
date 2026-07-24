@@ -125,10 +125,23 @@ export interface BankDetails {
   ifsc?: string;
 }
 
+/** Walk-in/not-yet-registered buyer details — used instead of `clientId` for a quick bill (Bill Generator's B2B-Unregistered/B2C modes). */
+export interface BillTo {
+  type?: 'b2b-unreg' | 'b2c';
+  name?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  stateCode?: string;
+  gstin?: string;
+}
+
 export interface Invoice {
   _id: string;
   invoiceNumber: string;
-  clientId: Client | string;
+  /** Exactly one of `clientId`/`billTo` is set — a registered client for formal invoices, or embedded walk-in details for a quick bill. */
+  clientId: Client | string | null;
+  billTo?: BillTo | null;
   date: string;
   dueDate: string;
   paidDate?: string | null;
@@ -158,7 +171,7 @@ export interface GstSummary {
 export interface Payment {
   _id: string;
   invoiceId: Invoice | string;
-  clientId: Client | string;
+  clientId: Client | string | null;
   amount: number;
   method: string;
   reference?: string;

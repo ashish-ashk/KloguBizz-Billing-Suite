@@ -17,7 +17,7 @@ const createPayment = asyncHandler(async (req, res) => {
   const payment = await Payment.create({
     ...req.body,
     orgId: req.orgId,
-    clientId: invoice.clientId
+    clientId: invoice.clientId || undefined
   });
   const paid = await Payment.aggregate([
     { $match: { invoiceId: invoice._id, orgId: invoice.orgId, status: 'success' } },

@@ -9,7 +9,7 @@ import { ItemPickerComponent } from '../../shared/item-picker.component';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
-import { Client, InvoiceItem, Item } from '../../core/models';
+import { BillTo, Client, InvoiceItem, Item } from '../../core/models';
 import { STATES, UNITS, addDays, fmtINR, numberToWords, stateName, today } from '../../core/format';
 
 type BillMode = 'b2b-reg' | 'b2b-unreg' | 'b2c';
@@ -64,26 +64,34 @@ interface BillRow {
         <a actions class="btn ghost" [routerLink]="['/invoices', invoiceId(), 'print']"><app-icon name="printer" [size]="14" /> Preview</a>
       }
       <button actions class="btn primary" type="button" [disabled]="!canSave() || saving()" (click)="save()">
-        {{ saving() ? 'Saving…' : (isEdit() ? 'Update Invoice' : 'Save as Invoice') }}
+        {{ saving() ? 'Saving…' : saveLabel() }}
       </button>
 
       @if (loading()) {
         <div class="card flush"><app-skeleton-rows [count]="5" /></div>
       } @else {
-      <!-- Mode selector -->
+      <!-- Mode selector — switchable even while editing, so a walk-in bill
+           can be "converted" into a client invoice (or back) by just picking
+           a different buyer mode; save() sends whichever buyer shape is
+           active and the backend clears the other. -->
       <div class="grid grid-3" style="margin-bottom:20px">
         @for (m of modes; track m.key) {
-          <button type="button" class="card hoverable" style="text-align:left;cursor:pointer;padding:14px 18px" [disabled]="isEdit()"
-            [style.opacity]="isEdit() && mode() !== m.key ? 0.5 : 1"
+          <button type="button" class="card hoverable" style="text-align:left;cursor:pointer;padding:14px 18px"
             [style.borderColor]="mode() === m.key ? 'var(--brand)' : ''"
             [style.background]="mode() === m.key ? 'var(--brand-pale)' : ''"
-            (click)="!isEdit() && mode.set(m.key)">
+            (click)="mode.set(m.key)">
             <div style="font-weight:700;font-family:var(--font-display);font-size:13.5px"
               [style.color]="mode() === m.key ? 'var(--brand)' : 'var(--text)'">{{ m.label }}</div>
             <div class="card-sub">{{ m.sub }}</div>
           </button>
         }
       </div>
+      @if (isEdit()) {
+        <div class="info-box" style="margin-bottom:16px;">
+          Switching buyer type above and saving will convert this document accordingly — e.g. picking
+          <strong>B2B — Registered</strong> turns a walk-in bill into a full client invoice, and vice versa.
+        </div>
+      }
 
       <div class="grid grid-wide" style="gap:20px;align-items:start">
 
@@ -400,11 +408,20 @@ export class BillGeneratorComponent implements OnInit {
     this.api.invoice(id).subscribe({
       next: inv => {
         this.loading.set(false);
-        this.mode.set('b2b-reg');
         this.invoiceNumber.set(inv.invoiceNumber);
         this.billDate = inv.date?.slice(0, 10) || today();
         this.dueDate = inv.dueDate?.slice(0, 10) || addDays(15);
-        this.clientId = typeof inv.clientId === 'string' ? inv.clientId : inv.clientId._id;
+        if (inv.clientId) {
+          this.mode.set('b2b-reg');
+          this.clientId = typeof inv.clientId === 'string' ? inv.clientId : inv.clientId._id;
+        } else {
+          this.mode.set(inv.billTo?.type || 'b2c');
+          this.buyerName = inv.billTo?.name || '';
+          this.buyerPhone = inv.billTo?.phone || '';
+          this.buyerAddress = inv.billTo?.address || '';
+          this.buyerEmail = inv.billTo?.email || '';
+          this.buyerStateCode = inv.billTo?.stateCode || '';
+        }
         this.rows = inv.items.length
           ? inv.items.map(i => ({ desc: i.desc, hsn: i.hsn || '', unit: 'Nos', qty: i.qty, rate: i.rate, gstRate: i.gstRate }))
           : [this.blankRow()];
@@ -516,13 +533,20 @@ export class BillGeneratorComponent implements OnInit {
     return this.r2(this.subtotal() - this.discountAmount() + this.totalTax());
   }
 
-  // ── Save as invoice ──────────────────────────
+  // ── Save as invoice / bill ────────────────────
   private validItems(): BillRow[] {
     return this.rows.filter(r => r.desc.trim() && (r.qty || 0) > 0 && (r.rate || 0) > 0);
   }
 
+  saveLabel(): string {
+    const noun = this.mode() === 'b2b-reg' ? 'Invoice' : 'Bill';
+    return this.isEdit() ? `Update ${noun}` : `Save as ${noun}`;
+  }
+
   canSave(): boolean {
-    return this.mode() === 'b2b-reg' && !!this.clientId && this.validItems().length > 0;
+    if (this.validItems().length === 0) return false;
+    if (this.mode() === 'b2b-reg') return !!this.clientId;
+    return !!this.buyerName.trim() && !!this.buyerStateCode;
   }
 
   save() {
@@ -539,8 +563,23 @@ export class BillGeneratorComponent implements OnInit {
       gstRate: r.gstRate
     }));
 
+    // clientId/billTo are mutually exclusive — always send both (one
+    // populated, the other explicitly null) so switching buyer mode on an
+    // existing bill/invoice actually converts it instead of leaving stale
+    // data from whichever shape was previously saved.
+    const isReg = this.mode() === 'b2b-reg';
+    const billTo: BillTo | null = isReg ? null : {
+      type: this.mode() as 'b2b-unreg' | 'b2c',
+      name: this.buyerName.trim(),
+      phone: this.buyerPhone.trim(),
+      email: this.buyerEmail.trim(),
+      address: this.buyerAddress.trim(),
+      stateCode: this.buyerStateCode
+    };
+
     const payload = {
-      clientId: this.clientId,
+      clientId: isReg ? this.clientId : null,
+      billTo,
       date: this.billDate,
       dueDate: this.dueDate,
       items,
@@ -561,7 +600,7 @@ export class BillGeneratorComponent implements OnInit {
           this.toast.success(`${inv.invoiceNumber} updated`);
           this.router.navigateByUrl('/invoices');
         } else {
-          this.toast.success('Invoice created');
+          this.toast.success(isReg ? 'Invoice created' : 'Bill created');
           this.resetForm();
         }
       },

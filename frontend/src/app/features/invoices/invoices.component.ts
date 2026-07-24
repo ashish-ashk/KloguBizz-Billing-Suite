@@ -59,7 +59,10 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft';
                       <div style="display:flex;align-items:center;gap:10px;">
                         <app-avatar [name]="clientName(inv)" [size]="28" />
                         <div>
-                          <div class="strong">{{ clientName(inv) }}</div>
+                          <div class="strong" style="display:flex;align-items:center;gap:6px;">
+                            {{ clientName(inv) }}
+                            @if (!inv.clientId) { <span class="pill" style="font-size:9.5px;padding:1px 7px;">Bill</span> }
+                          </div>
                           <div class="muted mono" style="font-size:11px;">{{ clientGstin(inv) }}</div>
                         </div>
                       </div>
@@ -73,7 +76,7 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft';
                     <td data-label="Status" data-priority="high"><app-pill [status]="inv.status" /></td>
                     <td data-label="">
                       <div class="actions">
-                        <a class="btn ghost sm" [routerLink]="['/invoices', inv._id, 'edit']">Edit</a>
+                        <a class="btn ghost sm" [routerLink]="inv.clientId ? ['/invoices', inv._id, 'edit'] : ['/bill-generator', inv._id, 'edit']">Edit</a>
                         @if (inv.status !== 'paid') {
                           <button class="btn success sm" type="button" (click)="markPaid(inv)"><app-icon name="check" [size]="13" /> Paid</button>
                         }
@@ -173,11 +176,13 @@ export class InvoicesComponent implements OnInit {
   }
 
   clientName(inv: Invoice): string {
-    return typeof inv.clientId === 'string' ? '—' : inv.clientId?.companyName || '—';
+    if (inv.clientId && typeof inv.clientId !== 'string') return inv.clientId.companyName || '—';
+    return inv.billTo?.name || '—';
   }
 
   clientGstin(inv: Invoice): string {
-    return typeof inv.clientId === 'string' ? '' : inv.clientId?.gstin || '';
+    if (inv.clientId && typeof inv.clientId !== 'string') return inv.clientId.gstin || '';
+    return inv.billTo?.gstin || '';
   }
 
   gstAmount(inv: Invoice): number {

@@ -15,9 +15,29 @@ const { toCsv } = require('../services/csvService');
 
 async function totalsFor(req, body) {
   const org = await Organisation.findById(req.orgId);
-  const client = await Client.findOne({ _id: body.clientId, ...tenantFilter(req) });
-  if (!client) throw httpError(400, 'Valid clientId is required');
-  return calculateInvoiceTotals(body.items || [], org.stateCode, client.stateCode);
+  let toStateCode;
+  if (body.clientId) {
+    const client = await Client.findOne({ _id: body.clientId, ...tenantFilter(req) });
+    if (!client) throw httpError(400, 'Valid clientId is required');
+    toStateCode = client.stateCode;
+  } else if (body.billTo?.name) {
+    toStateCode = body.billTo.stateCode || org.stateCode;
+  } else {
+    throw httpError(400, 'Provide a registered client or buyer details');
+  }
+  return calculateInvoiceTotals(body.items || [], org.stateCode, toStateCode);
+}
+
+// clientId/billTo are mutually exclusive (a registered-client invoice vs a
+// walk-in quick bill) — clearing the other whenever one is set lets a bill
+// be "converted" to a client invoice (or vice versa) just by switching which
+// one the request populates, without stale data lingering on the document.
+function normalizeBuyer(body) {
+  if (body.clientId === undefined && body.billTo === undefined) return body;
+  const out = { ...body };
+  if (out.clientId) out.billTo = null;
+  else if (out.billTo?.name) out.clientId = null;
+  return out;
 }
 
 // Pending invoices past their due date become overdue. Cheap enough to run
@@ -94,11 +114,12 @@ const getInvoice = asyncHandler(async (req, res) => {
 
 const createInvoice = asyncHandler(async (req, res) => {
   await assertInvoiceQuota(req.orgId);
-  const totals = await totalsFor(req, req.body);
+  const body = normalizeBuyer(req.body);
+  const totals = await totalsFor(req, body);
   const invoice = await Invoice.create({
-    ...req.body,
+    ...body,
     orgId: req.orgId,
-    invoiceNumber: req.body.invoiceNumber || await nextInvoiceNumber(req.orgId),
+    invoiceNumber: body.invoiceNumber || await nextInvoiceNumber(req.orgId),
     totals
   });
   logAudit({ req, action: 'invoice.created', entity: 'invoice', entityId: invoice._id, meta: { invoiceNumber: invoice.invoiceNumber, total: totals.total } });
@@ -106,11 +127,11 @@ const createInvoice = asyncHandler(async (req, res) => {
 });
 
 const updateInvoice = asyncHandler(async (req, res) => {
-  const update = { ...req.body };
-  if (req.body.items || req.body.clientId) {
+  const update = normalizeBuyer(req.body);
+  if (req.body.items || req.body.clientId !== undefined || req.body.billTo !== undefined) {
     const existing = await Invoice.findOne({ _id: req.params.id, ...tenantFilter(req) });
     if (!existing) throw httpError(404, 'Invoice not found');
-    update.totals = await totalsFor(req, { ...existing.toObject(), ...req.body });
+    update.totals = await totalsFor(req, normalizeBuyer({ ...existing.toObject(), ...req.body }));
   }
   const invoice = await Invoice.findOneAndUpdate(
     { _id: req.params.id, ...tenantFilter(req) },
@@ -151,7 +172,7 @@ const markPaid = asyncHandler(async (req, res) => {
   await Payment.create({
     orgId: req.orgId,
     invoiceId: invoice._id,
-    clientId: invoice.clientId,
+    clientId: invoice.clientId || undefined,
     amount: invoice.totals.total,
     method: req.body.method || 'Manual',
     reference: req.body.reference || 'marked-paid'
@@ -163,19 +184,21 @@ const markPaid = asyncHandler(async (req, res) => {
 const sendReminder = asyncHandler(async (req, res) => {
   const invoice = await Invoice.findOne({ _id: req.params.id, ...tenantFilter(req) }).populate('clientId');
   if (!invoice) throw httpError(404, 'Invoice not found');
-  if (!invoice.clientId?.email) throw httpError(400, 'Client has no email address on file');
+  const email = invoice.clientId?.email || invoice.billTo?.email;
+  const name = invoice.clientId?.companyName || invoice.billTo?.name;
+  if (!email) throw httpError(400, 'This buyer has no email address on file');
   const org = await Organisation.findById(req.orgId);
   const overdueDays = Math.max(0, Math.floor((Date.now() - invoice.dueDate.getTime()) / 86400000));
   const result = await sendReminderEmail({
-    to: invoice.clientId.email,
-    clientName: invoice.clientId.companyName,
+    to: email,
+    clientName: name,
     invoiceNumber: invoice.invoiceNumber,
     amount: `INR ${invoice.totals.total.toLocaleString('en-IN')}`,
     dueDate: invoice.dueDate,
     orgName: org?.name || 'KloguBizz',
     overdueDays
   });
-  logAudit({ req, action: 'invoice.reminder_sent', entity: 'invoice', entityId: invoice._id, meta: { to: invoice.clientId.email } });
+  logAudit({ req, action: 'invoice.reminder_sent', entity: 'invoice', entityId: invoice._id, meta: { to: email } });
   res.json({ ok: true, ...result });
 });
 
@@ -193,8 +216,8 @@ const exportInvoicesCsv = asyncHandler(async (req, res) => {
   const invoices = await Invoice.find(filter).populate('clientId', 'companyName gstin').sort({ date: -1 });
   const csv = toCsv(invoices, [
     { label: 'Invoice Number', value: i => i.invoiceNumber },
-    { label: 'Client', value: i => i.clientId?.companyName || '' },
-    { label: 'GSTIN', value: i => i.clientId?.gstin || '' },
+    { label: 'Client', value: i => i.clientId?.companyName || i.billTo?.name || '' },
+    { label: 'GSTIN', value: i => i.clientId?.gstin || i.billTo?.gstin || '' },
     { label: 'Date', value: i => i.date?.toISOString().slice(0, 10) },
     { label: 'Due Date', value: i => i.dueDate?.toISOString().slice(0, 10) },
     { label: 'Status', value: i => i.status },
@@ -220,11 +243,12 @@ const remindAll = asyncHandler(async (req, res) => {
   let sent = 0;
   let skipped = 0;
   for (const invoice of invoices) {
-    if (!invoice.clientId?.email) { skipped += 1; continue; }
+    const email = invoice.clientId?.email || invoice.billTo?.email;
+    if (!email) { skipped += 1; continue; }
     const overdueDays = Math.max(0, Math.floor((Date.now() - invoice.dueDate.getTime()) / 86400000));
     await sendReminderEmail({
-      to: invoice.clientId.email,
-      clientName: invoice.clientId.companyName,
+      to: email,
+      clientName: invoice.clientId?.companyName || invoice.billTo?.name,
       invoiceNumber: invoice.invoiceNumber,
       amount: `INR ${invoice.totals.total.toLocaleString('en-IN')}`,
       dueDate: invoice.dueDate,
@@ -241,7 +265,13 @@ const invoicePdf = asyncHandler(async (req, res) => {
   const invoice = await Invoice.findOne({ _id: req.params.id, ...tenantFilter(req) }).populate('clientId');
   if (!invoice) throw httpError(404, 'Invoice not found');
   const org = await Organisation.findById(req.orgId);
-  const buffer = await renderInvoicePdf({ invoice, client: invoice.clientId, org });
+  const client = invoice.clientId || (invoice.billTo?.name ? {
+    companyName: invoice.billTo.name,
+    address: invoice.billTo.address,
+    gstin: invoice.billTo.gstin,
+    stateCode: invoice.billTo.stateCode
+  } : null);
+  const buffer = await renderInvoicePdf({ invoice, client, org });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${invoice.invoiceNumber}.pdf"`);
   res.send(buffer);

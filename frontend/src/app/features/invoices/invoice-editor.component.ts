@@ -290,6 +290,14 @@ export class InvoiceEditorComponent implements OnInit {
   private loadInvoice(id: string) {
     this.api.invoice(id).subscribe({
       next: inv => {
+        // This editor only supports registered-client invoices — a walk-in
+        // bill (no clientId, buyer details in `billTo`) is edited on the
+        // Bill Generator instead, which is also where it can be "converted"
+        // into a client invoice.
+        if (!inv.clientId) {
+          this.router.navigate(['/bill-generator', id, 'edit']);
+          return;
+        }
         this.invoiceNumber = inv.invoiceNumber;
         this.clientId = typeof inv.clientId === 'string' ? inv.clientId : inv.clientId._id;
         this.date = inv.date?.slice(0, 10) || today();

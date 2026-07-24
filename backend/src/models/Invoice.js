@@ -17,9 +17,28 @@ const totalsSchema = new mongoose.Schema({
   isIGST: { type: Boolean, default: false }
 }, { _id: false });
 
+const billToSchema = new mongoose.Schema({
+  // Walk-in / not-yet-registered buyer details, used instead of `clientId`
+  // for Bill Generator's B2B-Unregistered and B2C modes. `type` records which
+  // buyer mode produced this so the UI can restore the right form on edit.
+  type: { type: String, enum: ['b2b-unreg', 'b2c'] },
+  name: String,
+  phone: String,
+  email: String,
+  address: String,
+  stateCode: String,
+  gstin: String
+}, { _id: false });
+
 const invoiceSchema = new mongoose.Schema({
   orgId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organisation', required: true, index: true },
-  clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', required: true },
+  // Exactly one of clientId/billTo is set: a registered client reference for
+  // formal invoices, or embedded walk-in buyer details for quick bills — see
+  // invoiceController.js's totalsFor/createInvoice/updateInvoice for the
+  // validation that enforces this and lets a bill later be "converted" to a
+  // client invoice (or vice versa) by switching which one is populated.
+  clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client' },
+  billTo: billToSchema,
   invoiceNumber: { type: String, required: true },
   date: { type: Date, required: true },
   dueDate: { type: Date, required: true },

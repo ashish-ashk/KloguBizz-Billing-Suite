@@ -881,12 +881,16 @@ textarea {
   text-overflow: ellipsis;
   min-width: 0;
 }
+app-quick-search {
+  display: contents;
+}
 .qsearch {
   position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
   flex: 1;
+  min-width: 0;
   max-width: 360px;
   margin: 0 6px;
   padding: 6px 10px;

@@ -6,8 +6,8 @@ import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
 import { IconComponent } from '../../shared/icons';
 import { ToastsComponent } from '../../shared/ui';
-import { InvoiceDocumentComponent } from '../../shared/invoice-document.component';
-import { Client, Invoice } from '../../core/models';
+import { InvoiceDocClient, InvoiceDocumentComponent } from '../../shared/invoice-document.component';
+import { Invoice } from '../../core/models';
 import { downloadBlob } from '../../core/format';
 
 @Component({
@@ -69,10 +69,19 @@ export class InvoicePrintComponent implements OnInit {
 
   org() { return this.auth.organisation(); }
 
-  client(): Client | null {
+  client(): InvoiceDocClient | null {
     const inv = this.invoice();
-    if (!inv || typeof inv.clientId === 'string') return null;
-    return inv.clientId;
+    if (!inv) return null;
+    if (inv.clientId && typeof inv.clientId !== 'string') return inv.clientId;
+    if (inv.billTo?.name) {
+      return {
+        companyName: inv.billTo.name,
+        address: inv.billTo.address,
+        gstin: inv.billTo.gstin,
+        stateCode: inv.billTo.stateCode || ''
+      };
+    }
+    return null;
   }
 
   ngOnInit() {

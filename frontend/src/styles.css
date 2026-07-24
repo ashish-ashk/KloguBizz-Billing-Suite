@@ -409,11 +409,20 @@ textarea { resize: vertical; font-family: inherit; }
 .crumb-sep { color: var(--faint); flex-shrink: 0; }
 .crumb-page { color: var(--text); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 /* Inline topbar quick-search: a real input, not a button that opens a
-   dialog — typing filters an anchored dropdown right underneath it. */
+   dialog — typing filters an anchored dropdown right underneath it.
+   `app-quick-search` (the component host element) sits between `.topbar`
+   (the flex container) and `.qsearch` (this div, the actual styled flex
+   item) with no CSS of its own, so without `display:contents` it becomes an
+   unstyled flex item with the UA-default `min-width:auto` — refusing to
+   shrink below its content's intrinsic width and overflowing/getting
+   clipped past the topbar's right-side icons on narrow screens. `contents`
+   removes the host from the box tree so `.qsearch` becomes the real flex
+   item and every rule below (including the mobile collapse) applies as written. */
+app-quick-search { display: contents; }
 .qsearch {
   position: relative;
   display: flex; align-items: center; gap: 8px;
-  flex: 1; max-width: 360px;
+  flex: 1; min-width: 0; max-width: 360px;
   margin: 0 6px;
   padding: 6px 10px;
   border-radius: 8px;
