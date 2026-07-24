@@ -16,7 +16,7 @@ import { downloadBlob } from '../../core/format';
   imports: [CommonModule, RouterLink, IconComponent, ToastsComponent, InvoiceDocumentComponent],
   template: `
     <div style="min-height:100vh;background:var(--bg);padding:28px 20px;">
-      <div class="no-print" style="max-width:860px;margin:0 auto 18px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+      <div class="no-print" style="max-width:210mm;margin:0 auto 18px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
         <a class="btn secondary" [routerLink]="['/invoices', invoiceId, 'edit']">← Back to editor</a>
         <div style="display:flex;gap:10px;">
           <button class="btn secondary" type="button" (click)="print()"><app-icon name="printer" [size]="14" /> Print</button>
@@ -35,7 +35,7 @@ import { downloadBlob } from '../../core/format';
             [orgAddress]="org()?.address || ''"
             [orgGstin]="org()?.gstin || ''"
             [orgPan]="org()?.pan || ''"
-            [templateId]="org()?.brandingConfig?.invoiceTemplateId || 'classic-corporate'"
+            [templateId]="org()?.brandingConfig?.invoiceTemplateId || 'modern-minimal'"
             [customTemplate]="org()?.brandingConfig?.customInvoiceTemplate || null"
             [accentColor]="org()?.brandingConfig?.primaryColor || '#4f46e5'"
             [logoUrl]="org()?.brandingConfig?.logoUrl || ''"

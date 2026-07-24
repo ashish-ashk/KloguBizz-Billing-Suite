@@ -1,10 +1,13 @@
 /**
- * Business-authentic invoice/bill layouts, mirrored from
- * backend/src/services/invoiceTemplates.js so the on-screen print/preview
- * view and the tenant template picker match what the downloaded PDF shows.
+ * Business-authentic invoice/bill layouts — 8 genuinely distinct, coordinated
+ * designs (header layout + typography + color role + table style + divider +
+ * paper tone chosen together as a system, not independent knobs recombined),
+ * mirrored from backend/src/services/invoiceTemplates.js so the on-screen
+ * print/preview view and the tenant template picker match what the downloaded
+ * PDF shows.
  */
 
-export type HeaderStyle = 'band' | 'bandLarge' | 'plain' | 'centered' | 'split' | 'sidebar' | 'gradient' | 'boxed' | 'diagonal' | 'ribbon' | 'letterhead' | 'stub';
+export type HeaderStyle = 'minimalPlain' | 'formalFramed' | 'diagonalBold' | 'splitCompact' | 'letterheadLedger' | 'receiptCentered' | 'ribbonCard' | 'framedCentered';
 export type TableStyle = 'bordered' | 'zebra' | 'minimal' | 'boxed' | 'ledger';
 export type DividerStyle = 'solid' | 'double' | 'dotted' | 'none' | 'perforated';
 export type PaperTone = 'white' | 'cream' | 'graypaper';
@@ -21,6 +24,14 @@ export interface InvoiceTemplate {
   paperTone: PaperTone;
   compact?: boolean;
   narrow?: boolean;
+  /** Zebra rows tinted with the org's accent color instead of flat gray (Creative Studio). */
+  accentTint?: boolean;
+  /** Bill-to/supply-details rendered as small rounded soft-background cards, plus a compact meta info card under the header (SaaS Product). */
+  infoCard?: boolean;
+  /** A framed/bordered header treatment (GST Ledger Register, Boutique Warm). */
+  pageFrame?: boolean;
+  /** Small "Original for Recipient" corner tag (GST Ledger Register only). */
+  copyLabel?: boolean;
 }
 
 export const FONT_STACKS: Record<string, string> = {
@@ -37,38 +48,65 @@ export const PAPER_TONE_COLORS: Record<PaperTone, string> = {
 };
 
 export const INVOICE_TEMPLATES: InvoiceTemplate[] = [
-  { id: 'classic-corporate', name: 'Classic Corporate', description: 'Formal serif layout with a bordered header band — the traditional look accountants expect.', font: 'Times-Roman', headerStyle: 'band', titleAlign: 'right', tableStyle: 'bordered', dividerStyle: 'double', paperTone: 'white' },
-  { id: 'modern-minimal', name: 'Modern Minimal', description: 'Clean sans-serif with generous white space and no visual clutter.', font: 'Helvetica', headerStyle: 'plain', titleAlign: 'left', tableStyle: 'minimal', dividerStyle: 'solid', paperTone: 'white' },
-  { id: 'bold-header', name: 'Bold Header', description: 'Full-width color band up top with a large title — impossible to miss in an inbox.', font: 'Helvetica', headerStyle: 'bandLarge', titleAlign: 'center', tableStyle: 'zebra', dividerStyle: 'none', paperTone: 'white' },
-  { id: 'elegant-serif', name: 'Elegant Serif', description: 'Warm cream paper tone with italic accents and a boxed table — boutique and refined.', font: 'Times-Roman', headerStyle: 'centered', titleAlign: 'center', tableStyle: 'boxed', dividerStyle: 'dotted', paperTone: 'cream' },
-  { id: 'two-column-compact', name: 'Two-Column Compact', description: 'Dense, information-first layout that fits many line items without feeling cramped.', font: 'Helvetica', headerStyle: 'split', titleAlign: 'left', tableStyle: 'minimal', dividerStyle: 'solid', paperTone: 'white', compact: true },
-  { id: 'tech-startup', name: 'Tech Startup', description: 'A bold color bar down the side and confident type — built for product-led companies.', font: 'Helvetica-Bold', headerStyle: 'sidebar', titleAlign: 'left', tableStyle: 'zebra', dividerStyle: 'none', paperTone: 'white' },
-  { id: 'gradient-accent', name: 'Gradient Accent', description: 'Layered two-tone header band for a modern, design-forward first impression.', font: 'Helvetica', headerStyle: 'gradient', titleAlign: 'center', tableStyle: 'bordered', dividerStyle: 'solid', paperTone: 'white' },
-  { id: 'professional-blue', name: 'Professional Blue', description: 'Boxed sections and a steady grid — the reassuring look of an enterprise invoice.', font: 'Helvetica', headerStyle: 'boxed', titleAlign: 'right', tableStyle: 'boxed', dividerStyle: 'solid', paperTone: 'white' },
-  { id: 'creative-bold', name: 'Creative Bold', description: 'An angled color block and confident negative space for agencies and studios.', font: 'Helvetica-Bold', headerStyle: 'diagonal', titleAlign: 'right', tableStyle: 'zebra', dividerStyle: 'none', paperTone: 'white' },
-  { id: 'simple-receipt', name: 'Simple Receipt', description: 'Monospace, centered, narrow — reads like a point-of-sale receipt.', font: 'Courier', headerStyle: 'centered', titleAlign: 'center', tableStyle: 'minimal', dividerStyle: 'dotted', paperTone: 'white', narrow: true },
-
-  // 15 additional layouts, each inspired by a common market/industry
-  // convention (not a copy of any specific vendor's proprietary design).
-  { id: 'minimal-whitespace', name: 'Whitespace', description: 'Minimalist and modern — generous margins, quiet type, nothing but the essentials.', font: 'Helvetica', headerStyle: 'plain', titleAlign: 'right', tableStyle: 'minimal', dividerStyle: 'none', paperTone: 'white' },
-  { id: 'statutory-classic', name: 'Statutory Classic', description: 'Classic corporate register look — framing rules and a bordered ledger table.', font: 'Times-Roman', headerStyle: 'letterhead', titleAlign: 'left', tableStyle: 'bordered', dividerStyle: 'solid', paperTone: 'graypaper' },
-  { id: 'studio-block', name: 'Studio Block', description: 'Creative agency energy — a bold two-tone header and confident zebra rows.', font: 'Helvetica-Bold', headerStyle: 'gradient', titleAlign: 'left', tableStyle: 'zebra', dividerStyle: 'none', paperTone: 'white' },
-  { id: 'till-receipt', name: 'Till Receipt', description: 'Retail point-of-sale style — monospace, centered, with a perforated tear line.', font: 'Courier', headerStyle: 'centered', titleAlign: 'center', tableStyle: 'minimal', dividerStyle: 'perforated', paperTone: 'white', narrow: true, compact: true },
-  { id: 'advisory-brief', name: 'Advisory Brief', description: 'Consulting and professional services — a quiet sidebar accent, minimal table.', font: 'Times-Roman', headerStyle: 'sidebar', titleAlign: 'right', tableStyle: 'minimal', dividerStyle: 'solid', paperTone: 'graypaper' },
-  { id: 'gst-formal-register', name: 'GST Register', description: 'Government/GST-formal — a framed letterhead and full ledger rulings.', font: 'Times-Roman', headerStyle: 'letterhead', titleAlign: 'center', tableStyle: 'ledger', dividerStyle: 'double', paperTone: 'white' },
-  { id: 'product-invoice-tech', name: 'Product Invoice', description: 'SaaS/tech style — a small corner ribbon and clean minimal table.', font: 'Helvetica', headerStyle: 'ribbon', titleAlign: 'right', tableStyle: 'minimal', dividerStyle: 'solid', paperTone: 'white' },
-  { id: 'site-work-order', name: 'Site Work Order', description: 'Construction and trades — a bordered docket header and ruled ledger table.', font: 'Helvetica-Bold', headerStyle: 'stub', titleAlign: 'left', tableStyle: 'ledger', dividerStyle: 'solid', paperTone: 'white' },
-  { id: 'solo-studio-freelancer', name: 'Solo Studio', description: 'Warm and approachable — friendly centered header for independent freelancers.', font: 'Helvetica', headerStyle: 'centered', titleAlign: 'center', tableStyle: 'zebra', dividerStyle: 'dotted', paperTone: 'cream' },
-  { id: 'order-confirmation', name: 'Order Confirmation', description: 'E-commerce order-slip style — compact ribbon header, zebra line items.', font: 'Helvetica', headerStyle: 'ribbon', titleAlign: 'left', tableStyle: 'zebra', dividerStyle: 'none', paperTone: 'white', compact: true },
-  { id: 'guest-folio-hospitality', name: 'Guest Folio', description: 'Hospitality guest-folio style — a large centered band and boxed charges table.', font: 'Times-Roman', headerStyle: 'bandLarge', titleAlign: 'center', tableStyle: 'boxed', dividerStyle: 'dotted', paperTone: 'cream' },
-  { id: 'clinic-statement', name: 'Clinic Statement', description: 'Medical/clinic statement — a calm split header and bordered charges table.', font: 'Helvetica', headerStyle: 'split', titleAlign: 'left', tableStyle: 'bordered', dividerStyle: 'solid', paperTone: 'graypaper' },
-  { id: 'property-statement', name: 'Property Statement', description: 'Real estate statement — boxed panels and a double rule for a formal finish.', font: 'Times-Roman', headerStyle: 'boxed', titleAlign: 'right', tableStyle: 'bordered', dividerStyle: 'double', paperTone: 'cream' },
-  { id: 'shipment-manifest', name: 'Shipment Manifest', description: 'Import-export/logistics manifest — a docket header and ruled ledger table.', font: 'Courier', headerStyle: 'stub', titleAlign: 'left', tableStyle: 'ledger', dividerStyle: 'solid', paperTone: 'graypaper', compact: true },
-  { id: 'boutique-label', name: 'Boutique Label', description: 'Boutique retail-brand feel — an angled accent block on warm cream paper.', font: 'Times-Roman', headerStyle: 'diagonal', titleAlign: 'left', tableStyle: 'boxed', dividerStyle: 'dotted', paperTone: 'cream' }
+  { id: 'modern-minimal', name: 'Modern Minimal', description: 'Quiet, whitespace-led — no color band, a small understated title, generous margins.', font: 'Helvetica', headerStyle: 'minimalPlain', titleAlign: 'right', tableStyle: 'minimal', dividerStyle: 'solid', paperTone: 'white' },
+  { id: 'corporate-formal', name: 'Corporate Formal', description: 'Institutional and accounting-firm formal — a framed letterhead, tracked caps, a bordered ledger table.', font: 'Times-Roman', headerStyle: 'formalFramed', titleAlign: 'right', tableStyle: 'bordered', dividerStyle: 'double', paperTone: 'white' },
+  { id: 'creative-studio', name: 'Creative Studio', description: 'Agency-bold — a large angled color block, oversized type and accent-tinted rows.', font: 'Helvetica-Bold', headerStyle: 'diagonalBold', titleAlign: 'right', tableStyle: 'zebra', dividerStyle: 'none', paperTone: 'white', accentTint: true },
+  { id: 'freelancer-compact', name: 'Freelancer Compact', description: 'Dense and unfussy — a single-line header and tight rows, built for many line items on one page.', font: 'Helvetica', headerStyle: 'splitCompact', titleAlign: 'left', tableStyle: 'minimal', dividerStyle: 'dotted', paperTone: 'white', compact: true },
+  { id: 'gst-ledger-register', name: 'GST Ledger Register', description: 'Indian statutory register style — a full ruled letterhead, "Original for Recipient" tag and a fully gridded ledger table.', font: 'Times-Roman', headerStyle: 'letterheadLedger', titleAlign: 'center', tableStyle: 'ledger', dividerStyle: 'double', paperTone: 'white', pageFrame: true, copyLabel: true },
+  { id: 'pos-receipt', name: 'POS Receipt', description: 'Reads like a printed till receipt — monospace, centered, narrow, tear-line dividers.', font: 'Courier', headerStyle: 'receiptCentered', titleAlign: 'center', tableStyle: 'minimal', dividerStyle: 'perforated', paperTone: 'white', narrow: true, compact: true },
+  { id: 'saas-product', name: 'SaaS Product', description: 'Digital-billing style — a corner ribbon and a compact info-card for invoice metadata.', font: 'Helvetica', headerStyle: 'ribbonCard', titleAlign: 'right', tableStyle: 'minimal', dividerStyle: 'solid', paperTone: 'white', infoCard: true },
+  { id: 'boutique-warm', name: 'Boutique Warm', description: 'Warm and boutique — a soft rounded frame, italic accents, cream paper.', font: 'Times-Roman', headerStyle: 'framedCentered', titleAlign: 'center', tableStyle: 'boxed', dividerStyle: 'dotted', paperTone: 'cream', pageFrame: true }
 ];
 
+// Old (pre-redesign) ids/headerStyles mapped to their nearest new archetype,
+// so tenants who saved one of the 25 retired templates keep rendering a
+// coherent look instead of silently falling back to index 0. Mirrors
+// backend/src/services/invoiceTemplates.js's LEGACY_ID_MAP/LEGACY_HEADER_MAP.
+const LEGACY_ID_MAP: Record<string, string> = {
+  'classic-corporate': 'corporate-formal',
+  'bold-header': 'creative-studio',
+  'elegant-serif': 'boutique-warm',
+  'two-column-compact': 'freelancer-compact',
+  'tech-startup': 'saas-product',
+  'gradient-accent': 'creative-studio',
+  'professional-blue': 'corporate-formal',
+  'creative-bold': 'creative-studio',
+  'simple-receipt': 'pos-receipt',
+  'minimal-whitespace': 'modern-minimal',
+  'statutory-classic': 'gst-ledger-register',
+  'studio-block': 'creative-studio',
+  'till-receipt': 'pos-receipt',
+  'advisory-brief': 'freelancer-compact',
+  'gst-formal-register': 'gst-ledger-register',
+  'product-invoice-tech': 'saas-product',
+  'site-work-order': 'gst-ledger-register',
+  'solo-studio-freelancer': 'boutique-warm',
+  'order-confirmation': 'saas-product',
+  'guest-folio-hospitality': 'boutique-warm',
+  'clinic-statement': 'corporate-formal',
+  'property-statement': 'corporate-formal',
+  'shipment-manifest': 'gst-ledger-register',
+  'boutique-label': 'boutique-warm'
+};
+
+const LEGACY_HEADER_MAP: Record<string, HeaderStyle> = {
+  band: 'formalFramed', bandLarge: 'diagonalBold', plain: 'minimalPlain',
+  split: 'splitCompact', sidebar: 'splitCompact', gradient: 'diagonalBold',
+  boxed: 'formalFramed', diagonal: 'diagonalBold', ribbon: 'ribbonCard',
+  letterhead: 'letterheadLedger', stub: 'ribbonCard'
+};
+
+const NEW_HEADER_STYLES = new Set<string>(['minimalPlain', 'formalFramed', 'diagonalBold', 'splitCompact', 'letterheadLedger', 'receiptCentered', 'ribbonCard', 'framedCentered']);
+
+/** Migrates a possibly-old headerStyle value (saved on a tenant's custom template) to one of the 8 current values. */
+function migrateHeaderStyle(headerStyle: string, narrow: boolean): HeaderStyle {
+  if (headerStyle === 'centered') return narrow ? 'receiptCentered' : 'framedCentered';
+  return LEGACY_HEADER_MAP[headerStyle] || 'minimalPlain';
+}
+
 export function getInvoiceTemplate(id: string | undefined): InvoiceTemplate {
-  return INVOICE_TEMPLATES.find(t => t.id === id) || INVOICE_TEMPLATES[0];
+  const mapped = (id && LEGACY_ID_MAP[id]) || id;
+  return INVOICE_TEMPLATES.find(t => t.id === mapped) || INVOICE_TEMPLATES[0];
 }
 
 /** The `id` reserved for a tenant's own from-scratch template (see CustomInvoiceTemplate). */
@@ -84,10 +122,14 @@ export interface CustomInvoiceTemplate {
   paperTone: PaperTone;
   compact: boolean;
   narrow: boolean;
+  accentTint?: boolean;
+  infoCard?: boolean;
+  pageFrame?: boolean;
+  copyLabel?: boolean;
 }
 
 export const DEFAULT_CUSTOM_INVOICE_TEMPLATE: CustomInvoiceTemplate = {
-  font: 'Helvetica', headerStyle: 'plain', titleAlign: 'right',
+  font: 'Helvetica', headerStyle: 'minimalPlain', titleAlign: 'right',
   tableStyle: 'bordered', dividerStyle: 'solid', paperTone: 'white',
   compact: false, narrow: false
 };
@@ -100,18 +142,14 @@ export const FONT_OPTIONS: Array<{ value: string; label: string }> = [
 ];
 
 export const HEADER_STYLE_OPTIONS: Array<{ value: HeaderStyle; label: string }> = [
-  { value: 'plain', label: 'Plain — logo left, title right' },
-  { value: 'band', label: 'Band — colored strip across the top' },
-  { value: 'bandLarge', label: 'Large Band — big centered title' },
-  { value: 'centered', label: 'Centered — everything center-aligned' },
-  { value: 'split', label: 'Split — two even columns' },
-  { value: 'sidebar', label: 'Sidebar — colored vertical bar' },
-  { value: 'gradient', label: 'Gradient — layered two-tone band' },
-  { value: 'boxed', label: 'Boxed — bordered info panels' },
-  { value: 'diagonal', label: 'Diagonal — angled color block' },
-  { value: 'ribbon', label: 'Ribbon — small corner flag' },
-  { value: 'letterhead', label: 'Letterhead — framing rules, ink-on-paper' },
-  { value: 'stub', label: 'Stub — bordered two-box docket' }
+  { value: 'minimalPlain', label: 'Minimal — quiet, no color band' },
+  { value: 'formalFramed', label: 'Formal Framed — bordered letterhead box' },
+  { value: 'diagonalBold', label: 'Diagonal Bold — large angled color block' },
+  { value: 'splitCompact', label: 'Split Compact — single-line dense header' },
+  { value: 'letterheadLedger', label: 'Letterhead Ledger — double-ruled statutory frame' },
+  { value: 'receiptCentered', label: 'Receipt Centered — narrow, centered receipt style' },
+  { value: 'ribbonCard', label: 'Ribbon Card — corner ribbon + info card' },
+  { value: 'framedCentered', label: 'Framed Centered — soft rounded frame' }
 ];
 
 export const TITLE_ALIGN_OPTIONS: Array<{ value: 'left' | 'right' | 'center'; label: string }> = [
@@ -145,7 +183,9 @@ export const PAPER_TONE_OPTIONS: Array<{ value: PaperTone; label: string }> = [
 /** Resolves a template id to its config, substituting the tenant's custom build when selected. */
 export function resolveInvoiceTemplate(templateId: string | undefined, customTemplate: CustomInvoiceTemplate | null | undefined): InvoiceTemplate {
   if (templateId === CUSTOM_TEMPLATE_ID && customTemplate) {
-    return { id: CUSTOM_TEMPLATE_ID, name: 'Custom Template', description: 'Your own template', ...customTemplate };
+    const narrow = !!customTemplate.narrow;
+    const headerStyle = NEW_HEADER_STYLES.has(customTemplate.headerStyle) ? customTemplate.headerStyle : migrateHeaderStyle(customTemplate.headerStyle || 'minimalPlain', narrow);
+    return { id: CUSTOM_TEMPLATE_ID, name: 'Custom Template', description: 'Your own template', ...customTemplate, headerStyle, narrow };
   }
   return getInvoiceTemplate(templateId);
 }

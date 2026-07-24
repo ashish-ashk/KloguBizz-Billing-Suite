@@ -105,10 +105,10 @@ interface TemplateConfig {
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               @for (c of presets; track c) {
-                <button type="button" (click)="config.accentColor = c"
+                <button type="button" (click)="config.accentColor = c" [attr.aria-label]="'Accent color ' + c"
                   [style.background]="c"
                   [style.outline]="config.accentColor === c ? '2px solid var(--text)' : 'none'"
-                  style="width:28px;height:28px;border-radius:7px;border:2px solid var(--card);box-shadow:0 1px 4px rgba(0,0,0,.2);cursor:pointer;"></button>
+                  style="width:36px;height:36px;border-radius:8px;border:2px solid var(--card);box-shadow:0 1px 4px rgba(0,0,0,.2);cursor:pointer;"></button>
               }
             </div>
           </section>

@@ -7,11 +7,13 @@ import { PublicBranding } from '../../core/models';
 import { STATES, isValidEmail } from '../../core/format';
 import { IconComponent } from '../../shared/icons';
 import { AuthPreviewCardComponent } from '../../shared/auth-preview-card.component';
+import { ModalComponent } from '../../shared/ui';
+import { LegalContentComponent } from '../../shared/legal-content.component';
 
 @Component({
   selector: 'app-register',
   standalone: true,
-  imports: [FormsModule, RouterLink, IconComponent, AuthPreviewCardComponent],
+  imports: [FormsModule, RouterLink, IconComponent, AuthPreviewCardComponent, ModalComponent, LegalContentComponent],
   template: `
     <div class="auth-page">
       <section class="auth-panel page-enter">
@@ -74,8 +76,8 @@ import { AuthPreviewCardComponent } from '../../shared/auth-preview-card.compone
             <label class="checkbox" style="align-items:flex-start;flex-wrap:wrap;line-height:1.5;">
               <input type="checkbox" name="acceptTerms" [(ngModel)]="acceptTerms" style="margin-top:2px;">
               <span>
-                I agree to the <a routerLink="/terms" target="_blank" style="color:var(--brand);font-weight:600;">Terms &amp; Conditions</a>
-                and <a routerLink="/sla" target="_blank" style="color:var(--brand);font-weight:600;">Service Level Agreement</a>
+                I agree to the <button type="button" class="link-btn" (click)="legalOpen.set('terms')">Terms &amp; Conditions</button>
+                and <button type="button" class="link-btn" (click)="legalOpen.set('sla')">Service Level Agreement</button>
               </span>
             </label>
             @if (error()) {
@@ -113,6 +115,12 @@ import { AuthPreviewCardComponent } from '../../shared/auth-preview-card.compone
         </div>
       </section>
     </div>
+
+    <app-modal [open]="legalOpen() !== null"
+      [title]="legalOpen() === 'sla' ? 'Service Level Agreement' : 'Terms & Conditions'"
+      [width]="640" (close)="legalOpen.set(null)">
+      @if (legalOpen()) { <app-legal-content [type]="legalOpen()!" /> }
+    </app-modal>
   `
 })
 export class RegisterComponent implements OnInit {
@@ -127,6 +135,7 @@ export class RegisterComponent implements OnInit {
   loading = signal(false);
   showPassword = signal(false);
   branding = signal<PublicBranding | null>(null);
+  legalOpen = signal<'terms' | 'sla' | null>(null);
 
   constructor(private auth: AuthService, private api: ApiService, private router: Router) {}
 

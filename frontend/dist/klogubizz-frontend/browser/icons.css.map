@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "sources": ["angular:styles/component:css;d70acd7a5649e80fd883acbd7b9af05eabd1b697cb69b7189c554a9abb0fb4a3;E:/Application/KloguBizz-Billing-Suite-master/KloguBizz-Billing-Suite/frontend/src/app/shared/icons.ts"],
+  "sources": ["angular:styles/component:css;d70acd7a5649e80fd883acbd7b9af05eabd1b697cb69b7189c554a9abb0fb4a3;C:/Users/Ashish/Desktop/KloguBiz/frontend/src/app/shared/icons.ts"],
   "sourcesContent": [":host { display: inline-flex; line-height: 0; flex-shrink: 0; }"],
   "mappings": ";AAAA;AAAQ,WAAS;AAAa,eAAa;AAAG,eAAa;AAAG;",
   "names": []

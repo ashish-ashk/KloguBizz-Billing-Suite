@@ -28,7 +28,7 @@ const brandingSchema = new mongoose.Schema({
   logoUrl: String,
   primaryColor: { type: String, default: '#4f46e5' },
   invoicePrefix: { type: String, default: 'KLG' },
-  invoiceTemplateId: { type: String, default: 'classic-corporate' },
+  invoiceTemplateId: { type: String, default: 'modern-minimal' },
   customInvoiceTemplate: { type: customInvoiceTemplateSchema, default: null },
   invoiceContent: { type: invoiceContentSchema, default: () => ({}) }
 }, { _id: false });

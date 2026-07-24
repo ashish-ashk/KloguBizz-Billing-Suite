@@ -68,7 +68,7 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
 
       <div class="info-box" style="margin-bottom:20px;display:flex;gap:8px;align-items:flex-start;">
         <app-icon name="template" [size]="14" style="margin-top:1px;flex-shrink:0;" />
-        <span>Pick from 25 authentic layouts, or build your own from scratch below. Add your logo and toggle what appears
+        <span>Pick from 8 real, coordinated invoice designs, or build your own from scratch below. Add your logo and toggle what appears
         on the document. The preview on the right updates instantly — nothing changes for your real invoices until
         you hit <strong>Save Template</strong>.</span>
       </div>
@@ -135,7 +135,7 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
             <div class="card-head">
               <div>
                 <div class="card-title">Choose a Template</div>
-                <div class="card-sub">25 authentic layouts — click to preview instantly</div>
+                <div class="card-sub">8 real, coordinated designs — click to preview instantly</div>
               </div>
               @if (mode() === 'preset') { <span class="pill active">✓ Active</span> }
             </div>
@@ -260,14 +260,14 @@ export class InvoiceTemplatesComponent implements OnInit {
   logoUrl = signal('');
   accentColor = signal('#4f46e5');
   mode = signal<PickerMode>('preset');
-  selectedTemplateId = signal('classic-corporate');
+  selectedTemplateId = signal('modern-minimal');
   customTemplate = signal<CustomInvoiceTemplate>({ ...DEFAULT_CUSTOM_INVOICE_TEMPLATE });
   content = signal<ContentToggles>({ ...DEFAULT_CONTENT });
 
   savedLogoUrl = signal('');
   savedAccentColor = signal('#4f46e5');
   savedMode = signal<PickerMode>('preset');
-  savedTemplateId = signal('classic-corporate');
+  savedTemplateId = signal('modern-minimal');
   savedCustomTemplate = signal<CustomInvoiceTemplate>({ ...DEFAULT_CUSTOM_INVOICE_TEMPLATE });
   savedContent = signal<ContentToggles>({ ...DEFAULT_CONTENT });
 
@@ -295,7 +295,7 @@ export class InvoiceTemplatesComponent implements OnInit {
     const branding = this.auth.organisation()?.brandingConfig || {};
     const logo = branding.logoUrl || '';
     const accent = branding.primaryColor || '#4f46e5';
-    const templateId = branding.invoiceTemplateId || 'classic-corporate';
+    const templateId = branding.invoiceTemplateId || 'modern-minimal';
     const isCustom = templateId === CUSTOM_TEMPLATE_ID;
     const custom = { ...DEFAULT_CUSTOM_INVOICE_TEMPLATE, ...(branding.customInvoiceTemplate || {}) };
     const content = { ...DEFAULT_CONTENT, ...(branding.invoiceContent || {}) };
@@ -303,8 +303,8 @@ export class InvoiceTemplatesComponent implements OnInit {
     this.logoUrl.set(logo); this.savedLogoUrl.set(logo);
     this.accentColor.set(accent); this.savedAccentColor.set(accent);
     this.mode.set(isCustom ? 'custom' : 'preset'); this.savedMode.set(isCustom ? 'custom' : 'preset');
-    this.selectedTemplateId.set(isCustom ? 'classic-corporate' : templateId);
-    this.savedTemplateId.set(isCustom ? 'classic-corporate' : templateId);
+    this.selectedTemplateId.set(isCustom ? 'modern-minimal' : templateId);
+    this.savedTemplateId.set(isCustom ? 'modern-minimal' : templateId);
     this.customTemplate.set(custom); this.savedCustomTemplate.set(custom);
     this.content.set(content); this.savedContent.set(content);
   }

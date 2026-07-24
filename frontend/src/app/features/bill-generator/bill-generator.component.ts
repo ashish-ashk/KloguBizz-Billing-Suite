@@ -27,6 +27,36 @@ interface BillRow {
   selector: 'app-bill-generator',
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, IconComponent, SkeletonRowsComponent, ItemPickerComponent],
+  styles: [`
+    .bg-item-head, .bg-item-row { display: grid; grid-template-columns: 2.2fr .8fr .7fr .55fr .85fr .7fr .95fr 30px; gap: 8px; }
+    .bg-item-head { margin-bottom: 6px; }
+    .bg-item-row { margin-bottom: 8px; align-items: center; }
+
+    /* Same per-row card treatment as invoice-editor's line-items table — an
+       editable grid, not a display-only list, so each row becomes its own
+       card with full-width fields rather than a horizontally-scrolling grid. */
+    @media (max-width: 640px) {
+      .bg-items-wrap { overflow-x: visible; }
+      .bg-items-grid { min-width: 0 !important; }
+      .bg-item-head { display: none; }
+      .bg-item-row {
+        display: block; border: 1px solid var(--border); border-radius: 10px;
+        padding: 12px; margin-bottom: 12px;
+      }
+      .bg-item-row > div { margin-bottom: 8px; }
+      .bg-item-row > div:last-child { margin-bottom: 0; }
+      .bg-item-row > div[data-label]:not([data-label=""])::before {
+        content: attr(data-label); display: block; font-size: 10.5px; color: var(--muted);
+        font-weight: 600; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px;
+      }
+      .bg-item-row > div[data-label="Taxable"] {
+        display: flex; justify-content: space-between; align-items: baseline;
+        border-top: 1px dashed var(--border); padding-top: 10px; font-size: 15px;
+      }
+      .bg-item-row > div[data-label="Taxable"]::before { margin-bottom: 0; }
+      .bg-item-row > div[data-label=""] { text-align: right; }
+    }
+  `],
   template: `
     <app-shell [title]="isEdit() ? 'Edit Bill' : 'Bill Generator'"
       [subtitle]="isEdit() ? 'Update this bill’s items, buyer and totals' : 'Create GST-compliant bills for B2B and B2C'">
@@ -164,29 +194,35 @@ interface BillRow {
               <div class="card-title">Items</div>
               <button class="btn secondary sm" type="button" (click)="addRow()">+ Add row</button>
             </div>
-            <div style="padding:14px 16px;overflow-x:auto">
-              <div style="min-width:760px">
-                <div style="display:grid;grid-template-columns:2.2fr .8fr .7fr .55fr .85fr .7fr .95fr 30px;gap:8px;margin-bottom:6px">
+            <div class="bg-items-wrap" style="padding:14px 16px;overflow-x:auto">
+              <div class="bg-items-grid" style="min-width:760px">
+                <div class="bg-item-head">
                   @for (h of itemHeads; track $index) {
                     <span style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--faint)">{{ h }}</span>
                   }
                 </div>
                 @for (r of rows; track $index; let i = $index) {
-                  <div style="display:grid;grid-template-columns:2.2fr .8fr .7fr .55fr .85fr .7fr .95fr 30px;gap:8px;margin-bottom:8px;align-items:center">
-                    <app-item-picker [items]="catalogItems()" [(value)]="r.desc" (picked)="applyItem(i, $event)" placeholder="Item or service description" />
-                    <input class="input" [(ngModel)]="r.hsn" placeholder="HSN">
-                    <select class="input" [(ngModel)]="r.unit">
-                      @for (u of units; track u) { <option [value]="u">{{ u }}</option> }
-                    </select>
-                    <input class="input" type="number" min="1" [(ngModel)]="r.qty">
-                    <input class="input" type="number" min="0" step="0.01" [(ngModel)]="r.rate">
-                    <select class="input" [(ngModel)]="r.gstRate">
-                      @for (g of gstRates; track g) { <option [ngValue]="g">{{ g }}%</option> }
-                    </select>
-                    <div style="font-size:12.5px;font-weight:600;text-align:right">{{ fmtINR(rowTaxable(r)) }}</div>
-                    @if (rows.length > 1) {
-                      <button class="btn ghost sm" type="button" style="padding:4px 8px" (click)="removeRow(i)" aria-label="Remove row">✕</button>
-                    } @else { <span></span> }
+                  <div class="bg-item-row">
+                    <div data-label="Description"><app-item-picker [items]="catalogItems()" [(value)]="r.desc" (picked)="applyItem(i, $event)" placeholder="Item or service description" /></div>
+                    <div data-label="HSN"><input class="input" [(ngModel)]="r.hsn" placeholder="HSN"></div>
+                    <div data-label="Unit">
+                      <select class="input" [(ngModel)]="r.unit">
+                        @for (u of units; track u) { <option [value]="u">{{ u }}</option> }
+                      </select>
+                    </div>
+                    <div data-label="Qty"><input class="input" type="number" min="1" [(ngModel)]="r.qty"></div>
+                    <div data-label="Rate (₹)"><input class="input" type="number" min="0" step="0.01" [(ngModel)]="r.rate"></div>
+                    <div data-label="GST %">
+                      <select class="input" [(ngModel)]="r.gstRate">
+                        @for (g of gstRates; track g) { <option [ngValue]="g">{{ g }}%</option> }
+                      </select>
+                    </div>
+                    <div data-label="Taxable" style="font-size:12.5px;font-weight:600;text-align:right">{{ fmtINR(rowTaxable(r)) }}</div>
+                    <div data-label="">
+                      @if (rows.length > 1) {
+                        <button class="btn ghost sm" type="button" style="padding:4px 8px" (click)="removeRow(i)" aria-label="Remove row">✕</button>
+                      }
+                    </div>
                   </div>
                 }
               </div>

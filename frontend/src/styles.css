@@ -87,6 +87,7 @@ h1, h2, h3 { font-family: var(--font-display); }
 @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
 @keyframes popIn { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: scale(1); } }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 
 .page-enter { animation: fadeInUp 0.3s var(--ease); }
 .pulse { animation: pulse 2s infinite; }
@@ -680,7 +681,11 @@ textarea { resize: vertical; font-family: inherit; }
 .modal-panel {
   background: var(--card);
   border-radius: 18px;
-  width: 460px;
+  /* Bound as a custom property (not `width` directly) by ModalComponent's
+     inline style — an inline `width` always beats an external stylesheet
+     rule regardless of media query, which was silently defeating the
+     mobile full-width/bottom-sheet override below. */
+  width: var(--modal-w, 460px);
   max-width: 95vw;
   max-height: 90vh;
   /* This element owns the rounded corners but never scrolls itself — overflow:
@@ -1011,9 +1016,16 @@ textarea { resize: vertical; font-family: inherit; }
 .auth-field { position: relative; }
 .auth-field input { padding-left: 36px; }
 .auth-field .field-icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
-/* Padding + negative margin grows the tap target well past the visible icon
-   without shifting the icon's position inside the input. */
-.auth-field .link-btn { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); padding: 12px; margin: -12px -12px -12px 0; }
+/* Fixed square box, flex-centered, with native button chrome stripped —
+   `appearance:none` matters here because without it mobile browsers'
+   default button rendering doesn't respect zeroed padding evenly, which
+   was throwing the icon off-center only on phones. */
+.auth-field .link-btn {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 32px; height: 32px; padding: 0; margin: 0;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-appearance: none; appearance: none; line-height: 1;
+}
 
 /* ── Legal pages (Terms/SLA) ─────────────────── */
 .legal-shell { padding: 40px 20px; }
@@ -1024,34 +1036,46 @@ textarea { resize: vertical; font-family: inherit; }
 }
 
 /* ── Print (invoice document) ────────────────── */
+/* .invoice-doc-wrap gives each usage site (full print page vs. squeezed
+   template-picker sticky column) its own measurable inline-size, which the
+   `--doc-fit` calc below reads via `cqw` to shrink-to-fit — the document
+   itself is always sized/laid out as a true A4 page (210mm wide, 18mm/30mm
+   margins matching pdfkit's 50pt/85pt backend margins almost exactly), just
+   visually zoomed down when its wrapper is narrower than that, so the
+   preview is a proportioned thumbnail of the real page rather than a
+   differently-shaped fluid layout. */
+.invoice-doc-wrap { container-type: inline-size; container-name: invoice-doc; }
 .invoice-doc {
   background: #fff;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 44px 48px;
-  max-width: 860px;
+  width: 210mm;
+  max-width: 100%;
   margin: 0 auto;
+  padding: 18mm;
   box-shadow: 0 4px 24px rgba(79, 70, 229, 0.1);
   font-size: 13px;
+  /* 793.7px == 210mm at the CSS-standard 96dpi reference; never scales
+     above 1 (never blown up past true A4 size on a wide desktop screen). */
+  --doc-fit: min(1, 100cqw / 793.7px);
+  zoom: var(--doc-fit);
 }
-/* .invoice-doc-wrap establishes a size-containment context so the document
-   inside (InvoiceDocumentComponent) can reflow via @container queries based
-   on its own rendered width — not the viewport's — since it's shown both
-   full-width (print/view page) and squeezed into a narrow sticky-preview
-   column (template picker) even on a wide desktop screen. */
-.invoice-doc-wrap { container-type: inline-size; container-name: invoice-doc; }
+/* Templates whose pdfkit counterpart uses the wider 85pt margin (receipts,
+   compact/narrow layouts) get the matching 30mm-equivalent pad here. */
+.invoice-doc.doc-narrow { padding: 30mm; }
+
+@page { size: A4; margin: 0; }
 @media print {
   .no-print { display: none !important; }
-  body { background: #fff; }
+  body { background: #fff; margin: 0; }
   .main { margin-left: 0 !important; width: 100% !important; }
   .sidebar, .menu-toggle, .toast-region { display: none !important; }
   .page { padding: 0; }
-  .invoice-doc { border: 0; border-radius: 0; box-shadow: none; max-width: none; padding: 24px 8px; }
-  /* Print must always render the full desktop layout, regardless of the
-     physical page width — sever the container-query context so none of
-     InvoiceDocumentComponent's @container (max-width:640px) mobile rules
-     can match. */
-  .invoice-doc-wrap { container-type: normal !important; }
+  .invoice-doc {
+    zoom: 1 !important; /* always true, un-scaled A4 size when actually printing */
+    border: 0; border-radius: 0; box-shadow: none; max-width: none;
+  }
+  .inv-items-table tr { break-inside: avoid; }
 }
 
 /* ── Responsive ──────────────────────────────── */
@@ -1122,7 +1146,15 @@ textarea { resize: vertical; font-family: inherit; }
   .page-actions, .toolbar, .tabs { flex-wrap: wrap; }
   .toolbar .search-box, .toolbar .search-box input { width: 100%; }
   .grid-2, .grid-3, .grid-4, .grid-5 { grid-template-columns: 1fr; }
-  .modal-panel { width: 100%; max-height: 88vh; }
+  /* Bottom-sheet on phones instead of a shrunk centered dialog — anchor to
+     the bottom edge with only the top corners rounded and a slide-up
+     entrance, the native-app pattern rather than a shrunk web dialog. */
+  .modal-overlay { align-items: flex-end; padding: 0; animation: none; }
+  .modal-panel {
+    width: 100%; max-width: 100%; max-height: 88vh;
+    border-radius: 20px 20px 0 0;
+    animation: sheetUp 0.22s var(--ease-spring);
+  }
   .modal-scroll { --modal-pad-y: 16px; --modal-pad-x: 16px; }
 
   /* Opt-in: plain data-display tables (not editable grids like the invoice

@@ -46,7 +46,7 @@ export function popScrollLock() {
   template: `
     @if (open) {
       <div class="modal-overlay no-print" (click)="close.emit()">
-        <div class="modal-panel" [style.width.px]="width" (click)="$event.stopPropagation()">
+        <div class="modal-panel" [style.--modal-w]="width + 'px'" (click)="$event.stopPropagation()">
           <div class="modal-scroll">
             <div class="modal-head">
               <div class="modal-title">{{ title }}</div>

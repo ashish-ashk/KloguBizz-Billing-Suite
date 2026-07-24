@@ -14,6 +14,23 @@ type MasterTab = 'gstRate' | 'hsn' | 'paymentMethod' | 'unit' | 'states';
   selector: 'app-super-masters',
   standalone: true,
   imports: [CommonModule, FormsModule, EmptyStateComponent, SkeletonRowsComponent, IconComponent],
+  styles: [`
+    /* An editable grid (inputs/selects per cell), not a display-only list —
+       same per-row card treatment as invoice-editor's line-items table
+       rather than the app-wide .stack-mobile convention. */
+    @media (max-width: 640px) {
+      .hsn-table thead { display: none; }
+      .hsn-table, .hsn-table tbody, .hsn-table tr, .hsn-table td { display: block; width: 100%; }
+      .hsn-table tr { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; padding: 12px; }
+      .hsn-table tr:last-child { margin-bottom: 0; }
+      .hsn-table td { padding: 6px 0; border: none; }
+      .hsn-table td[data-label]:not([data-label=""])::before {
+        content: attr(data-label); display: block; font-size: 10.5px; color: var(--muted);
+        font-weight: 600; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px;
+      }
+      .hsn-table td[data-label=""] { text-align: right; padding-top: 4px; }
+    }
+  `],
   template: `
     <div class="page-head">
       <div>
@@ -60,31 +77,31 @@ type MasterTab = 'gstRate' | 'hsn' | 'paymentMethod' | 'unit' | 'states';
               <button class="btn primary sm" type="button" [disabled]="saving()" (click)="save('hsn', hsnCodes)">Save Changes</button>
             </div>
             <div class="table-wrap">
-              <table class="table">
+              <table class="table hsn-table">
                 <thead><tr><th>Code</th><th>Description</th><th>GST Rate</th><th>Active</th><th></th></tr></thead>
                 <tbody>
                   @for (h of hsnCodes; track $index; let i = $index) {
                     <tr>
-                      <td><input class="input mono" style="width:110px;" [(ngModel)]="h.code" /></td>
-                      <td><input class="input" [(ngModel)]="h.description" /></td>
-                      <td>
+                      <td data-label="Code"><input class="input mono" style="width:110px;" [(ngModel)]="h.code" /></td>
+                      <td data-label="Description"><input class="input" [(ngModel)]="h.description" /></td>
+                      <td data-label="GST Rate">
                         <select class="input" style="width:90px;" [(ngModel)]="h.rate">
                           @for (r of gstRates; track r.rate) { <option [ngValue]="r.rate">{{ r.rate }}%</option> }
                         </select>
                       </td>
-                      <td><label class="switch"><input type="checkbox" [(ngModel)]="h.active" /><span class="track"></span></label></td>
-                      <td class="actions"><button class="btn danger sm" type="button" (click)="hsnCodes.splice(i, 1)">✕</button></td>
+                      <td data-label="Active"><label class="switch"><input type="checkbox" [(ngModel)]="h.active" /><span class="track"></span></label></td>
+                      <td data-label="" class="actions"><button class="btn danger sm" type="button" (click)="hsnCodes.splice(i, 1)">✕</button></td>
                     </tr>
                   }
                   <tr style="background:var(--brand-pale);">
-                    <td><input class="input mono" style="width:110px;" [(ngModel)]="newHsn.code" placeholder="9983xx" /></td>
-                    <td><input class="input" [(ngModel)]="newHsn.description" placeholder="Description" /></td>
-                    <td>
+                    <td data-label="Code"><input class="input mono" style="width:110px;" [(ngModel)]="newHsn.code" placeholder="9983xx" /></td>
+                    <td data-label="Description"><input class="input" [(ngModel)]="newHsn.description" placeholder="Description" /></td>
+                    <td data-label="GST Rate">
                       <select class="input" style="width:90px;" [(ngModel)]="newHsn.rate">
                         @for (r of gstRates; track r.rate) { <option [ngValue]="r.rate">{{ r.rate }}%</option> }
                       </select>
                     </td>
-                    <td colspan="2"><button class="btn secondary sm" type="button" (click)="addHsn()">+ Add</button></td>
+                    <td data-label="" colspan="2"><button class="btn secondary sm" type="button" (click)="addHsn()">+ Add</button></td>
                   </tr>
                 </tbody>
               </table>

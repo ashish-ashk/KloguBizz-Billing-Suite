@@ -6,12 +6,13 @@ import { ApiService } from '../../core/api.service';
 import { PublicBranding } from '../../core/models';
 import { IconComponent } from '../../shared/icons';
 import { AuthPreviewCardComponent } from '../../shared/auth-preview-card.component';
-import { ToastsComponent } from '../../shared/ui';
+import { ToastsComponent, ModalComponent } from '../../shared/ui';
+import { LegalContentComponent } from '../../shared/legal-content.component';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [FormsModule, RouterLink, IconComponent, AuthPreviewCardComponent, ToastsComponent],
+  imports: [FormsModule, RouterLink, IconComponent, AuthPreviewCardComponent, ToastsComponent, ModalComponent, LegalContentComponent],
   template: `
     <app-toasts />
     <div class="auth-page">
@@ -72,6 +73,13 @@ import { ToastsComponent } from '../../shared/ui';
             New to {{ branding()?.appName || 'Klogu Bizz' }}? <a routerLink="/register" style="color:var(--brand);font-weight:600;">Create an account</a>
           </p>
 
+          <p style="margin-top:10px;color:var(--faint,var(--muted));font-size:11.5px;text-align:center;">
+            By signing in, you agree to our
+            <button type="button" class="link-btn" style="font-size:11.5px;" (click)="legalOpen.set('terms')">Terms &amp; Conditions</button>
+            and
+            <button type="button" class="link-btn" style="font-size:11.5px;" (click)="legalOpen.set('sla')">SLA</button>.
+          </p>
+
           <button type="button" class="btn ghost block sm" style="margin-top:14px;" (click)="showDemo.set(!showDemo())">
             <app-icon name="lock" [size]="14" />
             {{ showDemo() ? 'Hide demo credentials' : 'View demo credentials' }}
@@ -107,6 +115,12 @@ import { ToastsComponent } from '../../shared/ui';
         </div>
       </section>
     </div>
+
+    <app-modal [open]="legalOpen() !== null"
+      [title]="legalOpen() === 'sla' ? 'Service Level Agreement' : 'Terms & Conditions'"
+      [width]="640" (close)="legalOpen.set(null)">
+      @if (legalOpen()) { <app-legal-content [type]="legalOpen()!" /> }
+    </app-modal>
   `
 })
 export class LoginComponent implements OnInit {
@@ -118,6 +132,7 @@ export class LoginComponent implements OnInit {
   showDemo = signal(false);
   justRegistered = signal(false);
   branding = signal<PublicBranding | null>(null);
+  legalOpen = signal<'terms' | 'sla' | null>(null);
 
   constructor(private auth: AuthService, private api: ApiService, private router: Router, private route: ActivatedRoute) {}
 
