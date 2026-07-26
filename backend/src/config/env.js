@@ -9,7 +9,7 @@ const DEV_DEFAULTS = {
   JWT_SECRET: 'local_dev_access_secret_change_me_now',
   JWT_REFRESH_SECRET: 'local_dev_refresh_secret_change_me_now',
   RAZORPAY_WEBHOOK_SECRET: 'local_webhook_secret',
-  SUPER_ADMIN_PASSWORD: 'SuperAdmin@1234'
+  SUPER_ADMIN_PASSWORD: 'SuperAdmin@123'
 };
 
 // FRONTEND_URL accepts a comma-separated list so the app can be reached from
@@ -60,8 +60,15 @@ function assertSecureConfig({ exitOnError = true } = {}) {
     if (env.JWT_REFRESH_SECRET === DEV_DEFAULTS.JWT_REFRESH_SECRET) {
       warnings.push('JWT_REFRESH_SECRET is the dev default. Set it before enabling refresh tokens.');
     }
+    // A warning, not an error: the running server never reads this value.
+    // It is used solely by the seed script when it creates the superadmin
+    // account, after which the real credential is the bcrypt hash in Mongo and
+    // can be rotated in-app. Failing the boot on it therefore blocks deploys it
+    // cannot protect — including a deployment whose superadmin password was
+    // changed long ago. assertSeedConfig() below is where it does hard-fail,
+    // because that is the only place the value is actually used.
     if (env.SUPER_ADMIN_PASSWORD === DEV_DEFAULTS.SUPER_ADMIN_PASSWORD) {
-      errors.push('SUPER_ADMIN_PASSWORD is still the documented default. Change it before deploying.');
+      warnings.push('SUPER_ADMIN_PASSWORD is the documented default. It is only used by `npm run seed`, which will refuse to run with it — but set it before seeding.');
     }
     if (!process.env.MONGO_URI) {
       errors.push('MONGO_URI is not set — the server would try a local database that does not exist in production.');
@@ -94,4 +101,39 @@ function assertSecureConfig({ exitOnError = true } = {}) {
   return { errors, warnings };
 }
 
-module.exports = { env, assertSecureConfig, DEV_DEFAULTS };
+/**
+ * Guards the seed script, which is the only thing that reads
+ * SUPER_ADMIN_PASSWORD — and which is destructive.
+ *
+ * Two separate risks, both fatal:
+ *
+ *  1. Seeding with the documented default password creates a platform-owner
+ *     account whose credentials are published in this repository. Unlike the
+ *     boot-time checks this is worth refusing outright, because this is the
+ *     moment the weak credential is actually written.
+ *
+ *  2. The seed wipes every collection before inserting sample data. Run against
+ *     a production database it destroys every tenant's invoices, payments and
+ *     clients, irreversibly. Requiring an explicit opt-in means that cannot
+ *     happen by reflex, a mistyped command, or a stray deploy hook.
+ */
+function assertSeedConfig({ exitOnError = true } = {}) {
+  const errors = [];
+
+  if (env.SUPER_ADMIN_PASSWORD === DEV_DEFAULTS.SUPER_ADMIN_PASSWORD && env.isProduction) {
+    errors.push('SUPER_ADMIN_PASSWORD is still the documented default. Set a unique value before seeding, or the platform owner account ships with a publicly known password.');
+  }
+  if (env.isProduction && process.env.ALLOW_DESTRUCTIVE_SEED !== 'true') {
+    errors.push('Seeding deletes every organisation, invoice, payment and client in the database. Refusing to run against a production database. Set ALLOW_DESTRUCTIVE_SEED=true only if you genuinely intend to erase it.');
+  }
+
+  if (errors.length) {
+    console.error('\n[seed] Refusing to seed:');
+    errors.forEach(message => console.error(`  - ${message}`));
+    console.error('');
+    if (exitOnError) process.exit(1);
+  }
+  return { errors };
+}
+
+module.exports = { env, assertSecureConfig, assertSeedConfig, DEV_DEFAULTS };

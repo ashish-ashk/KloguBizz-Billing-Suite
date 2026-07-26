@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const { connectDatabase } = require('../config/database');
-const { env } = require('../config/env');
+const { env, assertSeedConfig } = require('../config/env');
 const { Organisation } = require('../models/Organisation');
 const { User } = require('../models/User');
 const { Client } = require('../models/Client');
@@ -56,6 +56,10 @@ const settings = [
 const bank = { bank: 'HDFC Bank', account: '50100123456789', ifsc: 'HDFC0001234' };
 
 async function seed() {
+  // Refuses to run with the default superadmin password, and refuses to touch a
+  // production database at all without an explicit opt-in — the deleteMany
+  // sweep below would erase every tenant's real data.
+  assertSeedConfig();
   await connectDatabase();
   await Promise.all([
     Organisation.deleteMany({}),
@@ -241,8 +245,15 @@ async function seed() {
   await Subscription.create({ orgId: org._id, planCode: 'business', status: 'active', billingCycle: 'monthly' });
 
   console.log('Seed complete');
-  console.log(`Super Admin: ${env.SUPER_ADMIN_EMAIL} / ${env.SUPER_ADMIN_PASSWORD}`);
-  console.log('Tenant Admin: admin@techsoft.local / Admin@123');
+  // Credentials are echoed for local convenience only. In production this would
+  // put a live platform-owner password into the hosting provider's log stream,
+  // where it is retained and readable by anyone with dashboard access.
+  if (env.isProduction) {
+    console.log(`Super Admin: ${env.SUPER_ADMIN_EMAIL} / (password as configured in SUPER_ADMIN_PASSWORD)`);
+  } else {
+    console.log(`Super Admin: ${env.SUPER_ADMIN_EMAIL} / ${env.SUPER_ADMIN_PASSWORD}`);
+    console.log('Tenant Admin: admin@techsoft.local / Admin@123');
+  }
   process.exit(0);
 }
 
