@@ -77,14 +77,12 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
             [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'" [title]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'">
             <app-icon name="menu" [size]="17" />
           </button>
+          <!-- The logo lives in the sidebar only. It used to be repeated here as
+               well, which showed the same mark twice on desktop. The topbar-left
+               wrapper stays, because it is grid column 1 of the mobile topbar
+               (see .topbar in styles.css) — the search column's centring depends
+               on it existing. -->
           <div class="topbar-left">
-            <div class="topbar-brand" title="{{ auth.organisation()?.name }}">
-              @if (auth.organisation()?.brandingConfig?.logoUrl) {
-                <img [src]="auth.organisation()?.brandingConfig?.logoUrl" alt="Logo" class="brand-logo-img" />
-              } @else {
-                <img src="klogu-logo.png" alt="Klogu Bizz" class="brand-logo-img" />
-              }
-            </div>
             <div class="topbar-crumb">
               <span class="crumb-org">{{ auth.organisation()?.name || 'Workspace' }}</span>
               <app-icon name="chevronRight" [size]="12" class="crumb-sep" />

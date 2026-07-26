@@ -404,12 +404,8 @@ textarea { resize: vertical; font-family: inherit; }
   border-bottom: 1px solid var(--border);
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
-/* Tenant-customisable brand mark (Invoice Templates > Company Logo) shown in
-   the persistent topbar — unlike the sidebar's own logo, this stays visible
-   even when the mobile drawer is closed/collapsed, and for every user in the
-   org (it's read from the shared `organisation` record, not per-user state). */
-.topbar-brand { display: flex; align-items: center; flex-shrink: 0; }
-.topbar-brand .brand-mark, .topbar-brand .brand-logo-img { width: 30px; height: 30px; font-size: 12px; }
+/* The topbar carries no brand mark: the logo belongs to the sidebar, and
+   showing it in both places duplicated it on every screen. */
 .topbar-crumb { display: flex; align-items: center; gap: 6px; font-size: 12.5px; min-width: 0; flex-shrink: 1; }
 .crumb-org { color: var(--muted); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
 .crumb-sep { color: var(--faint); flex-shrink: 0; }
