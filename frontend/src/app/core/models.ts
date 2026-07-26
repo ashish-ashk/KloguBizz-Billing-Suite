@@ -28,6 +28,8 @@ export interface Organisation {
     /** Round the payable total to a whole rupee (the Indian billing
      *  convention). Defaults to true when unset. */
     roundOffTotal?: boolean;
+    /** Credit notes use their own consecutive series, as GST requires. */
+    creditNotePrefix?: string;
     invoiceTemplateId?: string;
     customInvoiceTemplate?: import('./invoice-templates').CustomInvoiceTemplate | null;
     invoiceContent?: {
@@ -165,6 +167,46 @@ export interface BillTo {
   gstin?: string;
 }
 
+/** Reasons recognised by GSTR-1's CDNR table. */
+export type CreditNoteReason =
+  | 'sales-return' | 'post-sale-discount' | 'correction'
+  | 'deficiency-in-service' | 'order-cancelled' | 'other';
+
+/**
+ * A credit note against an issued invoice.
+ *
+ * Under GST an issued invoice is never deleted or silently rewritten — a
+ * reduction is made by issuing one of these, which references the original and
+ * appears separately in the return.
+ */
+export interface CreditNote {
+  _id: string;
+  creditNoteNumber: string;
+  invoiceId: string;
+  /** Snapshotted at issue time so the note reads completely on its own. */
+  invoiceNumber: string;
+  invoiceDate?: string;
+  clientId: Client | string | null;
+  billTo?: BillTo | null;
+  date: string;
+  reason: CreditNoteReason;
+  reasonNote?: string;
+  items: InvoiceItem[];
+  discountPercent?: number;
+  totals: InvoiceTotals;
+  status: 'draft' | 'issued';
+  notes?: string;
+}
+
+/** How much of an invoice can still be credited. */
+export interface CreditSummary {
+  invoiceNumber: string;
+  invoiceTotal: number;
+  credited: number;
+  creditable: number;
+  creditNotes: CreditNote[];
+}
+
 export interface Invoice {
   _id: string;
   invoiceNumber: string;
@@ -174,13 +216,19 @@ export interface Invoice {
   date: string;
   dueDate: string;
   paidDate?: string | null;
-  status: 'draft' | 'pending' | 'partial' | 'paid' | 'overdue';
+  /** 'cancelled' = fully reversed by credit note, or voided before collection.
+   *  The document is retained either way. */
+  status: 'draft' | 'pending' | 'partial' | 'paid' | 'overdue' | 'cancelled';
+  cancelledAt?: string;
+  cancelReason?: string;
   items: InvoiceItem[];
   /** Invoice-level discount, on top of any per-line discounts. */
   discountPercent?: number;
   totals: InvoiceTotals;
   /** Settlement state, persisted by the backend from successful payments. */
   amountPaid?: number;
+  /** Total of issued credit notes — reduces what is owed like a payment does. */
+  amountCredited?: number;
   balanceDue?: number;
   notes?: string;
   paymentTerms?: string;
@@ -278,15 +326,6 @@ export interface Reminder {
   template?: string;
 }
 
-export interface InvoiceTemplate {
-  _id: string;
-  name: string;
-  layout: string;
-  accentColor: string;
-  enabled: boolean;
-  isDefault?: boolean;
-}
-
 export interface Master {
   _id?: string;
   type: 'gstRate' | 'hsn' | 'paymentMethod' | 'unit';
@@ -300,7 +339,6 @@ export interface Master {
 
 export interface MastersResponse {
   reminders: Reminder[];
-  templates: InvoiceTemplate[];
   masters: { gstRate: Master[]; hsn: Master[]; paymentMethod: Master[]; unit: Master[] };
 }
 

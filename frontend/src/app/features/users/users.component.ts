@@ -91,13 +91,22 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
                     @if (u.status === 'invited') {
                       <app-pill status="invited" />
                     }
-                    <button class="btn ghost sm" type="button" [disabled]="isOwner(u)"
-                      [title]="isOwner(u) ? 'Transfer ownership before you can edit the owner' : ''"
-                      (click)="openEdit(u)">Edit</button>
-                    @if (!isSelf(u)) {
-                      <button class="btn danger sm" type="button" [disabled]="isOwner(u)"
-                        [title]="isOwner(u) ? 'Transfer ownership before you can remove the owner' : ''"
-                        (click)="openRemove(u)">Remove</button>
+                    @if (u.status === 'invited') {
+                      <!-- A pending invitee has no account yet, so Edit/Remove
+                           don't apply: the useful actions are re-sending the
+                           link (invitations expire, and mail goes astray) and
+                           withdrawing it to free the seat and the address. -->
+                      <button class="btn ghost sm" type="button" [disabled]="saving()" (click)="resendInvite(u)">Resend</button>
+                      <button class="btn danger sm" type="button" [disabled]="saving()" (click)="openRevoke(u)">Withdraw</button>
+                    } @else {
+                      <button class="btn ghost sm" type="button" [disabled]="isOwner(u)"
+                        [title]="isOwner(u) ? 'Transfer ownership before you can edit the owner' : ''"
+                        (click)="openEdit(u)">Edit</button>
+                      @if (!isSelf(u)) {
+                        <button class="btn danger sm" type="button" [disabled]="isOwner(u)"
+                          [title]="isOwner(u) ? 'Transfer ownership before you can remove the owner' : ''"
+                          (click)="openRemove(u)">Remove</button>
+                      }
                     }
                   </div>
                 </div>
@@ -261,6 +270,45 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
         </div>
       </app-modal>
 
+      <!-- Withdraw invitation modal -->
+      <app-modal [open]="revokeOpen()" title="Withdraw Invitation" [width]="440" (close)="revokeOpen.set(false)">
+        <p style="margin:0;font-size:13px;color:var(--muted);line-height:1.6">
+          The invitation link stops working and the seat is freed. You can invite this
+          address again at any time.
+        </p>
+        @if (revokeTarget(); as u) {
+          <div style="margin-top:12px;font-weight:700;font-size:13px">
+            {{ u.name }} <span style="color:var(--muted);font-weight:500">· {{ u.email }}</span>
+          </div>
+        }
+        <div class="modal-foot">
+          <button class="btn ghost" type="button" (click)="revokeOpen.set(false)">Cancel</button>
+          <button class="btn danger solid" type="button" [disabled]="saving()" (click)="confirmRevoke()">
+            @if (saving()) { <span class="spinner"></span> }
+            Withdraw Invitation
+          </button>
+        </div>
+      </app-modal>
+
+      <!-- Copyable invitation link, shown when email delivery isn't available.
+           Without this the admin has no way to get the invitee in at all. -->
+      <app-modal [open]="!!pendingInviteUrl()" title="Share this invitation link" [width]="560" (close)="pendingInviteUrl.set(null)">
+        @if (pendingInviteUrl(); as pending) {
+          <p style="margin:0 0 14px;font-size:13px;color:var(--muted);line-height:1.6">
+            Email delivery isn't configured on this deployment, so the invitation for
+            <strong style="color:var(--text)">{{ pending.email }}</strong> wasn't sent.
+            Send them this link instead — it expires in seven days.
+          </p>
+          <div class="info-box" style="word-break:break-all;font-family:var(--font-mono,monospace);font-size:12px;">
+            {{ pending.url }}
+          </div>
+          <div class="modal-foot">
+            <button class="btn ghost" type="button" (click)="pendingInviteUrl.set(null)">Close</button>
+            <button class="btn primary" type="button" (click)="copyInviteUrl()">Copy link</button>
+          </div>
+        }
+      </app-modal>
+
       <!-- Transfer ownership modal -->
       <app-modal [open]="transferOpen()" title="Transfer Ownership" [width]="440" (close)="transferOpen.set(false)">
         <div class="info-box danger" style="display:flex;gap:8px;align-items:flex-start;margin-bottom:16px">
@@ -311,6 +359,11 @@ export class UsersComponent implements OnInit {
   transferOpen = signal(false);
   editTarget = signal<OrgUser | null>(null);
   removeTarget = signal<OrgUser | null>(null);
+  revokeOpen = signal(false);
+  revokeTarget = signal<OrgUser | null>(null);
+  /** Set when an invitation could not be emailed (no provider configured),
+   *  so the admin can copy the link and pass it on themselves. */
+  pendingInviteUrl = signal<{ email: string; url: string } | null>(null);
 
   inviteName = '';
   inviteEmail = '';
@@ -434,10 +487,75 @@ export class UsersComponent implements OnInit {
     this.saving.set(true);
     const email = this.inviteEmail.trim();
     this.api.inviteUser({ name: this.inviteName.trim(), email, role: this.inviteRole }).subscribe({
-      next: () => {
+      next: result => {
         this.saving.set(false);
         this.inviteOpen.set(false);
-        this.toast.success('Invitation sent to ' + email);
+        this.announceInvite(email, result.delivered, result.inviteUrl);
+        this.load();
+      },
+      error: err => { this.saving.set(false); this.toast.httpError(err); }
+    });
+  }
+
+  /** Sends a fresh link, replacing any outstanding one. */
+  resendInvite(u: OrgUser) {
+    if (this.saving()) return;
+    this.saving.set(true);
+    this.api.resendInvite(u._id).subscribe({
+      next: result => {
+        this.saving.set(false);
+        this.announceInvite(u.email, result.delivered, result.inviteUrl);
+        this.load();
+      },
+      error: err => { this.saving.set(false); this.toast.httpError(err); }
+    });
+  }
+
+  /**
+   * Reports the outcome honestly.
+   *
+   * With no email provider configured the backend returns the link instead of
+   * sending it, so claiming "invitation sent" would be a lie and the admin would
+   * have no way to get the invitee in. The link is surfaced for copying instead.
+   */
+  private announceInvite(email: string, delivered: boolean, inviteUrl?: string) {
+    if (delivered) {
+      this.toast.success('Invitation emailed to ' + email);
+      this.pendingInviteUrl.set(null);
+      return;
+    }
+    if (inviteUrl) {
+      this.pendingInviteUrl.set({ email, url: inviteUrl });
+      this.toast.info('Email is not configured — copy the invitation link below.');
+      return;
+    }
+    this.toast.info(`Invitation created for ${email}, but the email could not be delivered.`);
+  }
+
+  copyInviteUrl() {
+    const pending = this.pendingInviteUrl();
+    if (!pending) return;
+    navigator.clipboard?.writeText(pending.url).then(
+      () => this.toast.success('Invitation link copied'),
+      () => this.toast.error('Could not copy — select the link and copy it manually.')
+    );
+  }
+
+  // ── Withdraw a pending invitation ──────────────
+  openRevoke(u: OrgUser) {
+    this.revokeTarget.set(u);
+    this.revokeOpen.set(true);
+  }
+
+  confirmRevoke() {
+    const u = this.revokeTarget();
+    if (!u || this.saving()) return;
+    this.saving.set(true);
+    this.api.revokeInvite(u._id).subscribe({
+      next: () => {
+        this.saving.set(false);
+        this.revokeOpen.set(false);
+        this.toast.info(`Invitation for ${u.email} withdrawn`);
         this.load();
       },
       error: err => { this.saving.set(false); this.toast.httpError(err); }

@@ -92,7 +92,7 @@ npm start
 
 ## Seed Login
 
-- Super Admin: `superadmin@klogubizz.local` / `SuperAdmin@123`
+- Super Admin: `superadmin@klogubizz.local` / `SuperAdmin@1234`
 - Tenant Admin: `admin@techsoft.local` / `Admin@123`
 
 ## Notes

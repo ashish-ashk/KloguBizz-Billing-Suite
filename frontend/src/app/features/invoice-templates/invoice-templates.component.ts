@@ -12,6 +12,10 @@ import {
   FONT_OPTIONS, HEADER_STYLE_OPTIONS, INVOICE_TEMPLATES, PAPER_TONE_OPTIONS, TABLE_STYLE_OPTIONS, TEMPLATE_CATEGORIES,
   TemplateCategory, TITLE_ALIGN_OPTIONS
 } from '../../core/invoice-templates';
+// Shared with the super admin's platform-default page, so both previews show
+// identical content — comparing designs only means something when the data
+// underneath is the same.
+import { SAMPLE_CLIENT, SAMPLE_INVOICE } from '../../core/sample-invoice';
 
 type PickerMode = 'preset' | 'custom';
 type CategoryFilter = 'All' | TemplateCategory;
@@ -28,23 +32,6 @@ const DEFAULT_CONTENT: ContentToggles = {
   showLogo: true, showSignature: true, showBankDetails: true, showAmountInWords: true, showGstBreakdown: true
 };
 
-const SAMPLE_INVOICE: InvoiceDocData = {
-  invoiceNumber: 'KLG-2026-001',
-  date: new Date(2026, 6, 1).toISOString(),
-  dueDate: new Date(2026, 6, 16).toISOString(),
-  items: [
-    { desc: 'Web Development Services', hsn: '998314', qty: 1, rate: 45000, gstRate: 18 },
-    { desc: 'UI/UX Design', hsn: '998314', qty: 1, rate: 15000, gstRate: 18 }
-  ],
-  totals: { subtotal: 60000, cgst: 5400, sgst: 5400, igst: 0, total: 70800, isIGST: false },
-  notes: 'Thank you for your business!',
-  paymentTerms: 'Net 15',
-  bankDetails: { bank: 'HDFC Bank', account: '50100123456789', ifsc: 'HDFC0001234' }
-};
-
-const SAMPLE_CLIENT: InvoiceDocClient = {
-  companyName: 'Acme Traders Pvt Ltd', address: 'BKC, Mumbai, Maharashtra 400051', gstin: '27AAAAA0000A1Z5', stateCode: '27'
-};
 
 @Component({
   selector: 'app-invoice-templates',

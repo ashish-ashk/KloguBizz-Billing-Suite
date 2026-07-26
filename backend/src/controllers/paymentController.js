@@ -7,6 +7,7 @@ const { toCsv } = require('../services/csvService');
 const { logAudit } = require('../services/auditService');
 const { recalculateSettlement } = require('./invoiceController');
 const { roundMoney } = require('../services/gstService');
+const { assertValidMaster } = require('../services/masterService');
 
 const listPayments = asyncHandler(async (req, res) => {
   const filter = tenantFilter(req);
@@ -41,6 +42,10 @@ const createPayment = asyncHandler(async (req, res) => {
       'OVERPAYMENT'
     );
   }
+
+  // The payment method has to be one the super admin configured — it was
+  // previously a free string, so the Masters list was only ever a suggestion.
+  await assertValidMaster('paymentMethod', req.body.method, 'Payment method');
 
   // A draft receiving money is implicitly issued, so recalculateSettlement is
   // free to move its status.

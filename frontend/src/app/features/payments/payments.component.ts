@@ -380,9 +380,11 @@ type PayTab = 'tracker' | 'history' | 'reminders';
       <!-- Remind All confirm modal -->
       <app-modal [open]="confirmRemindAll()" title="Remind All" (close)="confirmRemindAll.set(false)">
         <p style="margin:0;color:var(--muted);line-height:1.6">
-          Sends a reminder email to every client with a pending, partial or overdue invoice
+          Chases every client with a pending, partial or overdue invoice
           (<strong style="color:var(--text)">{{ dueInvoices().length }}</strong> invoice{{ dueInvoices().length === 1 ? '' : 's' }}).
-          Invoices without a client email on file are skipped.
+          Invoices with no email on file are skipped, and anyone already reminded at
+          this stage will not be emailed twice. This runs in the background, so you
+          can carry on working.
         </p>
         <div class="modal-foot">
           <button class="btn ghost" type="button" (click)="confirmRemindAll.set(false)">Cancel</button>
@@ -633,7 +635,10 @@ export class PaymentsComponent implements OnInit {
       next: res => {
         this.remindingAll.set(false);
         this.confirmRemindAll.set(false);
-        this.toast.success(`${res.sent} reminder${res.sent === 1 ? '' : 's'} sent${res.skipped ? `, ${res.skipped} skipped (no email on file)` : ''}`);
+        // The sweep now runs in the background, so there is no send count to
+        // report yet — claiming "N sent" would be a guess. The per-invoice
+        // outcome lands in the reminder log either way.
+        this.toast.success(res.message);
       },
       error: err => { this.remindingAll.set(false); this.toast.httpError(err); }
     });

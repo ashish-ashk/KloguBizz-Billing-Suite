@@ -112,6 +112,7 @@ app.use('/api/v1/clients', require('./src/routes/clientRoutes'));
 app.use('/api/v1/items', require('./src/routes/itemRoutes'));
 app.use('/api/v1/invoices', require('./src/routes/invoiceRoutes'));
 app.use('/api/v1/payments', require('./src/routes/paymentRoutes'));
+app.use('/api/v1/credit-notes', require('./src/routes/creditNoteRoutes'));
 app.use('/api/v1/users', require('./src/routes/userRoutes'));
 app.use('/api/v1/subscriptions', require('./src/routes/subscriptionRoutes'));
 app.use('/api/v1/reports', require('./src/routes/reportRoutes'));
@@ -127,6 +128,11 @@ if (require.main === module) {
       const server = app.listen(env.PORT, () => {
         console.log(`KloguBizz API running on port ${env.PORT}`);
       });
+
+      // Automated payment reminders. Previously the reminder schedule was
+      // configurable in the super-admin panel but no job ever ran it, so no
+      // scheduled reminder was ever sent.
+      require('./src/services/reminderService').startReminderScheduler();
 
       // Render (and any container platform) sends SIGTERM before replacing an
       // instance. Without this the process is killed mid-request, dropping

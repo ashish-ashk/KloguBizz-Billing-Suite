@@ -236,7 +236,19 @@ const NEW_HEADER_STYLES = new Set([
 
 // Mirrors frontend/src/app/core/invoice-templates.ts's resolveInvoiceTemplate —
 // substitutes the tenant's own custom build when invoiceTemplateId is 'custom'.
-function resolveTemplate(brandingConfig) {
+/**
+ * Resolves the template to render with.
+ *
+ * @param brandingConfig   the tenant's own branding
+ * @param platformDefault  the super admin's platform-wide default template id,
+ *                         used when a tenant has never chosen one. Previously
+ *                         there was no such thing: the super-admin "Invoice
+ *                         Templates" page wrote to a separate InvoiceTemplate
+ *                         collection that nothing ever read, so the platform
+ *                         default was decorative and every tenant silently got
+ *                         the hardcoded fallback.
+ */
+function resolveTemplate(brandingConfig, platformDefault) {
   if (brandingConfig?.invoiceTemplateId === 'custom' && brandingConfig?.customInvoiceTemplate) {
     const c = brandingConfig.customInvoiceTemplate;
     const font = c.font || 'Helvetica';
@@ -260,7 +272,7 @@ function resolveTemplate(brandingConfig) {
       copyLabel: !!c.copyLabel
     };
   }
-  return getTemplate(brandingConfig?.invoiceTemplateId);
+  return getTemplate(brandingConfig?.invoiceTemplateId || platformDefault);
 }
 
 module.exports = { INVOICE_TEMPLATES, getTemplate, resolveTemplate, BOLD_VARIANTS, ITALIC_VARIANTS };

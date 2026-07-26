@@ -481,9 +481,14 @@ function drawHeader(doc, { template, org, invoice, brand, left, right, width, fo
   return y + 78;
 }
 
-function renderInvoicePdf({ invoice, client, org }) {
+/**
+ * @param platformDefaults  the super admin's platform-wide defaults
+ *                          ({ templateId }), applied when a tenant has never
+ *                          picked a template of their own.
+ */
+function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
   return new Promise((resolve, reject) => {
-    const template = resolveTemplate(org?.brandingConfig);
+    const template = resolveTemplate(org?.brandingConfig, platformDefaults?.templateId);
     const content = org?.brandingConfig?.invoiceContent || {};
     const showLogo = content.showLogo !== false;
     const showSignature = content.showSignature !== false;

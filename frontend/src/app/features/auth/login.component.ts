@@ -69,7 +69,11 @@ import { LegalContentComponent } from '../../shared/legal-content.component';
             </button>
           </form>
 
-          <p style="margin-top:20px;color:var(--muted);font-size:13px;text-align:center;">
+          <p style="margin-top:16px;text-align:center;">
+            <a routerLink="/forgot-password" style="color:var(--brand);font-weight:600;font-size:13px;">Forgot your password?</a>
+          </p>
+
+          <p style="margin-top:10px;color:var(--muted);font-size:13px;text-align:center;">
             New to {{ branding()?.appName || 'Klogu Bizz' }}? <a routerLink="/register" style="color:var(--brand);font-weight:600;">Create an account</a>
           </p>
 

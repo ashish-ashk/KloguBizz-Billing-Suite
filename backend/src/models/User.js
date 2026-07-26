@@ -11,7 +11,16 @@ const userSchema = new mongoose.Schema({
     default: 'viewer'
   },
   status: { type: String, enum: ['active', 'invited', 'disabled'], default: 'active' },
-  inviteToken: String,
+  // Only the SHA-256 hash of the invite/reset token is stored — the plaintext
+  // lives solely in the emailed URL. See services/tokenService.js. The old
+  // plaintext `inviteToken` field is gone; any invite issued before this change
+  // simply stops working, which is correct because the accept flow it pointed
+  // at never existed.
+  inviteTokenHash: String,
+  inviteTokenExpires: Date,
+  invitedAt: Date,
+  resetTokenHash: String,
+  resetTokenExpires: Date,
   lastLoginAt: Date,
   termsAcceptedAt: Date,
   termsVersion: String,
@@ -28,5 +37,9 @@ const userSchema = new mongoose.Schema({
 
 userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ orgId: 1, role: 1 });
+// Token redemption looks a user up by hash; sparse so the many users with no
+// pending token don't all collide on null.
+userSchema.index({ inviteTokenHash: 1 }, { sparse: true });
+userSchema.index({ resetTokenHash: 1 }, { sparse: true });
 
 module.exports = { User: mongoose.model('User', userSchema) };

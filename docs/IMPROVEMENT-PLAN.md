@@ -35,6 +35,32 @@ credit/debit notes (#33 proper), full list pagination (#40), the reminder schedu
 
 ---
 
+## STATUS — Phase 2 shipped (2026-07-27)
+
+**Done: items #10, #11, #12, #13, #18, #19, #33, #34, plus the delivery-visibility
+half of #58 and the discount-aware side of #44.**
+Verified by **78 automated tests** (14 unit + 64 integration against a real MongoDB)
+and a clean production `ng build`.
+
+| Area | What changed |
+|---|---|
+| Team invites (#10) | Was a dead end — the email linked to `/accept-invite?token=…`, but no such route and no redeem endpoint existed, so **every invited teammate was permanently locked out**. Added `GET /auth/invite/:token` + `POST /auth/accept-invite` (auto-signs-in), a real `/accept-invite` page, resend (invalidates the old link) and withdraw (frees the seat *and* the globally-unique email). Tokens are now **SHA-256 hashed with a 7-day expiry** — the old `inviteToken` plaintext field is gone |
+| Password reset (#11) | Did not exist at all. Added `POST /auth/forgot-password` (uniform response — no account enumeration) + `POST /auth/reset-password`, `/forgot-password` and `/reset-password` pages, a "Forgot your password?" link, 1-hour single-use hashed tokens. A reset **kills every open session** and **clears a brute-force lockout**, so a locked-out owner can recover |
+| Suspension (#12) | `Organisation.status` was stored, counted, and read by nothing — a suspended tenant kept invoicing. `protect` now enforces it: **writes refused, reads and exports still allowed** (it's their business data), auth/subscription routes stay open so they can resolve it. Super admin exempt. Tenant-facing banner, synced mid-session via the interceptor |
+| Reminders (#13) | `runReminderSweep` was a 3-line stub nothing called, so the whole super-admin Reminders page was decorative. Now a real hourly sweep that **uses the configured subject/template** (`{{invoiceNumber}}`-style placeholders, finally substituted), picks the latest applicable stage, dedups per invoice per stage via a new `ReminderLog`, chases the **balance** rather than the face value, skips suspended tenants and cancelled invoices, and logs every attempt including skips and failures. `remind-all` moved off the request path (**202 + background**) — it used to send serially in-request and time out |
+| Credit notes (#33) | Did not exist; Phase 1 had blocked deleting issued invoices with nothing to replace it. New `CreditNote` model with its **own consecutive number series** (GST requires one per document type), priced by the same GST engine from the same place of supply so an IGST invoice is credited in IGST. Full or partial, cumulative ceiling enforced, GSTR-1 CDNR reason codes, CSV export. Credits reduce `balanceDue` like a payment; a fully credited invoice closes as **cancelled, not paid** |
+| Invoice immutability (#34) | An issued invoice could be silently repriced — even a fully paid one. Now locked: items/discount/buyer changes are refused with `INVOICE_LOCKED`, status can't be set directly (`STATUS_DERIVED`), notes and terms stay editable. New `cancelInvoice` for an invoice raised in error with nothing collected; the document and its number are retained, and it drops out of reminders, outstanding figures and the GST return |
+| Masters (#19) | The page was decorative: `Item.gstRate` was a hardcoded `enum: [0,5,12,18,28]`, so adding the real 3% gold slab did nothing and the API rejected the value the admin had just configured. Enum dropped; `gstRate`, `unit` and `Payment.method` now validate against the `Master` collection via a cached `masterService`, invalidated on save. Stays permissive when nothing is seeded |
+| Platform template default (#18) | The super-admin gallery wrote to a separate `InvoiceTemplate` collection nothing ever rendered — two unrelated concepts sharing one name. Page rebuilt on the **real 22-template registry** with live preview; the choice is stored as the `defaultInvoiceTemplate` setting and applied by `resolveTemplate` whenever a tenant hasn't picked one. Dead model, route, controller, seed rows and frontend type removed. A test renders two PDFs to prove the default actually changes the output |
+| Email (part of #58) | Plain-text, unstyled, no CTA, and delivery was invisible. Now branded HTML with a button, and `sendEmail` returns an outcome instead of throwing — recorded per attempt in `ReminderLog` |
+
+**Still open, in the doc's own ordering:** MFA (#7), list pagination (#40),
+aggregation for remaining list endpoints, structured logging/error tracking (#57),
+CI and lint (#60), then Phase 4's super-admin console and Phase 5's GSTR-1 export,
+purchases/ITC and e-invoicing.
+
+---
+
 ## PART 1 — BUGS & FIXES
 
 ### 1.1 Security · privilege escalation (P0)

@@ -8,6 +8,8 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { logAudit } = require('../services/auditService');
 const { CURRENT_TERMS_VERSION } = require('../config/legal');
+const { createToken, hashToken, expiryFromNow, RESET_TTL_MS } = require('../services/tokenService');
+const { sendPasswordResetEmail } = require('../services/emailService');
 
 function signToken(user) {
   return jwt.sign(
@@ -128,4 +130,141 @@ const me = asyncHandler(async (req, res) => {
   res.json({ user: req.user, organisation });
 });
 
-module.exports = { register, login, me, signToken };
+// ── Invitations ──────────────────────────────────
+//
+// The invite flow was previously a dead end: inviteUser emailed a link to
+// /accept-invite?token=… but no endpoint existed to redeem it and no such
+// frontend route existed either, so every invited teammate was permanently
+// locked out (their status stays 'invited', which protect() rejects).
+
+/** Looks up a pending invite by token, or throws a uniform error. */
+async function findInvitee(token) {
+  if (!token) throw httpError(400, 'This invitation link is missing its token.', 'INVALID_INVITE');
+  const user = await User.findOne({ inviteTokenHash: hashToken(token) });
+  // One message for every failure mode, so the endpoint can't be used to probe
+  // which tokens exist.
+  const invalid = () => httpError(400, 'This invitation link is invalid or has already been used.', 'INVALID_INVITE');
+  if (!user) throw invalid();
+  if (user.status !== 'invited') throw invalid();
+  if (!user.inviteTokenExpires || user.inviteTokenExpires < new Date()) {
+    throw httpError(410, 'This invitation has expired. Ask your administrator to send a new one.', 'INVITE_EXPIRED');
+  }
+  return user;
+}
+
+/**
+ * Unauthenticated peek at an invitation, so the accept screen can greet the
+ * person by name and show which organisation they're joining rather than
+ * presenting a bare password box.
+ */
+const inviteDetails = asyncHandler(async (req, res) => {
+  const user = await findInvitee(req.params.token);
+  const organisation = user.orgId ? await Organisation.findById(user.orgId).select('name').lean() : null;
+  res.json({
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    orgName: organisation?.name || null,
+    expiresAt: user.inviteTokenExpires
+  });
+});
+
+/**
+ * Redeems an invitation: sets the password, activates the account, and signs
+ * the user straight in so they land in the app rather than back at a login form.
+ */
+const acceptInvite = asyncHandler(async (req, res) => {
+  const { token, password, acceptTerms } = req.body;
+  if (acceptTerms !== true) {
+    throw httpError(400, 'You must accept the Terms & Conditions and SLA to activate your account');
+  }
+  const user = await findInvitee(token);
+
+  user.passwordHash = await bcrypt.hash(password, 12);
+  user.status = 'active';
+  user.inviteTokenHash = undefined;
+  user.inviteTokenExpires = undefined;
+  user.termsAcceptedAt = new Date();
+  user.termsVersion = CURRENT_TERMS_VERSION;
+  user.lastLoginAt = new Date();
+  // Same reasoning as login: issue this session a version so any token minted
+  // before now is dead.
+  user.sessionVersion = (user.sessionVersion || 0) + 1;
+  await user.save();
+
+  const organisation = user.orgId ? await Organisation.findById(user.orgId) : null;
+  logAudit({ req: { orgId: user.orgId, user }, action: 'user.invite_accepted', entity: 'user', entityId: user._id, meta: { email: user.email, role: user.role } });
+  res.json(authPayload(user, organisation));
+});
+
+// ── Password reset ───────────────────────────────
+//
+// Previously absent entirely: a user who forgot their password had no recovery
+// path at all, and support had no way to help because the super admin couldn't
+// reset one either.
+
+/**
+ * Starts a reset.
+ *
+ * Always responds 200 with the same message whether or not the address exists —
+ * otherwise this endpoint becomes an account-enumeration oracle. The work is
+ * only done when there is a matching active user.
+ */
+const forgotPassword = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  const generic = { ok: true, message: 'If that email address has an account, a reset link is on its way.' };
+
+  const user = await User.findOne({ email: String(email || '').toLowerCase() });
+  // Invited-but-not-activated users are excluded: their route in is the invite
+  // link, and letting a reset activate the account would bypass terms
+  // acceptance. Disabled accounts are excluded outright.
+  if (!user || user.status !== 'active') return res.json(generic);
+
+  const { token, hash } = createToken();
+  user.resetTokenHash = hash;
+  user.resetTokenExpires = expiryFromNow(RESET_TTL_MS);
+  await user.save();
+
+  const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${encodeURIComponent(token)}`;
+  const result = await sendPasswordResetEmail({ to: user.email, name: user.name, resetUrl });
+
+  logAudit({ req: { orgId: user.orgId, user }, action: 'user.password_reset_requested', entity: 'user', entityId: user._id, meta: { delivered: !!result.sent } });
+  // In local mode there is no email, so hand the link back to make the flow
+  // testable. Never in production, where that would leak a live credential to
+  // anyone who can guess an address.
+  res.json(result.skipped && !env.isProduction ? { ...generic, resetUrl, localMode: true } : generic);
+});
+
+/**
+ * Completes a reset: sets the new password and invalidates every existing
+ * session, on the assumption that a reset may follow a compromise. Also clears
+ * any brute-force lockout, so a locked-out owner can recover.
+ */
+const resetPassword = asyncHandler(async (req, res) => {
+  const { token, password } = req.body;
+  const user = await User.findOne({ resetTokenHash: hashToken(String(token || '')) });
+
+  const invalid = () => httpError(400, 'This reset link is invalid or has already been used.', 'INVALID_RESET');
+  if (!user || user.status !== 'active') throw invalid();
+  if (!user.resetTokenExpires || user.resetTokenExpires < new Date()) {
+    throw httpError(410, 'This reset link has expired. Please request a new one.', 'RESET_EXPIRED');
+  }
+
+  user.passwordHash = await bcrypt.hash(password, 12);
+  user.resetTokenHash = undefined;
+  user.resetTokenExpires = undefined;
+  user.failedLoginAttempts = 0;
+  user.lockedUntil = undefined;
+  user.lastFailedLoginAt = undefined;
+  user.sessionVersion = (user.sessionVersion || 0) + 1;
+  await user.save();
+
+  logAudit({ req: { orgId: user.orgId, user }, action: 'user.password_reset', entity: 'user', entityId: user._id });
+  res.json({ ok: true, message: 'Your password has been reset. Please sign in with your new password.' });
+});
+
+module.exports = {
+  register, login, me, signToken,
+  inviteDetails, acceptInvite,
+  forgotPassword, resetPassword
+};

@@ -10,7 +10,6 @@ const {
   listMasters,
   saveMasters,
   updateReminder,
-  updateTemplate,
   getSettings,
   saveSetting,
   listAuditLogs
@@ -30,7 +29,6 @@ router.put('/plans/:code', upsertPlan);
 router.get('/masters', listMasters);
 router.put('/masters/:type', saveMasters);
 router.put('/reminders/:id', updateReminder);
-router.put('/templates/:id', updateTemplate);
 router.get('/settings', getSettings);
 router.put('/settings/:key', saveSetting);
 router.get('/audit-logs', listAuditLogs);

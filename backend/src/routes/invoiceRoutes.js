@@ -7,6 +7,7 @@ const {
   updateInvoice,
   duplicateInvoice,
   markPaid,
+  cancelInvoice,
   sendReminder,
   remindAll,
   deleteInvoice,
@@ -29,6 +30,8 @@ router.get('/:id', getInvoice);
 router.put('/:id', requireRole('admin', 'accountant'), validate(invoiceUpdateSchema), updateInvoice);
 router.post('/:id/duplicate', requireRole('admin', 'accountant'), duplicateInvoice);
 router.post('/:id/mark-paid', requireRole('admin', 'accountant'), validate(markPaidSchema), markPaid);
+// Voiding an issued document is an admin decision, not a bookkeeping one.
+router.post('/:id/cancel', requireRole('admin'), cancelInvoice);
 router.post('/:id/remind', requireRole('admin', 'accountant'), sendReminder);
 router.get('/:id/pdf', invoicePdf);
 router.delete('/:id', requireRole('admin'), deleteInvoice);

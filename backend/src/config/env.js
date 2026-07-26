@@ -9,7 +9,7 @@ const DEV_DEFAULTS = {
   JWT_SECRET: 'local_dev_access_secret_change_me_now',
   JWT_REFRESH_SECRET: 'local_dev_refresh_secret_change_me_now',
   RAZORPAY_WEBHOOK_SECRET: 'local_webhook_secret',
-  SUPER_ADMIN_PASSWORD: 'SuperAdmin@123'
+  SUPER_ADMIN_PASSWORD: 'SuperAdmin@1234'
 };
 
 // FRONTEND_URL accepts a comma-separated list so the app can be reached from

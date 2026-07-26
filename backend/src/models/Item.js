@@ -9,7 +9,12 @@ const itemSchema = new mongoose.Schema({
   hsn: { type: String, trim: true },
   category: { type: String, trim: true },
   unit: { type: String, trim: true, default: 'Nos' },
-  gstRate: { type: Number, enum: [0, 5, 12, 18, 28], default: 18 },
+  // No hardcoded enum here on purpose. It used to be `enum: [0,5,12,18,28]`,
+  // which meant the super admin could add a slab in Masters (3% applies to gold
+  // and jewellery) and the API would then reject the very rate they had just
+  // configured. The valid set now comes from the Master collection, checked in
+  // services/masterService.js.
+  gstRate: { type: Number, default: 18, min: 0, max: 100 },
   cessRate: { type: Number, default: 0 },
   sellingPrice: { type: Number, required: true },
   mrp: Number,

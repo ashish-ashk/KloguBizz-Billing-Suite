@@ -5,6 +5,7 @@ const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { buildItemTemplateBuffer, parseItemWorkbook } = require('../services/itemImportService');
 const { logAudit } = require('../services/auditService');
 const { pickFields } = require('../utils/pickFields');
+const { assertValidMaster } = require('../services/masterService');
 
 // `orgId` is never accepted from the body — it comes from the token, so an
 // update can't relocate the record into another tenant.
@@ -19,16 +20,30 @@ const listItems = asyncHandler(async (req, res) => {
   res.json(items);
 });
 
+/**
+ * Checks the GST rate and unit against the super admin's configured masters.
+ * Those lists were previously decorative — the model carried its own hardcoded
+ * enum and the unit was a free string.
+ */
+async function assertMasters(body) {
+  await assertValidMaster('gstRate', body.gstRate, 'GST rate');
+  await assertValidMaster('unit', body.unit, 'Unit');
+}
+
 const createItem = asyncHandler(async (req, res) => {
-  const item = await Item.create({ ...pickFields(req.body, ITEM_FIELDS), orgId: req.orgId });
+  const fields = pickFields(req.body, ITEM_FIELDS);
+  await assertMasters(fields);
+  const item = await Item.create({ ...fields, orgId: req.orgId });
   logAudit({ req, action: 'item.created', entity: 'item', entityId: item._id, meta: { name: item.name } });
   res.status(201).json(item);
 });
 
 const updateItem = asyncHandler(async (req, res) => {
+  const fields = pickFields(req.body, ITEM_FIELDS);
+  await assertMasters(fields);
   const item = await Item.findOneAndUpdate(
     { _id: req.params.id, ...tenantFilter(req) },
-    pickFields(req.body, ITEM_FIELDS),
+    fields,
     { new: true, runValidators: true }
   );
   if (!item) throw httpError(404, 'Item not found');

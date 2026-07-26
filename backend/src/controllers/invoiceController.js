@@ -3,16 +3,35 @@ const { Organisation } = require('../models/Organisation');
 const { Client } = require('../models/Client');
 const { Invoice } = require('../models/Invoice');
 const { Payment } = require('../models/Payment');
+const { CreditNote } = require('../models/CreditNote');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { calculateInvoiceTotals, roundMoney } = require('../services/gstService');
 const { nextInvoiceNumber } = require('../services/invoiceNumberService');
 const { renderInvoicePdf } = require('../services/pdfService');
+const { getPlatformDefaults } = require('../services/platformSettingsService');
 const { sendReminderEmail } = require('../services/emailService');
 const { assertInvoiceQuota } = require('../services/planService');
 const { logAudit } = require('../services/auditService');
 const { toCsv } = require('../services/csvService');
+const { runReminderSweep, daysPastDue } = require('../services/reminderService');
+const { ReminderLog } = require('../models/ReminderLog');
+const { Reminder } = require('../models/Settings');
+const { env } = require('../config/env');
+
+/**
+ * The configured reminder stage an invoice at `overdueDays` has reached, so a
+ * manual send uses the same wording the automated sweep would have used.
+ * Returns null when no stage applies (nothing configured, or not due yet), in
+ * which case emailService falls back to its defaults.
+ */
+async function currentReminderStage(overdueDays) {
+  const stages = await Reminder.find({ enabled: { $ne: false } }).lean();
+  return stages
+    .filter(stage => overdueDays >= Number(stage.daysOffset || 0))
+    .sort((a, b) => Number(b.daysOffset || 0) - Number(a.daysOffset || 0))[0] || null;
+}
 
 async function totalsFor(req, body) {
   const org = await Organisation.findById(req.orgId);
@@ -48,20 +67,38 @@ async function totalsFor(req, body) {
  * draft until it is issued.
  */
 async function recalculateSettlement(invoice) {
-  const [agg] = await Payment.aggregate([
-    { $match: { invoiceId: invoice._id, orgId: invoice.orgId, status: 'success' } },
-    { $group: { _id: '$invoiceId', amount: { $sum: '$amount' } } }
+  const [paymentAgg, creditAgg] = await Promise.all([
+    Payment.aggregate([
+      { $match: { invoiceId: invoice._id, orgId: invoice.orgId, status: 'success' } },
+      { $group: { _id: '$invoiceId', amount: { $sum: '$amount' } } }
+    ]),
+    // Credit notes reduce what is owed just as much as a payment does — a fully
+    // credited invoice is settled even though no money changed hands. Only
+    // issued notes count; a draft has not been given to the customer.
+    CreditNote.aggregate([
+      { $match: { invoiceId: invoice._id, orgId: invoice.orgId, status: 'issued' } },
+      { $group: { _id: '$invoiceId', amount: { $sum: '$totals.total' } } }
+    ])
   ]);
-  const total = roundMoney(invoice.totals?.total || 0);
-  const amountPaid = roundMoney(agg?.amount || 0);
+
+  const invoiceTotal = roundMoney(invoice.totals?.total || 0);
+  const amountCredited = roundMoney(creditAgg[0]?.amount || 0);
+  // What the customer is actually liable for after credits.
+  const total = roundMoney(Math.max(0, invoiceTotal - amountCredited));
+  const amountPaid = roundMoney(paymentAgg[0]?.amount || 0);
   const balanceDue = roundMoney(Math.max(0, total - amountPaid));
 
   invoice.amountPaid = amountPaid;
+  invoice.amountCredited = amountCredited;
   invoice.balanceDue = balanceDue;
 
   if (invoice.status !== 'draft') {
     const pastDue = invoice.dueDate && invoice.dueDate < new Date();
-    if (amountPaid >= total && total > 0) {
+    // A fully credited invoice is closed, not "paid" — nothing was collected.
+    if (amountCredited >= invoiceTotal && invoiceTotal > 0) {
+      invoice.status = 'cancelled';
+      invoice.paidDate = undefined;
+    } else if (amountPaid >= total && total > 0) {
       invoice.status = 'paid';
       invoice.paidDate = invoice.paidDate || new Date();
     } else {
@@ -249,9 +286,40 @@ const updateInvoice = asyncHandler(async (req, res) => {
     || req.body.discountPercent !== undefined
     || req.body.clientId !== undefined
     || req.body.billTo !== undefined;
+
+  const existing = await Invoice.findOne({ _id: req.params.id, ...tenantFilter(req) });
+  if (!existing) throw httpError(404, 'Invoice not found');
+
+  /**
+   * An issued invoice is a document the customer holds and the GST return has
+   * counted. Repricing it silently — which is what this endpoint used to
+   * allow, on a fully-paid invoice, with no versioning and no diff in the audit
+   * log — makes our copy disagree with theirs and with the return.
+   *
+   * Presentational fields stay editable, because correcting a note or a due
+   * date changes nothing that has been reported.
+   */
+  if (existing.status !== 'draft' && pricingChanged) {
+    throw httpError(
+      409,
+      `Invoice ${existing.invoiceNumber} has been issued, so its items and amounts can no longer be changed. Issue a credit note to reduce or reverse it.`,
+      'INVOICE_LOCKED'
+    );
+  }
+  if (existing.status === 'cancelled') {
+    throw httpError(409, `Invoice ${existing.invoiceNumber} has been cancelled and can no longer be edited.`, 'INVOICE_CANCELLED');
+  }
+  // Status is a settlement outcome, owned by recalculateSettlement — letting a
+  // caller set it directly would desync it from the payments on record.
+  if (update.status !== undefined && existing.status !== 'draft' && update.status !== existing.status) {
+    throw httpError(
+      409,
+      'An issued invoice\'s status follows its payments and credit notes and cannot be set directly. Record a payment, or issue a credit note.',
+      'STATUS_DERIVED'
+    );
+  }
+
   if (pricingChanged) {
-    const existing = await Invoice.findOne({ _id: req.params.id, ...tenantFilter(req) });
-    if (!existing) throw httpError(404, 'Invoice not found');
     update.totals = await totalsFor(req, normalizeBuyer({ ...existing.toObject(), ...req.body }));
   }
   const invoice = await Invoice.findOneAndUpdate(
@@ -338,25 +406,101 @@ const markPaid = asyncHandler(async (req, res) => {
   res.json(invoice);
 });
 
+/**
+ * Sends one reminder now, using the configured template for whichever stage
+ * this invoice has reached, and records the attempt.
+ *
+ * The manual send previously used hardcoded copy and left no delivery record at
+ * all — there was no way to tell whether a customer had ever been chased, or
+ * what they were told.
+ */
 const sendReminder = asyncHandler(async (req, res) => {
   const invoice = await Invoice.findOne({ _id: req.params.id, ...tenantFilter(req) }).populate('clientId');
   if (!invoice) throw httpError(404, 'Invoice not found');
+
   const email = invoice.clientId?.email || invoice.billTo?.email;
   const name = invoice.clientId?.companyName || invoice.billTo?.name;
   if (!email) throw httpError(400, 'This buyer has no email address on file');
+
   const org = await Organisation.findById(req.orgId);
-  const overdueDays = Math.max(0, Math.floor((Date.now() - invoice.dueDate.getTime()) / 86400000));
+  const overdueDays = Math.max(0, daysPastDue(invoice.dueDate));
+  const balanceDue = invoice.balanceDue ?? invoice.totals?.total ?? 0;
+  const stage = await currentReminderStage(overdueDays);
+  const amount = `INR ${Number(balanceDue).toLocaleString('en-IN')}`;
+
   const result = await sendReminderEmail({
     to: email,
     clientName: name,
     invoiceNumber: invoice.invoiceNumber,
-    amount: `INR ${invoice.totals.total.toLocaleString('en-IN')}`,
+    // Chase what is still owed, not the original face value — a part-paid
+    // invoice was previously chased for the full amount.
+    amount,
+    balanceDue: amount,
     dueDate: invoice.dueDate,
     orgName: org?.name || 'KloguBizz',
-    overdueDays
+    overdueDays,
+    subject: stage?.subject,
+    template: stage?.template,
+    viewUrl: `${env.FRONTEND_URL}/invoices/${invoice._id}/print`
   });
-  logAudit({ req, action: 'invoice.reminder_sent', entity: 'invoice', entityId: invoice._id, meta: { to: email } });
+
+  await ReminderLog.create({
+    orgId: req.orgId,
+    invoiceId: invoice._id,
+    reminderId: stage?._id,
+    stage: stage ? `offset:${stage.daysOffset}` : 'manual',
+    to: email,
+    status: result.sent ? 'sent' : result.failed ? 'failed' : 'skipped',
+    reason: result.reason,
+    balanceDue,
+    overdueDays,
+    trigger: 'manual'
+  });
+
+  logAudit({ req, action: 'invoice.reminder_sent', entity: 'invoice', entityId: invoice._id, meta: { to: email, delivered: !!result.sent } });
   res.json({ ok: true, ...result });
+});
+
+/**
+ * Voids an issued invoice that was never acted on.
+ *
+ * The narrow case a credit note is overkill for: an invoice raised in error,
+ * with nothing collected and nothing credited. The document is kept (its number
+ * stays in the series, which is what GST requires) but it stops counting as
+ * money owed and drops out of reminders and the outstanding figures.
+ *
+ * Once any payment exists, this is refused — reversing a real charge is what
+ * credit notes are for.
+ */
+const cancelInvoice = asyncHandler(async (req, res) => {
+  const invoice = await Invoice.findOne({ _id: req.params.id, ...tenantFilter(req) });
+  if (!invoice) throw httpError(404, 'Invoice not found');
+
+  if (invoice.status === 'draft') {
+    throw httpError(409, 'This invoice is still a draft — delete it instead of cancelling it.', 'INVOICE_IS_DRAFT');
+  }
+  if (invoice.status === 'cancelled') {
+    throw httpError(409, 'This invoice is already cancelled.', 'ALREADY_CANCELLED');
+  }
+
+  await recalculateSettlement(invoice);
+  if (invoice.amountPaid > 0) {
+    throw httpError(
+      409,
+      `Invoice ${invoice.invoiceNumber} has ${invoice.amountPaid.toFixed(2)} recorded against it, so it cannot be cancelled. Void the payment first, or issue a credit note to reverse the charge.`,
+      'INVOICE_HAS_PAYMENTS'
+    );
+  }
+
+  invoice.status = 'cancelled';
+  invoice.cancelledAt = new Date();
+  invoice.cancelReason = req.body?.reason;
+  invoice.balanceDue = 0;
+  invoice.paidDate = undefined;
+  await invoice.save();
+
+  logAudit({ req, action: 'invoice.cancelled', entity: 'invoice', entityId: invoice._id, meta: { invoiceNumber: invoice.invoiceNumber, reason: invoice.cancelReason } });
+  res.json(invoice);
 });
 
 /**
@@ -426,33 +570,57 @@ const exportInvoicesCsv = asyncHandler(async (req, res) => {
   res.send(csv);
 });
 
-// Sends reminder emails for every pending/partial/overdue invoice with a
-// client email on file. Used by the "Remind all" action on the Payments page.
+/**
+ * Chases every unpaid invoice for this tenant.
+ *
+ * Runs as a background job rather than inside the request. The old version sent
+ * emails serially in the request handler, so a tenant with 500 overdue invoices
+ * held the connection open for minutes and then hit the platform's request
+ * timeout — losing both the response and any idea of how far it had got.
+ *
+ * The work goes through the same sweep the scheduler uses, so it gets the
+ * configured templates, the per-stage dedup (a customer already chased today is
+ * not chased again) and a ReminderLog entry per attempt for free.
+ */
 const remindAll = asyncHandler(async (req, res) => {
   const filter = tenantFilter(req);
   await sweepOverdue(filter);
-  filter.status = { $in: ['pending', 'partial', 'overdue'] };
-  const invoices = await Invoice.find(filter).populate('clientId');
-  const org = await Organisation.findById(req.orgId);
-  let sent = 0;
-  let skipped = 0;
-  for (const invoice of invoices) {
-    const email = invoice.clientId?.email || invoice.billTo?.email;
-    if (!email) { skipped += 1; continue; }
-    const overdueDays = Math.max(0, Math.floor((Date.now() - invoice.dueDate.getTime()) / 86400000));
-    await sendReminderEmail({
-      to: email,
-      clientName: invoice.clientId?.companyName || invoice.billTo?.name,
-      invoiceNumber: invoice.invoiceNumber,
-      amount: `INR ${invoice.totals.total.toLocaleString('en-IN')}`,
-      dueDate: invoice.dueDate,
-      orgName: org?.name || 'KloguBizz',
-      overdueDays
-    });
-    sent += 1;
-  }
-  logAudit({ req, action: 'invoice.remind_all', entity: 'invoice', meta: { sent, skipped } });
-  res.json({ sent, skipped, total: invoices.length });
+
+  // Report what is *eligible* so the response is immediately meaningful, then
+  // let the sweep decide what actually needs sending.
+  const pending = await Invoice.find({ ...filter, status: { $in: ['pending', 'partial', 'overdue'] } })
+    .populate('clientId', 'email')
+    .select('clientId billTo')
+    .lean();
+  const withEmail = pending.filter(inv => inv.clientId?.email || inv.billTo?.email).length;
+
+  const orgId = req.orgId;
+  const actor = { orgId, user: req.user };
+  // Deliberately not awaited: the response returns immediately and the sweep
+  // continues in the background. Errors are logged rather than surfaced,
+  // because there is no longer a request to surface them to — the per-invoice
+  // outcome lands in ReminderLog either way.
+  setImmediate(() => {
+    runReminderSweep({ orgId })
+      .then(result => {
+        logAudit({
+          req: actor,
+          action: 'invoice.remind_all',
+          entity: 'invoice',
+          meta: { sent: result.sent, skipped: result.skipped, failed: result.failed, scanned: result.scanned }
+        });
+        console.log(`[reminders] manual sweep for org ${orgId}: sent=${result.sent} skipped=${result.skipped} failed=${result.failed}`);
+      })
+      .catch(error => console.error(`[reminders] manual sweep for org ${orgId} failed:`, error.message));
+  });
+
+  res.status(202).json({
+    queued: true,
+    eligible: withEmail,
+    withoutEmail: pending.length - withEmail,
+    total: pending.length,
+    message: `Chasing ${withEmail} invoice${withEmail === 1 ? '' : 's'} in the background. Customers already reminded at this stage will be skipped.`
+  });
 });
 
 const invoicePdf = asyncHandler(async (req, res) => {
@@ -465,7 +633,11 @@ const invoicePdf = asyncHandler(async (req, res) => {
     gstin: invoice.billTo.gstin,
     stateCode: invoice.billTo.stateCode
   } : null);
-  const buffer = await renderInvoicePdf({ invoice, client, org });
+  // The platform default applies when this tenant has never chosen a
+  // template — previously there was no way for the super admin's choice to
+  // reach the renderer at all.
+  const platformDefaults = await getPlatformDefaults();
+  const buffer = await renderInvoicePdf({ invoice, client, org, platformDefaults });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${invoice.invoiceNumber}.pdf"`);
   res.send(buffer);
@@ -480,6 +652,7 @@ module.exports = {
   updateInvoice,
   duplicateInvoice,
   markPaid,
+  cancelInvoice,
   sendReminder,
   remindAll,
   deleteInvoice,

@@ -4,6 +4,13 @@ import { authGuard, superAdminGuard, tenantAdminGuard } from './core/auth.guard'
 export const routes: Routes = [
   { path: 'login', loadComponent: () => import('./features/auth/login.component').then(m => m.LoginComponent) },
   { path: 'register', loadComponent: () => import('./features/auth/register.component').then(m => m.RegisterComponent) },
+  // Unauthenticated recovery/onboarding routes. `accept-invite` in particular
+  // was referenced by every invitation email but never actually existed, so the
+  // link fell through to the wildcard below and invited users could never
+  // activate their account.
+  { path: 'accept-invite', loadComponent: () => import('./features/auth/accept-invite.component').then(m => m.AcceptInviteComponent) },
+  { path: 'forgot-password', loadComponent: () => import('./features/auth/forgot-password.component').then(m => m.ForgotPasswordComponent) },
+  { path: 'reset-password', loadComponent: () => import('./features/auth/reset-password.component').then(m => m.ResetPasswordComponent) },
   { path: 'terms', data: { type: 'terms' }, loadComponent: () => import('./features/legal/legal-page.component').then(m => m.LegalPageComponent) },
   { path: 'sla', data: { type: 'sla' }, loadComponent: () => import('./features/legal/legal-page.component').then(m => m.LegalPageComponent) },
   {

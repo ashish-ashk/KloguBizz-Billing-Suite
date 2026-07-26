@@ -1,0 +1,75 @@
+const { Master } = require('../models/Settings');
+const { httpError } = require('../utils/httpError');
+
+/**
+ * Makes the super admin's Masters page actually mean something.
+ *
+ * The page has always let the platform owner edit GST rate slabs, units and
+ * payment methods, but nothing read those records:
+ *   - `Item.gstRate` was a hardcoded Mongoose enum `[0,5,12,18,28]`, so adding
+ *     a 3% slab (real: gold and jewellery) in Masters had no effect whatsoever,
+ *     and the API rejected the very value the admin had just configured.
+ *   - `Item.unit` and `Payment.method` were free strings with hardcoded
+ *     defaults, so the configured lists were suggestions at best.
+ * The whole page was configured-but-unwired.
+ *
+ * Values are cached briefly because they are read on every item and payment
+ * write but change perhaps a few times a year — the alternative is a Mongo
+ * round-trip per line item.
+ */
+
+const CACHE_TTL_MS = 60 * 1000;
+const cache = new Map(); // type -> { values: Set, labels: string[], at: number }
+
+async function loadMaster(type) {
+  const cached = cache.get(type);
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached;
+
+  const docs = await Master.find({ type, active: { $ne: false } }).sort({ sortOrder: 1 }).lean();
+  const entry = {
+    // `rate` for numeric masters (GST slabs), `code` or `label` for the rest.
+    values: new Set(docs.map(doc => (type === 'gstRate' ? Number(doc.rate) : (doc.code || doc.label)))
+      .filter(value => value !== undefined && value !== null && value !== '')),
+    labels: docs.map(doc => (type === 'gstRate' ? `${doc.rate}%` : (doc.code || doc.label))),
+    at: Date.now()
+  };
+  cache.set(type, entry);
+  return entry;
+}
+
+/** Called after a masters save so the next request sees the new list. */
+function invalidateMasterCache(type) {
+  if (type) cache.delete(type);
+  else cache.clear();
+}
+
+/**
+ * Validates a value against a master list.
+ *
+ * Deliberately permissive when the list is empty: a deployment that has never
+ * seeded masters must keep working rather than rejecting every write. That
+ * makes this a guard against typos and stale client-side enums, not a security
+ * boundary.
+ */
+async function assertValidMaster(type, value, fieldLabel) {
+  if (value === undefined || value === null || value === '') return;
+  const { values, labels } = await loadMaster(type);
+  if (values.size === 0) return;
+
+  const candidate = type === 'gstRate' ? Number(value) : String(value);
+  if (values.has(candidate)) return;
+
+  throw httpError(
+    400,
+    `${fieldLabel} "${value}" is not one of the configured options (${labels.join(', ')}).`,
+    'INVALID_MASTER_VALUE'
+  );
+}
+
+/** GST rate slabs currently configured, for the frontend to render as options. */
+async function listMasterValues(type) {
+  const { labels } = await loadMaster(type);
+  return labels;
+}
+
+module.exports = { assertValidMaster, invalidateMasterCache, listMasterValues };

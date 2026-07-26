@@ -42,8 +42,12 @@ async function buildSummary(req) {
   const period = resolvePeriod(req.query);
   const filter = {
     ...tenantFilter(req),
-    // Drafts have not been issued, so they are not part of any return.
-    status: { $ne: 'draft' },
+    // Drafts were never issued, so they are not part of any return. Cancelled
+    // invoices are excluded too: their charge has been reversed by credit note
+    // (or voided before collection), so counting their tax would overstate the
+    // liability. The credit notes themselves are reported separately, as
+    // GSTR-1's CDNR table expects.
+    status: { $nin: ['draft', 'cancelled'] },
     date: { $gte: period.from, $lte: period.to }
   };
   // Only the fields the summary needs, so a long history doesn't drag whole

@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { Organisation } = require('../models/Organisation');
 const { Plan } = require('../models/Plan');
-const { Reminder, InvoiceTemplate, AuditLog, Master, GlobalSetting } = require('../models/Settings');
+const { Reminder, AuditLog, Master, GlobalSetting } = require('../models/Settings');
 const { User } = require('../models/User');
 const { Client } = require('../models/Client');
 const { Invoice } = require('../models/Invoice');
@@ -12,6 +12,8 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { logAudit } = require('../services/auditService');
 const { pickFields } = require('../utils/pickFields');
+const { invalidateMasterCache } = require('../services/masterService');
+const { invalidatePlatformDefaults } = require('../services/platformSettingsService');
 
 // The super admin may change a tenant's plan and status (that's the point of
 // the panel), but not `invoiceSequence`/`invoiceSequenceFY` — those belong to
@@ -147,14 +149,17 @@ const upsertPlan = asyncHandler(async (req, res) => {
 // ---- Masters: GST rates, HSN codes, payment methods, units ----
 
 const listMasters = asyncHandler(async (req, res) => {
-  const [reminders, templates, masters] = await Promise.all([
+  const [reminders, masters] = await Promise.all([
     Reminder.find().sort({ daysOffset: 1 }),
-    InvoiceTemplate.find(),
     Master.find().sort({ sortOrder: 1, createdAt: 1 })
   ]);
   const grouped = { gstRate: [], hsn: [], paymentMethod: [], unit: [] };
   masters.forEach(m => { (grouped[m.type] || (grouped[m.type] = [])).push(m); });
-  res.json({ reminders, templates, masters: grouped });
+  // `templates` is deliberately gone. It returned rows from a separate
+  // InvoiceTemplate collection that nothing ever rendered — the real templates
+  // live in services/invoiceTemplates.js, and the platform-wide default is the
+  // `defaultInvoiceTemplate` global setting.
+  res.json({ reminders, masters: grouped });
 });
 
 // Bulk-replace all masters of one type in a single save.
@@ -172,6 +177,9 @@ const saveMasters = asyncHandler(async (req, res) => {
     active: item.active !== false,
     sortOrder: i
   })));
+  // Masters are cached for a minute on the read path; drop the entry so the
+  // very next item/payment write validates against what was just saved.
+  invalidateMasterCache(type);
   logAudit({ req, action: 'masters.saved', entity: 'master', entityId: type, meta: { count: docs.length } });
   res.json(docs);
 });
@@ -183,17 +191,7 @@ const updateReminder = asyncHandler(async (req, res) => {
   res.json(reminder);
 });
 
-const updateTemplate = asyncHandler(async (req, res) => {
-  if (req.body.isDefault) {
-    await InvoiceTemplate.updateMany({}, { isDefault: false });
-  }
-  const template = await InvoiceTemplate.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
-  if (!template) throw httpError(404, 'Template not found');
-  logAudit({ req, action: 'template.updated', entity: 'invoiceTemplate', entityId: template._id, meta: { name: template.name } });
-  res.json(template);
-});
-
-// ---- Global key/value settings (branding, email, template options...) ----
+// ---- Global key/value settings (branding, email, template default...) ----
 
 const getSettings = asyncHandler(async (req, res) => {
   const settings = await GlobalSetting.find();
@@ -206,6 +204,9 @@ const saveSetting = asyncHandler(async (req, res) => {
     { value: req.body },
     { new: true, upsert: true }
   );
+  // The platform template default is cached on the PDF render path; drop it so
+  // the change takes effect on the very next invoice.
+  if (req.params.key === 'defaultInvoiceTemplate') invalidatePlatformDefaults();
   logAudit({ req, action: 'settings.saved', entity: 'setting', entityId: req.params.key });
   res.json({ key: setting.key, value: setting.value });
 });
@@ -226,7 +227,6 @@ module.exports = {
   listMasters,
   saveMasters,
   updateReminder,
-  updateTemplate,
   getSettings,
   saveSetting,
   listAuditLogs

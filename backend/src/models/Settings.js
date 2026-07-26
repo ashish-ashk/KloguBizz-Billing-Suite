@@ -8,14 +8,6 @@ const reminderSchema = new mongoose.Schema({
   template: String
 }, { timestamps: true });
 
-const invoiceTemplateSchema = new mongoose.Schema({
-  name: String,
-  layout: { type: String, default: 'standard' },
-  accentColor: { type: String, default: '#4f46e5' },
-  enabled: { type: Boolean, default: true },
-  isDefault: { type: Boolean, default: false }
-}, { timestamps: true });
-
 const auditLogSchema = new mongoose.Schema({
   orgId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organisation', index: true },
   actorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -48,7 +40,6 @@ const globalSettingSchema = new mongoose.Schema({
 
 module.exports = {
   Reminder: mongoose.model('Reminder', reminderSchema),
-  InvoiceTemplate: mongoose.model('InvoiceTemplate', invoiceTemplateSchema),
   AuditLog: mongoose.model('AuditLog', auditLogSchema),
   Master: mongoose.model('Master', masterSchema),
   GlobalSetting: mongoose.model('GlobalSetting', globalSettingSchema)

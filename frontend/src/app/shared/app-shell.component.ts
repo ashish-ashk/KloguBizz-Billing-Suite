@@ -124,6 +124,23 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
           </div>
         </div>
         <div class="page page-enter">
+          @if (accountBlocked()) {
+            <!-- A suspended or cancelled account can read and export but cannot
+                 save. Without this banner every write just fails with a toast
+                 and the tenant has no idea why, or what to do about it. -->
+            <div class="info-box danger no-print" style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start;">
+              <app-icon name="alertTriangle" [size]="16" style="flex-shrink:0;margin-top:1px" />
+              <div style="line-height:1.6;">
+                <strong>{{ orgStatus() === 'suspended' ? 'This account is suspended.' : 'This account has been cancelled.' }}</strong><br />
+                You can still view, print and export everything you have already recorded, but new
+                changes cannot be saved.
+                @if (orgStatus() === 'suspended') {
+                  <a routerLink="/subscription" style="color:inherit;font-weight:700;text-decoration:underline;">Check your subscription</a>
+                  or contact support to restore access.
+                }
+              </div>
+            </div>
+          }
           <div class="page-head">
             <div>
               <h1>{{ title }}</h1>
@@ -147,6 +164,14 @@ export class AppShellComponent {
   userMenuOpen = signal(false);
   collapsed = signal(localStorage.getItem(COLLAPSE_KEY) === '1');
   quickSearch = viewChild(QuickSearchComponent);
+
+  /** Organisation status, which now genuinely gates writes server-side. */
+  orgStatus = computed(() => this.auth.organisation()?.status);
+  /** Suspended and cancelled accounts are read-only, not signed out. */
+  accountBlocked = computed(() => {
+    const status = this.orgStatus();
+    return status === 'suspended' || status === 'cancelled';
+  });
 
   commandItems = computed<CommandItem[]>(() => {
     const items: CommandItem[] = [

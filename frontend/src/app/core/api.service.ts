@@ -2,7 +2,8 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../environments/environment';
 import {
-  AuditEntry, Client, GstSummary, Invoice, InvoiceStats, InvoiceTemplate, Item, ItemBulkUploadResult, Master, MastersResponse,
+  AuditEntry, Client, CreditNote, CreditNoteReason, CreditSummary, GstSummary, Invoice, InvoiceItem, InvoiceStats,
+  Item, ItemBulkUploadResult, Master, MastersResponse,
   Organisation, OrgSummary, OrgUser, Payment, Plan, PlanUsage, PublicBranding, Reminder, Subscription, SuperOverview
 } from './models';
 
@@ -42,10 +43,42 @@ export class ApiService {
   duplicateInvoice(id: string) { return this.http.post<Invoice>(`${this.api}/invoices/${id}/duplicate`, {}); }
   markPaid(id: string) { return this.http.post<Invoice>(`${this.api}/invoices/${id}/mark-paid`, {}); }
   sendReminder(id: string) { return this.http.post<{ ok: boolean }>(`${this.api}/invoices/${id}/remind`, {}); }
-  remindAll() { return this.http.post<{ sent: number; skipped: number; total: number }>(`${this.api}/invoices/remind-all`, {}); }
+  /** Queues a background sweep and returns immediately (202). It used to send
+   *  serially inside the request, which timed out on any real overdue book. */
+  remindAll() {
+    return this.http.post<{
+      queued: boolean; eligible: number; withoutEmail: number; total: number; message: string;
+    }>(`${this.api}/invoices/remind-all`, {});
+  }
   deleteInvoice(id: string) { return this.http.delete(`${this.api}/invoices/${id}`); }
   downloadInvoicePdf(id: string) { return this.http.get(`${this.api}/invoices/${id}/pdf`, { responseType: 'blob' }); }
+  /** Voids an issued invoice that was raised in error and never paid. The
+   *  document is retained — its number stays in the series, as GST requires. */
+  cancelInvoice(id: string, reason?: string) {
+    return this.http.post<Invoice>(`${this.api}/invoices/${id}/cancel`, { reason });
+  }
   exportInvoicesCsv() { return this.http.get(`${this.api}/invoices/export.csv`, { responseType: 'blob' }); }
+
+  // ── Credit notes ─────────────────────────────
+  creditNotes(invoiceId?: string) {
+    const suffix = invoiceId ? `?invoiceId=${invoiceId}` : '';
+    return this.http.get<CreditNote[]>(`${this.api}/credit-notes${suffix}`);
+  }
+  creditNote(id: string) { return this.http.get<CreditNote>(`${this.api}/credit-notes/${id}`); }
+  /** The ceiling and history for one invoice, so the form can show it up front. */
+  creditSummary(invoiceId: string) {
+    return this.http.get<CreditSummary>(`${this.api}/credit-notes/for-invoice/${invoiceId}`);
+  }
+  createCreditNote(payload: {
+    invoiceId: string;
+    reason?: CreditNoteReason;
+    reasonNote?: string;
+    items?: Partial<InvoiceItem>[];
+    notes?: string;
+  }) {
+    return this.http.post<{ creditNote: CreditNote; invoice: Invoice }>(`${this.api}/credit-notes`, payload);
+  }
+  exportCreditNotesCsv() { return this.http.get(`${this.api}/credit-notes/export.csv`, { responseType: 'blob' }); }
 
   // ── Payments ─────────────────────────────────
   payments() { return this.http.get<Payment[]>(`${this.api}/payments`); }
@@ -76,9 +109,17 @@ export class ApiService {
 
   // ── Users ────────────────────────────────────
   users() { return this.http.get<OrgUser[]>(`${this.api}/users`); }
+  /** `inviteUrl` is only returned in local mode (no email provider configured),
+   *  so the flow stays testable without leaking a live credential in production. */
   inviteUser(payload: { name: string; email: string; role: string }) {
-    return this.http.post<{ user: OrgUser; inviteUrl: string }>(`${this.api}/users/invite`, payload);
+    return this.http.post<{ user: OrgUser; inviteUrl?: string; delivered: boolean }>(`${this.api}/users/invite`, payload);
   }
+  /** Issues a fresh invitation link, invalidating any outstanding one. */
+  resendInvite(id: string) {
+    return this.http.post<{ user: OrgUser; inviteUrl?: string; delivered: boolean }>(`${this.api}/users/${id}/resend-invite`, {});
+  }
+  /** Withdraws a pending invitation, freeing the seat and the email address. */
+  revokeInvite(id: string) { return this.http.delete(`${this.api}/users/${id}/invite`); }
   updateUser(id: string, payload: Partial<OrgUser>) { return this.http.put<OrgUser>(`${this.api}/users/${id}`, payload); }
   removeUser(id: string) { return this.http.delete<OrgUser>(`${this.api}/users/${id}`); }
   changePassword(payload: { currentPassword: string; newPassword: string }) {
@@ -135,9 +176,6 @@ export class ApiService {
   }
   superUpdateReminder(id: string, payload: Partial<Reminder>) {
     return this.http.put<Reminder>(`${this.api}/superadmin/reminders/${id}`, payload);
-  }
-  superUpdateTemplate(id: string, payload: Partial<InvoiceTemplate>) {
-    return this.http.put<InvoiceTemplate>(`${this.api}/superadmin/templates/${id}`, payload);
   }
   superSettings() { return this.http.get<Record<string, any>>(`${this.api}/superadmin/settings`); }
   superSaveSetting(key: string, value: unknown) {

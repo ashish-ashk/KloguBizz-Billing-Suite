@@ -66,7 +66,12 @@ const invoiceSchema = new mongoose.Schema({
   invoiceNumber: { type: String, required: true },
   date: { type: Date, required: true },
   dueDate: { type: Date, required: true },
-  status: { type: String, enum: ['draft', 'pending', 'partial', 'paid', 'overdue'], default: 'draft' },
+  // 'cancelled' means the charge has been fully reversed by credit note(s), or
+  // the invoice was voided before anything was collected. The document itself
+  // is retained either way — under GST an issued invoice is never deleted.
+  status: { type: String, enum: ['draft', 'pending', 'partial', 'paid', 'overdue', 'cancelled'], default: 'draft' },
+  cancelledAt: Date,
+  cancelReason: String,
   paidDate: Date,
   items: { type: [lineItemSchema], default: [] },
   // Invoice-level discount, on top of any per-line discounts.
@@ -79,6 +84,10 @@ const invoiceSchema = new mongoose.Schema({
   // full total as pending. Kept in sync by
   // invoiceController.recalculateSettlement.
   amountPaid: { type: Number, default: 0, min: 0 },
+  // Total of issued credit notes against this invoice. Reduces what the
+  // customer owes just as a payment does — a fully credited invoice is settled
+  // without any money having changed hands.
+  amountCredited: { type: Number, default: 0, min: 0 },
   balanceDue: { type: Number, default: 0 },
   notes: String,
   paymentTerms: { type: String, default: 'Net 15' },

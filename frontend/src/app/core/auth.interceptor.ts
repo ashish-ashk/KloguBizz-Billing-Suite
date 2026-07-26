@@ -18,6 +18,15 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
           : 'Your session has expired. Please sign in again.';
         auth.forceLogout(message);
       }
+
+      // The organisation was suspended or cancelled while this session was open.
+      // The cached organisation still says 'active' (it was stored at login), so
+      // sync it — otherwise the read-only banner never appears and the user just
+      // sees writes fail for no visible reason.
+      if (err.status === 403 && (err.error?.code === 'ORG_SUSPENDED' || err.error?.code === 'ORG_CANCELLED')) {
+        auth.markOrganisationStatus(err.error.code === 'ORG_SUSPENDED' ? 'suspended' : 'cancelled');
+      }
+
       return throwError(() => err);
     })
   );

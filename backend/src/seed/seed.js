@@ -8,7 +8,7 @@ const { Invoice } = require('../models/Invoice');
 const { Payment } = require('../models/Payment');
 const { Plan } = require('../models/Plan');
 const { Subscription } = require('../models/Subscription');
-const { Reminder, InvoiceTemplate, AuditLog, Master, GlobalSetting } = require('../models/Settings');
+const { Reminder, AuditLog, Master, GlobalSetting } = require('../models/Settings');
 const { Item } = require('../models/Item');
 const { calculateInvoiceTotals } = require('../services/gstService');
 
@@ -66,7 +66,6 @@ async function seed() {
     Plan.deleteMany({}),
     Subscription.deleteMany({}),
     Reminder.deleteMany({}),
-    InvoiceTemplate.deleteMany({}),
     AuditLog.deleteMany({}),
     Master.deleteMany({}),
     GlobalSetting.deleteMany({}),
@@ -77,14 +76,70 @@ async function seed() {
   await Master.insertMany(masters);
   await GlobalSetting.insertMany(settings);
   await Reminder.insertMany([
-    { name: 'Friendly Reminder', daysOffset: -3, enabled: true, subject: 'Invoice {{invoice_id}} is due soon', template: 'Dear {{client_name}}, invoice {{invoice_id}} for {{amount}} is due on {{due_date}}.' },
-    { name: 'Due Today', daysOffset: 0, enabled: true, subject: 'Invoice {{invoice_id}} is due today', template: 'Dear {{client_name}}, invoice {{invoice_id}} for {{amount}} is due today.' },
-    { name: 'Overdue Notice', daysOffset: 3, enabled: true, subject: 'Invoice {{invoice_id}} is overdue', template: 'Dear {{client_name}}, invoice {{invoice_id}} for {{amount}} was due on {{due_date}} and is now overdue.' },
-    { name: 'Final Notice', daysOffset: 7, enabled: false, subject: 'Final notice — invoice {{invoice_id}}', template: 'Dear {{client_name}}, this is a final notice for invoice {{invoice_id}}.' }
-  ]);
-  await InvoiceTemplate.insertMany([
-    { name: 'Standard GST', layout: 'standard', accentColor: '#4f46e5', isDefault: true },
-    { name: 'Compact GST', layout: 'compact', accentColor: '#059669' }
+    // Placeholder names must match what emailService.renderTemplate substitutes
+    // ({{invoiceNumber}}, {{clientName}}, {{amount}}, {{dueDate}}, {{dueState}},
+    // {{overdueDays}}, {{orgName}}). The previous seed used {{invoice_id}} and
+    // {{client_name}}, which were never recognised — they would have rendered as
+    // empty strings in a real reminder.
+    {
+      name: 'Friendly Reminder',
+      daysOffset: -3,
+      enabled: true,
+      subject: 'Invoice {{invoiceNumber}} is due soon',
+      template: [
+        'Dear {{clientName}},',
+        '',
+        'Invoice {{invoiceNumber}} for {{amount}} is due on {{dueDate}}.',
+        '',
+        'Warm regards,',
+        '{{orgName}}'
+      ].join('\n')
+    },
+    {
+      name: 'Due Today',
+      daysOffset: 0,
+      enabled: true,
+      subject: 'Invoice {{invoiceNumber}} is due today',
+      template: [
+        'Dear {{clientName}},',
+        '',
+        'Invoice {{invoiceNumber}} for {{amount}} is due today.',
+        '',
+        'Warm regards,',
+        '{{orgName}}'
+      ].join('\n')
+    },
+    {
+      name: 'Overdue Notice',
+      daysOffset: 3,
+      enabled: true,
+      subject: 'Invoice {{invoiceNumber}} is overdue',
+      template: [
+        'Dear {{clientName}},',
+        '',
+        'Invoice {{invoiceNumber}} for {{amount}} {{dueState}}.',
+        '',
+        'Please arrange payment at your earliest convenience.',
+        '',
+        'Warm regards,',
+        '{{orgName}}'
+      ].join('\n')
+    },
+    {
+      name: 'Final Notice',
+      daysOffset: 7,
+      enabled: false,
+      subject: 'Final notice — invoice {{invoiceNumber}}',
+      template: [
+        'Dear {{clientName}},',
+        '',
+        'This is a final notice for invoice {{invoiceNumber}}, now {{overdueDays}} days overdue',
+        'with {{balanceDue}} still outstanding.',
+        '',
+        'Warm regards,',
+        '{{orgName}}'
+      ].join('\n')
+    }
   ]);
 
   const org = await Organisation.create({

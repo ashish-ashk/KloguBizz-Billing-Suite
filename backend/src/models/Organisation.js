@@ -29,7 +29,11 @@ const brandingSchema = new mongoose.Schema({
   headerImageUrl: String,
   primaryColor: { type: String, default: '#4f46e5' },
   invoicePrefix: { type: String, default: 'KLG' },
+  creditNotePrefix: { type: String, default: 'CN' },
   invoiceTitleLabel: { type: String, default: '' },
+  // Round the payable total to a whole rupee (the Indian billing convention).
+  // Defaults to true; a tenant billing in exact paise can turn it off.
+  roundOffTotal: { type: Boolean, default: true },
   invoiceTemplateId: { type: String, default: 'modern-minimal' },
   customInvoiceTemplate: { type: customInvoiceTemplateSchema, default: null },
   invoiceContent: { type: invoiceContentSchema, default: () => ({}) }
@@ -83,7 +87,12 @@ const organisationSchema = new mongoose.Schema({
   // Null for orgs created before this field existed — see
   // invoiceNumberService.js's nextInvoiceNumber for the migration-safe
   // handling of that case (it must NOT reset an org's existing count).
-  invoiceSequenceFY: { type: String, default: null }
+  invoiceSequenceFY: { type: String, default: null },
+  // Credit notes need their own consecutive series: GST requires a distinct
+  // numbering series per document type, so a credit note must never draw from
+  // the tax-invoice counter. Same FY-reset semantics as above.
+  creditNoteSequence: { type: Number, default: 0 },
+  creditNoteSequenceFY: { type: String, default: null }
 }, { timestamps: true });
 
 organisationSchema.index({ adminEmail: 1 });

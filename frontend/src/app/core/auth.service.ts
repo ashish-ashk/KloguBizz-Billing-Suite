@@ -54,10 +54,50 @@ export class AuthService {
     return this.http.post<AuthResponse>(`${environment.apiUrl}/auth/register`, payload);
   }
 
+  /** Unauthenticated peek at an invitation, so the accept screen can show who
+   *  is being invited and to which organisation. */
+  inviteDetails(token: string) {
+    return this.http.get<{ name: string; email: string; role: string; orgName: string | null; expiresAt: string }>(
+      `${environment.apiUrl}/auth/invite/${encodeURIComponent(token)}`
+    );
+  }
+
+  /** Redeems an invitation and signs the new teammate straight in — unlike
+   *  register, which deliberately bounces to /login. Someone who just chose a
+   *  password has proved who they are, and a second login form here would be
+   *  friction for no security gain. */
+  acceptInvite(payload: { token: string; password: string; acceptTerms: boolean }) {
+    return this.http.post<AuthResponse>(`${environment.apiUrl}/auth/accept-invite`, payload)
+      .pipe(tap(res => this.store(res)));
+  }
+
+  /** Starts a password reset. Always succeeds, whether or not the address has
+   *  an account — the API deliberately gives nothing away. */
+  forgotPassword(email: string) {
+    return this.http.post<{ ok: boolean; message: string; resetUrl?: string; localMode?: boolean }>(
+      `${environment.apiUrl}/auth/forgot-password`, { email }
+    );
+  }
+
+  /** Completes a reset. Does not auto-authenticate: every existing session is
+   *  invalidated server-side, so the user signs in fresh with the new password. */
+  resetPassword(payload: { token: string; password: string }) {
+    return this.http.post<{ ok: boolean; message: string }>(`${environment.apiUrl}/auth/reset-password`, payload);
+  }
+
   /** Updates the cached organisation (e.g. after saving branding/theme changes). */
   setOrganisation(org: Organisation) {
     localStorage.setItem(this.orgKey, JSON.stringify(org));
     this.organisation.set(org);
+  }
+
+  /** Reconciles the cached organisation status when the server tells us it has
+   *  changed mid-session — the org is cached at login, so a suspension applied
+   *  afterwards would otherwise stay invisible to the UI. */
+  markOrganisationStatus(status: string) {
+    const org = this.organisation();
+    if (!org || org.status === status) return;
+    this.setOrganisation({ ...org, status });
   }
 
   /** User-initiated sign-out (the sidebar/topbar "Sign Out" buttons). */

@@ -25,6 +25,27 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8, 'must be at least 8 characters').max(200)
 });
 
+// Tokens are base64url of 32 random bytes; bounded so an absurd payload is
+// rejected before it reaches a hash.
+const opaqueToken = z.string().min(20, 'is not a valid token').max(200, 'is not a valid token');
+
+const acceptInviteSchema = z.object({
+  token: opaqueToken,
+  password: z.string().min(8, 'must be at least 8 characters').max(200),
+  acceptTerms: z.literal(true, { errorMap: () => ({ message: 'must be accepted to activate your account' }) })
+});
+
+const forgotPasswordSchema = z.object({
+  // Deliberately lenient: the endpoint responds identically whether or not the
+  // address exists, so a strict format error here would leak more than it helps.
+  email: z.string().trim().toLowerCase().min(1, 'is required').max(200)
+});
+
+const resetPasswordSchema = z.object({
+  token: opaqueToken,
+  password: z.string().min(8, 'must be at least 8 characters').max(200)
+});
+
 // ── Clients ──────────────────────────────────────
 
 const clientCreateSchema = z.object({
@@ -166,6 +187,21 @@ const paymentCreateSchema = z.object({
   // CSV export while contributing nothing to the invoice balance.
 });
 
+// ── Credit notes ─────────────────────────────────
+
+const creditNoteCreateSchema = z.object({
+  invoiceId: objectId,
+  date: isoDate.optional(),
+  // A classification, not free text: GSTR-1's CDNR table requires one.
+  reason: z.enum(['sales-return', 'post-sale-discount', 'correction', 'deficiency-in-service', 'order-cancelled', 'other']).optional(),
+  reasonNote: longText.optional().nullable(),
+  // Omitted for a full reversal, in which case the controller copies the
+  // invoice's own lines so HSN codes and rates stay consistent for the return.
+  items: z.array(lineItemSchema).max(500, 'cannot exceed 500 line items').optional(),
+  discountPercent: percent.optional(),
+  notes: longText.optional().nullable()
+});
+
 // ── Users ────────────────────────────────────────
 
 const userInviteSchema = z.object({
@@ -212,10 +248,12 @@ const subscriptionStartSchema = z.object({
 
 module.exports = {
   registerSchema, loginSchema, changePasswordSchema,
+  acceptInviteSchema, forgotPasswordSchema, resetPasswordSchema,
   clientCreateSchema, clientUpdateSchema,
   itemCreateSchema, itemUpdateSchema,
   invoiceCreateSchema, invoiceUpdateSchema, markPaidSchema,
   paymentCreateSchema,
+  creditNoteCreateSchema,
   userInviteSchema, userUpdateSchema,
   organisationUpdateSchema, transferOwnershipSchema,
   subscriptionStartSchema

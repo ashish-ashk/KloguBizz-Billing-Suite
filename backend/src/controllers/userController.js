@@ -9,6 +9,8 @@ const { sendInviteEmail } = require('../services/emailService');
 const { assertUserQuota } = require('../services/planService');
 const { logAudit } = require('../services/auditService');
 const { pickFields } = require('../utils/pickFields');
+const { createToken, expiryFromNow, INVITE_TTL_MS } = require('../services/tokenService');
+const { env } = require('../config/env');
 
 // Roles a tenant admin is allowed to hand out. Deliberately excludes
 // 'superadmin': that role is in the User enum because the platform owner
@@ -39,24 +41,107 @@ const listUsers = asyncHandler(async (req, res) => {
   res.json(users);
 });
 
+/**
+ * Issues a fresh invite token and emails the link.
+ *
+ * Shared by invite and resend so the two can't drift. Only the hash is stored
+ * (see services/tokenService.js) and any previous token for this user is
+ * replaced, which is what makes resending implicitly revoke the old link.
+ */
+async function issueInvite(user, req) {
+  const { token, hash } = createToken();
+  user.inviteTokenHash = hash;
+  user.inviteTokenExpires = expiryFromNow(INVITE_TTL_MS);
+  user.invitedAt = new Date();
+  await user.save();
+
+  const org = await Organisation.findById(user.orgId).select('name').lean();
+  const inviteUrl = `${env.FRONTEND_URL}/accept-invite?token=${encodeURIComponent(token)}`;
+  const result = await sendInviteEmail({
+    to: user.email,
+    name: user.name,
+    inviteUrl,
+    orgName: org?.name,
+    inviterName: req.user?.name,
+    expiresAt: user.inviteTokenExpires
+  });
+
+  // In local mode there's no email, so the link is returned for hand-off. Never
+  // in production, where an admin could otherwise harvest a working credential
+  // for an address they don't control.
+  return { inviteUrl: result.skipped && !env.isProduction ? inviteUrl : undefined, delivered: !!result.sent };
+}
+
 const inviteUser = asyncHandler(async (req, res) => {
   const { name, email, role = 'viewer' } = req.body;
   if (!name || !email) throw httpError(400, 'name and email are required');
   await assertUserQuota(req.orgId);
-  const inviteToken = crypto.randomBytes(24).toString('hex');
+
+  const existing = await User.findOne({ email: String(email).toLowerCase() });
+  if (existing) {
+    // Emails are globally unique, so say something useful rather than letting
+    // the raw duplicate-key error surface.
+    const sameOrg = String(existing.orgId) === String(req.orgId);
+    throw httpError(
+      409,
+      sameOrg
+        ? `${email} is already on your team.`
+        : 'That email address is already registered on KloguBizz.',
+      'EMAIL_IN_USE'
+    );
+  }
+
   const user = await User.create({
     orgId: req.orgId,
     name,
     email,
     role,
     status: 'invited',
-    inviteToken,
-    passwordHash: await bcrypt.hash(crypto.randomBytes(12).toString('hex'), 12)
+    // A random unusable password: the account has no password until the invite
+    // is redeemed, and this keeps the required field satisfied without leaving
+    // a guessable value behind.
+    passwordHash: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12)
   });
-  const inviteUrl = `${process.env.FRONTEND_URL || 'http://localhost:4200'}/accept-invite?token=${inviteToken}`;
-  await sendInviteEmail({ to: email, inviteUrl });
-  logAudit({ req, action: 'user.invited', entity: 'user', entityId: user._id, meta: { email, role } });
-  res.status(201).json({ user: { ...user.toObject(), passwordHash: undefined }, inviteUrl });
+
+  const { inviteUrl, delivered } = await issueInvite(user, req);
+  logAudit({ req, action: 'user.invited', entity: 'user', entityId: user._id, meta: { email, role, delivered } });
+  res.status(201).json({ user: { ...user.toObject(), passwordHash: undefined }, inviteUrl, delivered });
+});
+
+/**
+ * Sends a new invitation link, replacing any outstanding one.
+ *
+ * Needed because invites expire, and because the original link may never have
+ * arrived — without this an admin's only recourse was to delete the user and
+ * start again.
+ */
+const resendInvite = asyncHandler(async (req, res) => {
+  const user = await User.findOne({ _id: req.params.id, ...tenantFilter(req) });
+  if (!user) throw httpError(404, 'User not found');
+  if (user.status !== 'invited') {
+    throw httpError(409, `${user.name} has already activated their account.`, 'ALREADY_ACTIVE');
+  }
+  const { inviteUrl, delivered } = await issueInvite(user, req);
+  logAudit({ req, action: 'user.invite_resent', entity: 'user', entityId: user._id, meta: { email: user.email, delivered } });
+  res.json({ user: { ...user.toObject(), passwordHash: undefined }, inviteUrl, delivered });
+});
+
+/**
+ * Withdraws a pending invitation.
+ *
+ * A hard delete rather than the soft-disable used for real users: nobody has
+ * ever signed in to this record, it owns no data, and removing it frees both
+ * the plan seat and the globally-unique email address for re-inviting.
+ */
+const revokeInvite = asyncHandler(async (req, res) => {
+  const user = await User.findOne({ _id: req.params.id, ...tenantFilter(req) });
+  if (!user) throw httpError(404, 'User not found');
+  if (user.status !== 'invited') {
+    throw httpError(409, 'That user has already activated their account — disable them instead.', 'ALREADY_ACTIVE');
+  }
+  await user.deleteOne();
+  logAudit({ req, action: 'user.invite_revoked', entity: 'user', entityId: user._id, meta: { email: user.email } });
+  res.status(204).end();
 });
 
 // Authenticated user changes their own password.
@@ -116,4 +201,7 @@ const removeUser = asyncHandler(async (req, res) => {
   res.json(user);
 });
 
-module.exports = { listUsers, inviteUser, updateUser, removeUser, changePassword };
+module.exports = {
+  listUsers, inviteUser, resendInvite, revokeInvite,
+  updateUser, removeUser, changePassword
+};
