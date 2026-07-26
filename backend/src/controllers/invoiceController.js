@@ -115,11 +115,16 @@ const getInvoice = asyncHandler(async (req, res) => {
 const createInvoice = asyncHandler(async (req, res) => {
   await assertInvoiceQuota(req.orgId);
   const body = normalizeBuyer(req.body);
+  // The number is always server-generated from the org's atomic counter,
+  // never taken from the request — a client-supplied value would bypass
+  // that counter (leaving it out of sync) and risks colliding with a
+  // number the counter has already handed out.
+  delete body.invoiceNumber;
   const totals = await totalsFor(req, body);
   const invoice = await Invoice.create({
     ...body,
     orgId: req.orgId,
-    invoiceNumber: body.invoiceNumber || await nextInvoiceNumber(req.orgId),
+    invoiceNumber: await nextInvoiceNumber(req.orgId),
     totals
   });
   logAudit({ req, action: 'invoice.created', entity: 'invoice', entityId: invoice._id, meta: { invoiceNumber: invoice.invoiceNumber, total: totals.total } });
@@ -128,6 +133,9 @@ const createInvoice = asyncHandler(async (req, res) => {
 
 const updateInvoice = asyncHandler(async (req, res) => {
   const update = normalizeBuyer(req.body);
+  // Immutable once issued — same reasoning as createInvoice above, and it
+  // also stops an edit from accidentally reassigning an already-used number.
+  delete update.invoiceNumber;
   if (req.body.items || req.body.clientId !== undefined || req.body.billTo !== undefined) {
     const existing = await Invoice.findOne({ _id: req.params.id, ...tenantFilter(req) });
     if (!existing) throw httpError(404, 'Invoice not found');

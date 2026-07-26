@@ -77,7 +77,13 @@ const organisationSchema = new mongoose.Schema({
   status: { type: String, enum: ['trial', 'active', 'suspended', 'cancelled'], default: 'trial' },
   brandingConfig: { type: brandingSchema, default: () => ({}) },
   themeConfig: { type: themeConfigSchema, default: () => ({}) },
-  invoiceSequence: { type: Number, default: 0 }
+  invoiceSequence: { type: Number, default: 0 },
+  // Which financial year (Apr–Mar, labelled by its starting calendar year,
+  // e.g. '2026' for FY2026-27) `invoiceSequence` currently counts against.
+  // Null for orgs created before this field existed — see
+  // invoiceNumberService.js's nextInvoiceNumber for the migration-safe
+  // handling of that case (it must NOT reset an org's existing count).
+  invoiceSequenceFY: { type: String, default: null }
 }, { timestamps: true });
 
 organisationSchema.index({ adminEmail: 1 });
