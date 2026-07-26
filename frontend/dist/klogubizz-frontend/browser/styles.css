@@ -2366,8 +2366,22 @@ app-quick-search {
     padding: 16px 14px 22px;
   }
   .topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
     padding: 0 12px 0 60px;
     gap: 8px;
+  }
+  .topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .topbar-right {
+    min-width: 0;
+    justify-self: end;
   }
   .crumb-org {
     display: none;
@@ -2376,10 +2390,6 @@ app-quick-search {
     display: none;
   }
   .qsearch {
-    position: absolute;
-    left: calc(50% + 24px);
-    top: 50%;
-    transform: translate(-50%, -50%);
     flex: 0 0 34px;
     width: 34px;
     height: 34px;
@@ -2412,7 +2422,6 @@ app-quick-search {
     left: 68px;
     right: 8px;
     top: 8px;
-    transform: none;
     z-index: 41;
     box-shadow: var(--shadow-md);
     overflow: visible;

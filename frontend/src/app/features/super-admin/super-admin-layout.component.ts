@@ -73,10 +73,12 @@ const SUPER_ADMIN_COMMANDS: CommandItem[] = [
             [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'" [title]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'">
             <app-icon name="menu" [size]="17" />
           </button>
-          <div class="topbar-crumb">
-            <span class="crumb-org">Owner Panel</span>
-            <app-icon name="chevronRight" [size]="12" class="crumb-sep" />
-            <span class="crumb-page">Platform Control</span>
+          <div class="topbar-left">
+            <div class="topbar-crumb">
+              <span class="crumb-org">Owner Panel</span>
+              <app-icon name="chevronRight" [size]="12" class="crumb-sep" />
+              <span class="crumb-page">Platform Control</span>
+            </div>
           </div>
           <app-quick-search class="no-print" [items]="commandItems" (navigate)="router.navigateByUrl($event)" />
           <div class="topbar-right">
