@@ -77,9 +77,13 @@ function drawDivider(doc, style, x1, x2, y, color) {
 }
 
 /** Renders the header block; returns the y position content should resume at. */
-function drawHeader(doc, { template, org, invoice, brand, left, right, width, font, fontBold, logo }) {
+function drawHeader(doc, { template, org, invoice, brand, left, right, width, font, fontBold, logo, titleLabel }) {
   const orgName = org?.name || 'Your Business';
   let y = 46;
+
+  // Tenant-wide override of the title word ("Invoice"/"Tax Invoice") set on
+  // the Invoice Templates page; falls back to each archetype's own default.
+  const T = def => (titleLabel || def);
 
   const drawLogoAt = (x, yPos, h) => {
     if (logo) { try { doc.image(logo, x, yPos, { height: h }); } catch { /* corrupt image data, skip */ } }
@@ -92,7 +96,7 @@ function drawHeader(doc, { template, org, invoice, brand, left, right, width, fo
     doc.font(font).fontSize(8).fillColor(FAINT);
     const line2 = [org?.address, org?.gstin && `GSTIN: ${org.gstin}`].filter(Boolean).join('  ·  ');
     if (line2) doc.text(line2, textX, y + 18, { width: width * 0.55 });
-    doc.fillColor(brand).font(fontBold).fontSize(14).text('Invoice', left, y, { width, align: 'right' });
+    doc.fillColor(brand).font(fontBold).fontSize(14).text(T('Invoice'), left, y, { width, align: 'right' });
     doc.fillColor(MUTED).font(font).fontSize(8.5);
     doc.text(invoice.invoiceNumber, left, y + 18, { width, align: 'right' });
     doc.text(`${fmtDate(invoice.date)}  ·  Due ${fmtDate(invoice.dueDate)}`, left, y + 30, { width, align: 'right' });
@@ -109,7 +113,7 @@ function drawHeader(doc, { template, org, invoice, brand, left, right, width, fo
     let iy = y + 32;
     if (org?.address) { doc.text(org.address, textX, iy, { width: width * 0.45 }); iy += 12; }
     if (org?.gstin) doc.text(`GSTIN: ${org.gstin}`, textX, iy, { width: width * 0.45 });
-    doc.fillColor(brand).font(fontBold).fontSize(10).text('TAX INVOICE', left, y + 14, { width: width - 14, align: 'right', characterSpacing: 1 });
+    doc.fillColor(brand).font(fontBold).fontSize(10).text(T('Tax Invoice').toUpperCase(), left, y + 14, { width: width - 14, align: 'right', characterSpacing: 1 });
     doc.fillColor(MUTED).font(font).fontSize(8.5);
     doc.text(`No. ${invoice.invoiceNumber}`, left, y + 32, { width: width - 14, align: 'right' });
     doc.text(`Date: ${fmtDate(invoice.date)}`, left, y + 45, { width: width - 14, align: 'right' });
@@ -120,7 +124,7 @@ function drawHeader(doc, { template, org, invoice, brand, left, right, width, fo
   if (template.headerStyle === 'diagonalBold') {
     const blockW = width * 0.42;
     doc.moveTo(right - blockW, 0).lineTo(right, 0).lineTo(right, 110).lineTo(right - blockW * 0.55, 110).closePath().fill(brand);
-    doc.fillColor('#fff').font(fontBold).fontSize(26).text('INVOICE', right - blockW + 14, 30, { width: blockW - 28, align: 'right' });
+    doc.fillColor('#fff').font(fontBold).fontSize(26).text(T('Invoice').toUpperCase(), right - blockW + 14, 30, { width: blockW - 28, align: 'right' });
     doc.fontSize(9).text(`Due ${fmtDate(invoice.dueDate)}`, right - blockW + 14, 64, { width: blockW - 28, align: 'right' });
     if (logo) drawLogoAt(left, y, 32);
     const textX = logo ? left + 42 : left;
@@ -151,7 +155,7 @@ function drawHeader(doc, { template, org, invoice, brand, left, right, width, fo
     doc.fillColor(DARK).font(fontBold).fontSize(15).text(orgName, left, ty, { width, align: 'center' });
     ty += 18;
     if (org?.address) { doc.font(font).fontSize(9).fillColor(MUTED).text(org.address, left, ty, { width, align: 'center' }); ty += 14; }
-    doc.font(fontBold).fontSize(9).fillColor(DARK).text('TAX INVOICE', left, ty, { width, align: 'center', characterSpacing: 1 });
+    doc.font(fontBold).fontSize(9).fillColor(DARK).text(T('Tax Invoice').toUpperCase(), left, ty, { width, align: 'center', characterSpacing: 1 });
     ty += 13;
     doc.font(font).fontSize(9).fillColor(brand).text(`${invoice.invoiceNumber}  ·  Due ${fmtDate(invoice.dueDate)}`, left, ty, { width, align: 'center' });
     ty += 14;
@@ -167,7 +171,7 @@ function drawHeader(doc, { template, org, invoice, brand, left, right, width, fo
     doc.font(font).fontSize(8).fillColor(MUTED);
     let iy = ty + 15;
     if (org?.address) { doc.text(org.address, left, iy, { width, align: 'center' }); iy += 11; }
-    doc.font(fontBold).fontSize(9).fillColor(brand).text('TAX INVOICE', left, iy, { width, align: 'center' });
+    doc.font(fontBold).fontSize(9).fillColor(brand).text(T('Tax Invoice').toUpperCase(), left, iy, { width, align: 'center' });
     iy += 12;
     doc.font(font).fontSize(8).fillColor(MUTED).text(`${invoice.invoiceNumber}  ·  ${fmtDate(invoice.date)}`, left, iy, { width, align: 'center' });
     return iy + 18;
@@ -179,7 +183,7 @@ function drawHeader(doc, { template, org, invoice, brand, left, right, width, fo
     doc.fillColor(DARK).font(fontBold).fontSize(15).text(orgName, textX, y + 4, { width: width * 0.55 });
     const flagW = 76, flagH = 20;
     doc.moveTo(right - flagW, y).lineTo(right, y).lineTo(right, y + flagH).lineTo(right - flagW + 10, y + flagH).closePath().fill(brand);
-    doc.fillColor('#fff').font(fontBold).fontSize(8.5).text('INVOICE', right - flagW, y + 6, { width: flagW - 8, align: 'center' });
+    doc.fillColor('#fff').font(fontBold).fontSize(8.5).text(T('Invoice').toUpperCase(), right - flagW, y + 6, { width: flagW - 8, align: 'center' });
     y += 34;
     const cardY = y, cardH = 40, colW = width / 3;
     doc.rect(left, cardY, width, cardH).fill('#f5f6ff');
@@ -200,18 +204,140 @@ function drawHeader(doc, { template, org, invoice, brand, left, right, width, fo
     doc.fillColor(DARK).font(fontBold).fontSize(15).text(orgName, left, ty, { width, align: 'center' });
     ty += 17;
     if (org?.address) { doc.font(font).fontSize(8.5).fillColor(MUTED).text(org.address, left, ty, { width, align: 'center' }); ty += 13; }
-    doc.font(ITALIC_VARIANTS[font] || font).fontSize(13).fillColor(brand).text('Invoice', left, ty, { width, align: 'center' });
+    doc.font(ITALIC_VARIANTS[font] || font).fontSize(13).fillColor(brand).text(T('Invoice'), left, ty, { width, align: 'center' });
     ty += 16;
     doc.font(font).fontSize(8.5).fillColor(DARK).text(`${invoice.invoiceNumber}  ·  Due ${fmtDate(invoice.dueDate)}`, left, ty, { width, align: 'center' });
     return y + boxH + 16;
   }
 
+  if (template.headerStyle === 'sidebarStripe') {
+    if (logo) drawLogoAt(left, y, 32);
+    const textX = logo ? left + 42 : left;
+    doc.fillColor(DARK).font(fontBold).fontSize(17).text(orgName.toUpperCase(), textX, y, { width: width * 0.55, characterSpacing: 0.3 });
+    doc.font(font).fontSize(8).fillColor(FAINT);
+    const line2 = [org?.address, org?.gstin && `GSTIN: ${org.gstin}`].filter(Boolean).join('  ·  ');
+    if (line2) doc.text(line2, textX, y + 20, { width: width * 0.5 });
+    doc.fillColor(brand).font(fontBold).fontSize(15).text(T('Invoice').toUpperCase(), left, y, { width, align: 'right' });
+    doc.fillColor(MUTED).font(font).fontSize(8.5);
+    doc.text(invoice.invoiceNumber, left, y + 20, { width, align: 'right' });
+    doc.text(`${fmtDate(invoice.date)}  ·  Due ${fmtDate(invoice.dueDate)}`, left, y + 32, { width, align: 'right' });
+    return y + 56;
+  }
+
+  if (template.headerStyle === 'bannerBlock') {
+    const bandH = 56;
+    doc.roundedRect(left, y - 6, width, bandH, 8).fill(brand);
+    if (logo) drawLogoAt(left + 14, y + 8, 24);
+    const textX = logo ? left + 52 : left + 14;
+    doc.fillColor('#fff').font(fontBold).fontSize(15).text(orgName, textX, y + 10);
+    doc.font(fontBold).fontSize(13).fillColor('#fff').text(T('Invoice'), left, y + 8, { width: width - 14, align: 'right' });
+    doc.font(font).fontSize(8).fillColor('#ffffff').opacity(0.9)
+      .text(`${invoice.invoiceNumber}  ·  Due ${fmtDate(invoice.dueDate)}`, left, y + 26, { width: width - 14, align: 'right' });
+    doc.opacity(1);
+    let iy = y + bandH + 8;
+    if (org?.address || org?.gstin) {
+      const line2 = [org?.address, org?.gstin && `GSTIN: ${org.gstin}`].filter(Boolean).join('  ·  ');
+      doc.fillColor(MUTED).font(font).fontSize(8).text(line2, left, iy, { width });
+      iy += 14;
+    }
+    return iy + 6;
+  }
+
+  if (template.headerStyle === 'underlineAccent') {
+    if (logo) drawLogoAt(left, y, 26);
+    const textX = logo ? left + 34 : left;
+    doc.fillColor(DARK).font(fontBold).fontSize(15).text(orgName, textX, y, { width: width * 0.6 });
+    doc.font(font).fontSize(8).fillColor(FAINT);
+    const line2 = [org?.address, org?.gstin && `GSTIN: ${org.gstin}`].filter(Boolean).join('  ·  ');
+    if (line2) doc.text(line2, textX, y + 18, { width: width * 0.55 });
+    doc.fillColor(brand).font(fontBold).fontSize(14).text(T('Invoice').toUpperCase(), left, y, { width, align: 'right', characterSpacing: 0.5 });
+    doc.fillColor(MUTED).font(font).fontSize(8.5);
+    doc.text(invoice.invoiceNumber, left, y + 18, { width, align: 'right' });
+    doc.text(`${fmtDate(invoice.date)}  ·  Due ${fmtDate(invoice.dueDate)}`, left, y + 30, { width, align: 'right' });
+    const uy = y + 48;
+    doc.moveTo(left, uy).lineTo(right, uy).lineWidth(3).strokeColor(brand).stroke();
+    return uy + 14;
+  }
+
+  if (template.headerStyle === 'watermarkGhost') {
+    if (logo) drawLogoAt(left + width / 2 - 14, y, 28);
+    const ty = logo ? y + 34 : y;
+    doc.fillColor(DARK).font(fontBold).fontSize(13).text(orgName, left, ty, { width, align: 'center' });
+    let iy = ty + 16;
+    if (org?.address) { doc.font(font).fontSize(8.5).fillColor(MUTED).text(org.address, left, iy, { width, align: 'center' }); iy += 12; }
+    doc.font(fontBold).fontSize(9).fillColor(brand).text(T('Tax Invoice').toUpperCase(), left, iy, { width, align: 'center', characterSpacing: 1 });
+    iy += 13;
+    doc.font(font).fontSize(8.5).fillColor(MUTED).text(`${invoice.invoiceNumber}  ·  Due ${fmtDate(invoice.dueDate)}`, left, iy, { width, align: 'center' });
+    return iy + 16;
+  }
+
+  if (template.headerStyle === 'mastheadGrid') {
+    const boxH = 78, leftW = width * 0.58;
+    doc.rect(left, y, width, boxH).strokeColor('#d1d5db').lineWidth(1).stroke();
+    doc.moveTo(left + leftW, y).lineTo(left + leftW, y + boxH).strokeColor('#d1d5db').lineWidth(1).stroke();
+    if (logo) drawLogoAt(left + 12, y + 10, 24);
+    const textX = logo ? left + 46 : left + 12;
+    doc.fillColor(DARK).font(fontBold).fontSize(12).text(orgName, textX, y + 12, { width: leftW - 24 });
+    doc.font(font).fontSize(8).fillColor(MUTED);
+    let iy2 = y + 30;
+    if (org?.address) { doc.text(org.address, textX, iy2, { width: leftW - 24 }); iy2 += 12; }
+    if (org?.gstin) doc.text(`GSTIN: ${org.gstin}`, textX, iy2, { width: leftW - 24 });
+    const rowH = boxH / 3, rx = left + leftW;
+    const rows = [[`${T('Invoice')} No`, invoice.invoiceNumber, DARK], ['Date', fmtDate(invoice.date), DARK], ['Due', fmtDate(invoice.dueDate), RED]];
+    rows.forEach((r, i) => {
+      const ry = y + i * rowH;
+      if (i > 0) doc.moveTo(rx, ry).lineTo(right, ry).strokeColor('#d1d5db').lineWidth(0.5).stroke();
+      doc.fillColor(FAINT).font(fontBold).fontSize(7).text(r[0].toUpperCase(), rx + 12, ry + 7, { width: width - leftW - 24 });
+      doc.fillColor(r[2]).font(fontBold).fontSize(9).text(r[1], rx + 12, ry + 17, { width: width - leftW - 24 });
+    });
+    return y + boxH + 16;
+  }
+
+  if (template.headerStyle === 'badgeCentered') {
+    const cx = left + width / 2;
+    if (logo) {
+      doc.save();
+      doc.circle(cx, y + 14, 15).clip();
+      try { doc.image(logo, cx - 15, y - 1, { width: 30, height: 30 }); } catch { /* corrupt image data, skip */ }
+      doc.restore();
+    } else {
+      doc.circle(cx, y + 14, 15).fill(brand);
+      const ini = (orgName || 'Y').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'Y';
+      doc.fillColor('#fff').font(fontBold).fontSize(11).text(ini, cx - 15, y + 8, { width: 30, align: 'center' });
+    }
+    let iy = y + 36;
+    doc.fillColor(DARK).font(fontBold).fontSize(13).text(orgName, left, iy, { width, align: 'center' });
+    iy += 16;
+    if (org?.address) { doc.font(font).fontSize(8).fillColor(MUTED).text(org.address, left, iy, { width, align: 'center' }); iy += 13; }
+    doc.moveTo(cx - 30, iy).lineTo(cx + 30, iy).strokeColor(FAINT).lineWidth(0.75).stroke();
+    iy += 10;
+    doc.font(fontBold).fontSize(8.5).fillColor(brand).text(T('Invoice'), left, iy, { width, align: 'center' });
+    doc.font(font).fontSize(8).fillColor(MUTED).text(`${invoice.invoiceNumber}  ·  Due ${fmtDate(invoice.dueDate)}`, left, iy + 12, { width, align: 'center' });
+    return iy + 28;
+  }
+
+  if (template.headerStyle === 'twoToneSplit') {
+    const blockW = width * 0.42;
+    doc.rect(right - blockW, y - 6, blockW, 90).fill(brand);
+    doc.fillColor('#fff').font(fontBold).fontSize(17).text(T('Invoice').toUpperCase(), right - blockW + 16, y + 8, { width: blockW - 30, align: 'right' });
+    doc.font(font).fontSize(9).text(invoice.invoiceNumber, right - blockW + 16, y + 32, { width: blockW - 30, align: 'right' });
+    doc.text(`${fmtDate(invoice.date)}  ·  Due ${fmtDate(invoice.dueDate)}`, right - blockW + 16, y + 46, { width: blockW - 30, align: 'right' });
+    if (logo) drawLogoAt(left, y, 30);
+    const textX = logo ? left + 40 : left;
+    doc.fillColor(DARK).font(fontBold).fontSize(14).text(orgName, textX, y + 8, { width: width - blockW - 30 });
+    doc.font(font).fontSize(8).fillColor(MUTED);
+    let iy = y + 28;
+    if (org?.address) { doc.text(org.address, textX, iy, { width: width - blockW - 30 }); iy += 12; }
+    if (org?.gstin) doc.text(`GSTIN: ${org.gstin}`, textX, iy, { width: width - blockW - 30 });
+    return y + 96;
+  }
+
   // Fallback — should not normally be reached since resolveTemplate always
-  // yields one of the 8 headerStyle values above, kept only as a safety net.
+  // yields one of the 15 headerStyle values above, kept only as a safety net.
   if (logo) drawLogoAt(left, y, 32);
   const textX = logo ? left + 42 : left;
   doc.fillColor(DARK).font(fontBold).fontSize(18).text(orgName, textX, y, { width: width * 0.55 });
-  doc.fillColor(brand).font(fontBold).fontSize(20).text('TAX INVOICE', left, y, { width, align: 'right' });
+  doc.fillColor(brand).font(fontBold).fontSize(20).text(T('Tax Invoice').toUpperCase(), left, y, { width, align: 'right' });
   doc.fillColor(DARK).font(font).fontSize(11).text(invoice.invoiceNumber, left, y + 26, { width, align: 'right' });
   doc.fillColor(RED).fontSize(9).text(`Due: ${fmtDate(invoice.dueDate)}`, left, y + 54, { width, align: 'right' });
   return y + 78;
@@ -236,15 +362,42 @@ function renderInvoicePdf({ invoice, client, org }) {
     doc.on('error', reject);
 
     const brand = org?.brandingConfig?.primaryColor || '#4f46e5';
+    const titleLabel = org?.brandingConfig?.invoiceTitleLabel || '';
     const [br, bg, bb] = hexToRgbTriplet(brand);
     const pageBg = PAPER_TONES[template.paperTone] || '#ffffff';
     if (pageBg !== '#ffffff') doc.rect(0, 0, doc.page.width, doc.page.height).fill(pageBg);
+
+    // Agency Spine: a full-height color bar down the left edge, drawn first
+    // (page background layer) so it never sits over header/body text, which
+    // all starts at doc.page.margins.left, well clear of this narrow strip.
+    if (template.headerStyle === 'sidebarStripe') {
+      doc.rect(0, 0, 10, doc.page.height).fill(brand);
+    }
+    // Statutory Watermark: a large faint rotated wordmark drawn before any
+    // content, so the header/table/totals painted afterwards sit on top of it.
+    // The text box is measured and centered exactly on the page center before
+    // rotating around that same point, and lineBreak is disabled — sizing the
+    // box any other way risks pdfkit wrapping/clipping the rotated text against
+    // the page edge.
+    if (template.headerStyle === 'watermarkGhost') {
+      const word = (titleLabel || 'Invoice').toUpperCase();
+      doc.save();
+      doc.font(fontBold).fontSize(80);
+      const tw = doc.widthOfString(word);
+      const th = doc.currentLineHeight();
+      const cx = doc.page.width / 2, cy = doc.page.height / 2;
+      doc.rotate(-30, { origin: [cx, cy] });
+      doc.fillColor('#94a3b8').opacity(0.14)
+        .text(word, cx - tw / 2, cy - th / 2, { lineBreak: false });
+      doc.opacity(1);
+      doc.restore();
+    }
 
     const left = doc.page.margins.left;
     const right = doc.page.width - doc.page.margins.right;
     const width = right - left;
 
-    let y = drawHeader(doc, { template, org, invoice, brand, left, right, width, font, fontBold, logo });
+    let y = drawHeader(doc, { template, org, invoice, brand, left, right, width, font, fontBold, logo, titleLabel });
     drawDivider(doc, template.dividerStyle, left, right, y, brand);
     y += 14;
 

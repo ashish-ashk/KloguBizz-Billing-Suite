@@ -59,6 +59,55 @@ const INVOICE_TEMPLATES = [
     description: 'Warm and boutique — a soft rounded frame, italic accents, cream paper.',
     font: 'Times-Roman', fontBold: 'Times-Bold',
     headerStyle: 'framedCentered', titleAlign: 'center', tableStyle: 'boxed', dividerStyle: 'dotted', paperTone: 'cream', pageFrame: true
+  },
+  {
+    id: 'agency-spine',
+    name: 'Agency Spine',
+    description: 'Design-studio bold — a full-height color spine down the page edge, uppercase type, tinted rows.',
+    font: 'Helvetica-Bold', fontBold: 'Helvetica-Bold',
+    headerStyle: 'sidebarStripe', titleAlign: 'left', tableStyle: 'zebra', dividerStyle: 'none', paperTone: 'white', accentTint: true
+  },
+  {
+    id: 'friendly-banner',
+    name: 'Friendly Banner',
+    description: 'Approachable SaaS-billing look — a full-width color banner across the top holding your brand and the invoice title.',
+    font: 'Helvetica', fontBold: 'Helvetica-Bold',
+    headerStyle: 'bannerBlock', titleAlign: 'left', tableStyle: 'boxed', dividerStyle: 'solid', paperTone: 'white'
+  },
+  {
+    id: 'clean-ledger',
+    name: 'Clean Ledger',
+    description: 'Crisp accounting-software style — plain header, a bold color rule underneath, nothing else competing for attention.',
+    font: 'Helvetica', fontBold: 'Helvetica-Bold',
+    headerStyle: 'underlineAccent', titleAlign: 'right', tableStyle: 'minimal', dividerStyle: 'none', paperTone: 'white'
+  },
+  {
+    id: 'statutory-watermark',
+    name: 'Statutory Watermark',
+    description: 'Formal and legal-adjacent — a faint diagonal INVOICE watermark behind a fully gridded ledger table.',
+    font: 'Times-Roman', fontBold: 'Times-Bold',
+    headerStyle: 'watermarkGhost', titleAlign: 'center', tableStyle: 'ledger', dividerStyle: 'double', paperTone: 'white'
+  },
+  {
+    id: 'enterprise-grid',
+    name: 'Enterprise Grid',
+    description: 'ERP-style hard-bordered masthead — company block and a gridded invoice-meta table side by side.',
+    font: 'Helvetica', fontBold: 'Helvetica-Bold',
+    headerStyle: 'mastheadGrid', titleAlign: 'left', tableStyle: 'bordered', dividerStyle: 'solid', paperTone: 'graypaper'
+  },
+  {
+    id: 'boutique-badge',
+    name: 'Boutique Badge',
+    description: 'Storefront-friendly — a centered circular logo badge, centered company name, a soft boxed table.',
+    font: 'Times-Roman', fontBold: 'Times-Bold',
+    headerStyle: 'badgeCentered', titleAlign: 'center', tableStyle: 'boxed', dividerStyle: 'dotted', paperTone: 'cream'
+  },
+  {
+    id: 'split-corporate',
+    name: 'Split Corporate',
+    description: 'Confident two-tone header — a solid color block holds the invoice title and dates opposite your company details.',
+    font: 'Helvetica-Bold', fontBold: 'Helvetica-Bold',
+    headerStyle: 'twoToneSplit', titleAlign: 'right', tableStyle: 'bordered', dividerStyle: 'double', paperTone: 'white'
   }
 ];
 
@@ -130,7 +179,9 @@ const ITALIC_VARIANTS = {
 
 const NEW_HEADER_STYLES = new Set([
   'minimalPlain', 'formalFramed', 'diagonalBold', 'splitCompact',
-  'letterheadLedger', 'receiptCentered', 'ribbonCard', 'framedCentered'
+  'letterheadLedger', 'receiptCentered', 'ribbonCard', 'framedCentered',
+  'sidebarStripe', 'bannerBlock', 'underlineAccent', 'watermarkGhost',
+  'mastheadGrid', 'badgeCentered', 'twoToneSplit'
 ]);
 
 // Mirrors frontend/src/app/core/invoice-templates.ts's resolveInvoiceTemplate —

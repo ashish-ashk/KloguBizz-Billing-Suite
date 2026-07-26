@@ -23,6 +23,7 @@ export interface Organisation {
     logoUrl?: string;
     primaryColor?: string;
     invoicePrefix?: string;
+    invoiceTitleLabel?: string;
     invoiceTemplateId?: string;
     customInvoiceTemplate?: import('./invoice-templates').CustomInvoiceTemplate | null;
     invoiceContent?: {

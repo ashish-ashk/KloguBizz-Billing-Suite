@@ -8,11 +8,13 @@ import { AuthService } from '../../core/auth.service';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
 import {
-  CUSTOM_TEMPLATE_ID, CustomInvoiceTemplate, DEFAULT_CUSTOM_INVOICE_TEMPLATE, DIVIDER_STYLE_OPTIONS,
-  FONT_OPTIONS, HEADER_STYLE_OPTIONS, INVOICE_TEMPLATES, PAPER_TONE_OPTIONS, TABLE_STYLE_OPTIONS, TITLE_ALIGN_OPTIONS
+  COLOR_PALETTE, CUSTOM_TEMPLATE_ID, CustomInvoiceTemplate, DEFAULT_CUSTOM_INVOICE_TEMPLATE, DIVIDER_STYLE_OPTIONS,
+  FONT_OPTIONS, HEADER_STYLE_OPTIONS, INVOICE_TEMPLATES, PAPER_TONE_OPTIONS, TABLE_STYLE_OPTIONS, TEMPLATE_CATEGORIES,
+  TemplateCategory, TITLE_ALIGN_OPTIONS
 } from '../../core/invoice-templates';
 
 type PickerMode = 'preset' | 'custom';
+type CategoryFilter = 'All' | TemplateCategory;
 
 interface ContentToggles {
   showLogo: boolean;
@@ -58,6 +60,21 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
     @media (max-width: 360px) {
       .accent-row input[type="color"] { width: 100%; height: 36px; }
     }
+
+    .swatch-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .swatch-btn {
+      width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; padding: 0; cursor: pointer;
+      box-shadow: 0 0 0 1px var(--border); flex-shrink: 0; transition: transform .12s ease;
+    }
+    .swatch-btn:hover { transform: scale(1.1); }
+    .swatch-btn.selected { border-color: var(--card); box-shadow: 0 0 0 2px var(--fg); }
+
+    .cat-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .cat-chip {
+      border: 1px solid var(--border); background: var(--card); color: var(--muted); border-radius: 999px;
+      padding: 5px 12px; font-size: 11.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+    }
+    .cat-chip.active { background: var(--fg); color: var(--card); border-color: var(--fg); }
   `],
   template: `
     <app-shell title="Invoice Templates" subtitle="Choose how your invoices and bills look, and add your company logo">
@@ -68,8 +85,8 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
 
       <div class="info-box" style="margin-bottom:20px;display:flex;gap:8px;align-items:flex-start;">
         <app-icon name="template" [size]="14" style="margin-top:1px;flex-shrink:0;" />
-        <span>Pick from 8 real, coordinated invoice designs, or build your own from scratch below. Add your logo and toggle what appears
-        on the document. The preview on the right updates instantly — nothing changes for your real invoices until
+        <span>Pick from 15 real, coordinated invoice designs, or build your own from scratch below. Add your logo, pick an accent color
+        and toggle what appears on the document. The preview on the right updates instantly — nothing changes for your real invoices until
         you hit <strong>Save Template</strong>.</span>
       </div>
 
@@ -97,12 +114,26 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
           </section>
 
           <section class="card">
-            <div class="card-title" style="margin-bottom:12px;">Accent Color</div>
+            <div class="card-title" style="margin-bottom:4px;">Accent Color</div>
+            <div class="card-sub" style="margin-bottom:12px;">Pick a curated color, or enter your own hex code</div>
             <div class="accent-row">
               <input type="color" [ngModel]="accentColor()" (ngModelChange)="accentColor.set($event)"
                 style="width:42px;height:42px;border:1px solid var(--border);border-radius:8px;padding:2px;background:var(--card);cursor:pointer;flex-shrink:0;" />
               <input class="mono" [ngModel]="accentColor()" (ngModelChange)="accentColor.set($event)" />
             </div>
+            <div class="swatch-row">
+              @for (c of colorPalette; track c.value) {
+                <button type="button" class="swatch-btn" [class.selected]="accentColor().toLowerCase() === c.value"
+                  [style.background]="c.value" [title]="c.name" (click)="accentColor.set(c.value)"></button>
+              }
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-title" style="margin-bottom:4px;">Invoice Title</div>
+            <div class="card-sub" style="margin-bottom:12px;">Overrides every template's title word — leave blank to keep each design's own default ("Invoice", "Tax Invoice", etc.)</div>
+            <input [ngModel]="invoiceTitleLabel()" (ngModelChange)="invoiceTitleLabel.set($event)"
+              placeholder="e.g. Tax Invoice, Proforma Invoice, Bill, Receipt" maxlength="40" />
           </section>
 
           <section class="card">
@@ -135,22 +166,31 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
             <div class="card-head">
               <div>
                 <div class="card-title">Choose a Template</div>
-                <div class="card-sub">8 real, coordinated designs — click to preview instantly</div>
+                <div class="card-sub">15 real, coordinated designs — filter by style, or search, then click to preview instantly</div>
               </div>
               @if (mode() === 'preset') { <span class="pill active">✓ Active</span> }
             </div>
+            <input [ngModel]="searchQuery()" (ngModelChange)="searchQuery.set($event)" placeholder="Search templates…" style="margin-bottom:10px;" />
+            <div class="cat-chip-row">
+              <button type="button" class="cat-chip" [class.active]="categoryFilter() === 'All'" (click)="categoryFilter.set('All')">All ({{ templates.length }})</button>
+              @for (cat of categories; track cat) {
+                <button type="button" class="cat-chip" [class.active]="categoryFilter() === cat" (click)="categoryFilter.set(cat)">{{ cat }}</button>
+              }
+            </div>
             <div style="display:grid;gap:10px;">
-              @for (t of templates; track t.id) {
+              @for (t of filteredTemplates(); track t.id) {
                 <button type="button" class="theme-card" [class.selected]="mode() === 'preset' && selectedTemplateId() === t.id"
                   (click)="selectPreset(t.id)">
                   @if (savedMode() === 'preset' && savedTemplateId() === t.id) { <span class="theme-current-badge">Current</span> }
                   <span style="width:44px;height:36px;border-radius:6px;flex-shrink:0;display:grid;place-items:center;font-size:9px;font-weight:700;color:#fff;"
                     [style.background]="accentColor()">{{ t.name.slice(0,2).toUpperCase() }}</span>
                   <span class="theme-card-info">
-                    <span class="theme-card-name">{{ t.name }}</span>
+                    <span class="theme-card-name">{{ t.name }} <span class="pill" style="font-size:9.5px;padding:1px 7px;margin-left:4px;">{{ t.category }}</span></span>
                     <span style="font-size:11px;color:var(--muted);">{{ t.description }}</span>
                   </span>
                 </button>
+              } @empty {
+                <div class="card-sub" style="padding:16px 0;text-align:center;">No templates match — try a different search or category.</div>
               }
             </div>
           </section>
@@ -237,7 +277,8 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
               [showLogo]="content().showLogo"
               [showSignature]="content().showSignature"
               [showBankDetails]="content().showBankDetails"
-              [showAmountInWords]="content().showAmountInWords" />
+              [showAmountInWords]="content().showAmountInWords"
+              [invoiceTitleLabel]="invoiceTitleLabel()" />
           </div>
         </div>
       </div>
@@ -248,6 +289,8 @@ export class InvoiceTemplatesComponent implements OnInit {
   @ViewChild('logoInput') logoInputRef?: ElementRef<HTMLInputElement>;
 
   templates = INVOICE_TEMPLATES;
+  categories = TEMPLATE_CATEGORIES;
+  colorPalette = COLOR_PALETTE;
   fontOptions = FONT_OPTIONS;
   headerStyleOptions = HEADER_STYLE_OPTIONS;
   titleAlignOptions = TITLE_ALIGN_OPTIONS;
@@ -259,13 +302,18 @@ export class InvoiceTemplatesComponent implements OnInit {
 
   logoUrl = signal('');
   accentColor = signal('#4f46e5');
+  invoiceTitleLabel = signal('');
   mode = signal<PickerMode>('preset');
   selectedTemplateId = signal('modern-minimal');
   customTemplate = signal<CustomInvoiceTemplate>({ ...DEFAULT_CUSTOM_INVOICE_TEMPLATE });
   content = signal<ContentToggles>({ ...DEFAULT_CONTENT });
 
+  categoryFilter = signal<CategoryFilter>('All');
+  searchQuery = signal('');
+
   savedLogoUrl = signal('');
   savedAccentColor = signal('#4f46e5');
+  savedInvoiceTitleLabel = signal('');
   savedMode = signal<PickerMode>('preset');
   savedTemplateId = signal('modern-minimal');
   savedCustomTemplate = signal<CustomInvoiceTemplate>({ ...DEFAULT_CUSTOM_INVOICE_TEMPLATE });
@@ -280,9 +328,19 @@ export class InvoiceTemplatesComponent implements OnInit {
 
   selectedTemplateName = computed(() => this.templates.find(t => t.id === this.selectedTemplateId())?.name || 'Template');
 
+  filteredTemplates = computed(() => {
+    const cat = this.categoryFilter();
+    const q = this.searchQuery().trim().toLowerCase();
+    return this.templates.filter(t =>
+      (cat === 'All' || t.category === cat) &&
+      (!q || t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q))
+    );
+  });
+
   dirty = computed(() =>
     this.logoUrl() !== this.savedLogoUrl() ||
     this.accentColor() !== this.savedAccentColor() ||
+    this.invoiceTitleLabel() !== this.savedInvoiceTitleLabel() ||
     this.mode() !== this.savedMode() ||
     (this.mode() === 'preset' ? this.selectedTemplateId() !== this.savedTemplateId() : false) ||
     (this.mode() === 'custom' ? JSON.stringify(this.customTemplate()) !== JSON.stringify(this.savedCustomTemplate()) : false) ||
@@ -295,6 +353,7 @@ export class InvoiceTemplatesComponent implements OnInit {
     const branding = this.auth.organisation()?.brandingConfig || {};
     const logo = branding.logoUrl || '';
     const accent = branding.primaryColor || '#4f46e5';
+    const titleLabel = branding.invoiceTitleLabel || '';
     const templateId = branding.invoiceTemplateId || 'modern-minimal';
     const isCustom = templateId === CUSTOM_TEMPLATE_ID;
     const custom = { ...DEFAULT_CUSTOM_INVOICE_TEMPLATE, ...(branding.customInvoiceTemplate || {}) };
@@ -302,6 +361,7 @@ export class InvoiceTemplatesComponent implements OnInit {
 
     this.logoUrl.set(logo); this.savedLogoUrl.set(logo);
     this.accentColor.set(accent); this.savedAccentColor.set(accent);
+    this.invoiceTitleLabel.set(titleLabel); this.savedInvoiceTitleLabel.set(titleLabel);
     this.mode.set(isCustom ? 'custom' : 'preset'); this.savedMode.set(isCustom ? 'custom' : 'preset');
     this.selectedTemplateId.set(isCustom ? 'modern-minimal' : templateId);
     this.savedTemplateId.set(isCustom ? 'modern-minimal' : templateId);
@@ -339,6 +399,7 @@ export class InvoiceTemplatesComponent implements OnInit {
   discard() {
     this.logoUrl.set(this.savedLogoUrl());
     this.accentColor.set(this.savedAccentColor());
+    this.invoiceTitleLabel.set(this.savedInvoiceTitleLabel());
     this.mode.set(this.savedMode());
     this.selectedTemplateId.set(this.savedTemplateId());
     this.customTemplate.set({ ...this.savedCustomTemplate() });
@@ -353,6 +414,7 @@ export class InvoiceTemplatesComponent implements OnInit {
         ...current,
         logoUrl: this.logoUrl(),
         primaryColor: this.accentColor(),
+        invoiceTitleLabel: this.invoiceTitleLabel(),
         invoiceTemplateId: this.effectiveTemplateId(),
         customInvoiceTemplate: this.customTemplate(),
         invoiceContent: this.content()
@@ -363,6 +425,7 @@ export class InvoiceTemplatesComponent implements OnInit {
         this.auth.setOrganisation(org);
         this.savedLogoUrl.set(this.logoUrl());
         this.savedAccentColor.set(this.accentColor());
+        this.savedInvoiceTitleLabel.set(this.invoiceTitleLabel());
         this.savedMode.set(this.mode());
         this.savedTemplateId.set(this.selectedTemplateId());
         this.savedCustomTemplate.set({ ...this.customTemplate() });

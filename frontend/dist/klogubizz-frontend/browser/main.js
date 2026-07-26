@@ -106,45 +106,45 @@ var tenantAdminGuard = () => {
 
 // src/app/app.routes.ts
 var routes = [
-  { path: "login", loadComponent: () => import("./chunk-G3T675NR.js").then((m) => m.LoginComponent) },
-  { path: "register", loadComponent: () => import("./chunk-VWU474MW.js").then((m) => m.RegisterComponent) },
+  { path: "login", loadComponent: () => import("./chunk-YKXCH33U.js").then((m) => m.LoginComponent) },
+  { path: "register", loadComponent: () => import("./chunk-E6NOWJ2N.js").then((m) => m.RegisterComponent) },
   { path: "terms", data: { type: "terms" }, loadComponent: () => import("./chunk-7RT4D47J.js").then((m) => m.LegalPageComponent) },
   { path: "sla", data: { type: "sla" }, loadComponent: () => import("./chunk-7RT4D47J.js").then((m) => m.LegalPageComponent) },
   {
     path: "",
     canActivate: [authGuard],
     children: [
-      { path: "dashboard", loadComponent: () => import("./chunk-SXY5RBNN.js").then((m) => m.DashboardComponent) },
-      { path: "invoices", loadComponent: () => import("./chunk-5JHOUUSK.js").then((m) => m.InvoicesComponent) },
-      { path: "invoices/new", loadComponent: () => import("./chunk-BHNKONPF.js").then((m) => m.InvoiceEditorComponent) },
-      { path: "invoices/:id/edit", loadComponent: () => import("./chunk-BHNKONPF.js").then((m) => m.InvoiceEditorComponent) },
-      { path: "invoices/:id/print", loadComponent: () => import("./chunk-LKA7RPCO.js").then((m) => m.InvoicePrintComponent) },
-      { path: "bill-generator", loadComponent: () => import("./chunk-BXTFBRWV.js").then((m) => m.BillGeneratorComponent) },
-      { path: "bill-generator/:id/edit", loadComponent: () => import("./chunk-BXTFBRWV.js").then((m) => m.BillGeneratorComponent) },
-      { path: "clients", loadComponent: () => import("./chunk-H3MAMGG7.js").then((m) => m.ClientsComponent) },
-      { path: "items", loadComponent: () => import("./chunk-VGQBK3YD.js").then((m) => m.ItemsComponent) },
-      { path: "payments", loadComponent: () => import("./chunk-JYJ6XLK5.js").then((m) => m.PaymentsComponent) },
-      { path: "reports", loadComponent: () => import("./chunk-YO3JZIMX.js").then((m) => m.ReportsComponent) },
-      { path: "users", loadComponent: () => import("./chunk-LROFBAR6.js").then((m) => m.UsersComponent) },
-      { path: "subscription", loadComponent: () => import("./chunk-D2MIWI4W.js").then((m) => m.SubscriptionComponent) },
-      { path: "appearance", canActivate: [tenantAdminGuard], loadComponent: () => import("./chunk-UOQ2IK7U.js").then((m) => m.AppearanceComponent) },
-      { path: "invoice-templates", canActivate: [tenantAdminGuard], loadComponent: () => import("./chunk-5G4BTB2V.js").then((m) => m.InvoiceTemplatesComponent) },
+      { path: "dashboard", loadComponent: () => import("./chunk-RH7KAXAC.js").then((m) => m.DashboardComponent) },
+      { path: "invoices", loadComponent: () => import("./chunk-AHE4G75H.js").then((m) => m.InvoicesComponent) },
+      { path: "invoices/new", loadComponent: () => import("./chunk-T3X375DG.js").then((m) => m.InvoiceEditorComponent) },
+      { path: "invoices/:id/edit", loadComponent: () => import("./chunk-T3X375DG.js").then((m) => m.InvoiceEditorComponent) },
+      { path: "invoices/:id/print", loadComponent: () => import("./chunk-JVEGCBML.js").then((m) => m.InvoicePrintComponent) },
+      { path: "bill-generator", loadComponent: () => import("./chunk-FD75P2WD.js").then((m) => m.BillGeneratorComponent) },
+      { path: "bill-generator/:id/edit", loadComponent: () => import("./chunk-FD75P2WD.js").then((m) => m.BillGeneratorComponent) },
+      { path: "clients", loadComponent: () => import("./chunk-3ZKLYBUQ.js").then((m) => m.ClientsComponent) },
+      { path: "items", loadComponent: () => import("./chunk-UY76WJ7L.js").then((m) => m.ItemsComponent) },
+      { path: "payments", loadComponent: () => import("./chunk-2D76TKRT.js").then((m) => m.PaymentsComponent) },
+      { path: "reports", loadComponent: () => import("./chunk-LCPENN7Z.js").then((m) => m.ReportsComponent) },
+      { path: "users", loadComponent: () => import("./chunk-DZ53RTLZ.js").then((m) => m.UsersComponent) },
+      { path: "subscription", loadComponent: () => import("./chunk-EUDYXBZ6.js").then((m) => m.SubscriptionComponent) },
+      { path: "appearance", canActivate: [tenantAdminGuard], loadComponent: () => import("./chunk-3JLPYXGH.js").then((m) => m.AppearanceComponent) },
+      { path: "invoice-templates", canActivate: [tenantAdminGuard], loadComponent: () => import("./chunk-2A3X2NJH.js").then((m) => m.InvoiceTemplatesComponent) },
       { path: "", pathMatch: "full", redirectTo: "dashboard" }
     ]
   },
   {
     path: "super-admin",
     canActivate: [superAdminGuard],
-    loadComponent: () => import("./chunk-URM6TNIM.js").then((m) => m.SuperAdminLayoutComponent),
+    loadComponent: () => import("./chunk-H6ZHEHL7.js").then((m) => m.SuperAdminLayoutComponent),
     children: [
       { path: "", pathMatch: "full", redirectTo: "organisations" },
-      { path: "organisations", loadComponent: () => import("./chunk-46JYIAN2.js").then((m) => m.SuperOrganisationsComponent) },
-      { path: "masters", loadComponent: () => import("./chunk-OXK42QIE.js").then((m) => m.SuperMastersComponent) },
-      { path: "templates", loadComponent: () => import("./chunk-Z2KP6QBG.js").then((m) => m.SuperTemplatesComponent) },
-      { path: "reminders", loadComponent: () => import("./chunk-LSRWDLDE.js").then((m) => m.SuperRemindersComponent) },
-      { path: "plans", loadComponent: () => import("./chunk-MV2DDUTC.js").then((m) => m.SuperPlansComponent) },
-      { path: "branding", loadComponent: () => import("./chunk-5623EF3R.js").then((m) => m.SuperBrandingComponent) },
-      { path: "profile", loadComponent: () => import("./chunk-JGLZUQVK.js").then((m) => m.SuperProfileComponent) }
+      { path: "organisations", loadComponent: () => import("./chunk-NC2LOM23.js").then((m) => m.SuperOrganisationsComponent) },
+      { path: "masters", loadComponent: () => import("./chunk-JIUQJXFO.js").then((m) => m.SuperMastersComponent) },
+      { path: "templates", loadComponent: () => import("./chunk-HLMSHSXA.js").then((m) => m.SuperTemplatesComponent) },
+      { path: "reminders", loadComponent: () => import("./chunk-LVI24WHE.js").then((m) => m.SuperRemindersComponent) },
+      { path: "plans", loadComponent: () => import("./chunk-LWSEA3GL.js").then((m) => m.SuperPlansComponent) },
+      { path: "branding", loadComponent: () => import("./chunk-VLOVL2HG.js").then((m) => m.SuperBrandingComponent) },
+      { path: "profile", loadComponent: () => import("./chunk-272G6CXP.js").then((m) => m.SuperProfileComponent) }
     ]
   },
   { path: "**", redirectTo: "dashboard" }

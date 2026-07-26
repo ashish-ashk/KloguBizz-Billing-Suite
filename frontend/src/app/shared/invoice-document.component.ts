@@ -38,7 +38,9 @@ export interface InvoiceDocClient {
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="invoice-doc" [class.doc-narrow]="tpl().narrow" [style.fontFamily]="fontStack()" [style.background]="paperBg()">
+    <div class="invoice-doc" [class.doc-narrow]="tpl().narrow" [style.fontFamily]="fontStack()"
+      [style.backgroundColor]="paperBg()" [style.boxShadow]="sidebarShadow()"
+      [style.backgroundImage]="watermarkBg()" [style.backgroundRepeat]="'no-repeat'" [style.backgroundPosition]="'center'" [style.backgroundSize]="'65% 65%'">
 
       @switch (tpl().headerStyle) {
         @case ('minimalPlain') {
@@ -54,7 +56,7 @@ export interface InvoiceDocClient {
               </div>
             </div>
             <div style="text-align:right;">
-              <div [style.color]="accentColor()" style="font-weight:600;font-size:15px;">Invoice</div>
+              <div [style.color]="accentColor()" style="font-weight:600;font-size:15px;">{{ title('Invoice') }}</div>
               <div style="font-size:10px;color:var(--muted);margin-top:4px;line-height:1.6;">
                 {{ invoice().invoiceNumber }}<br />{{ fmtDate(invoice().date) }} · Due {{ fmtDate(invoice().dueDate) }}
               </div>
@@ -74,7 +76,7 @@ export interface InvoiceDocClient {
               </div>
             </div>
             <div style="text-align:right;">
-              <div [style.color]="accentColor()" style="font-weight:700;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;">Tax Invoice</div>
+              <div [style.color]="accentColor()" style="font-weight:700;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;">{{ title('Tax Invoice') }}</div>
               <div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.9;">
                 <div>No. <strong [style.color]="dark">{{ invoice().invoiceNumber }}</strong></div>
                 <div>Date: {{ fmtDate(invoice().date) }}</div>
@@ -91,7 +93,7 @@ export interface InvoiceDocClient {
               <div class="mono" style="font-size:11px;color:var(--muted);margin-top:6px;">{{ invoice().invoiceNumber }}</div>
             </div>
             <div class="inv-diag-bold-block" [style.background]="accentColor()">
-              <div style="font-weight:800;font-size:26px;letter-spacing:-1px;color:#fff;">INVOICE</div>
+              <div style="font-weight:800;font-size:26px;letter-spacing:-1px;color:#fff;text-transform:uppercase;">{{ title('Invoice') }}</div>
               <div style="font-size:10.5px;color:rgba(255,255,255,.9);margin-top:4px;">Due {{ fmtDate(invoice().dueDate) }}</div>
             </div>
           </div>
@@ -117,7 +119,7 @@ export interface InvoiceDocClient {
               @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:32px;max-width:110px;object-fit:contain;margin-bottom:6px;" /> }
               <div style="font-weight:800;font-size:16px;letter-spacing:.5px;" [style.color]="dark">{{ orgName() }}</div>
               @if (orgAddress()) { <div style="font-size:10px;color:var(--muted);margin-top:3px;">{{ orgAddress() }}</div> }
-              <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-top:8px;" [style.color]="dark">Tax Invoice</div>
+              <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-top:8px;" [style.color]="dark">{{ title('Tax Invoice') }}</div>
               <div style="font-size:10px;margin-top:4px;" [style.color]="accentColor()">{{ invoice().invoiceNumber }} · Due {{ fmtDate(invoice().dueDate) }}</div>
             </div>
           </div>
@@ -127,7 +129,7 @@ export interface InvoiceDocClient {
             @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:28px;max-width:90px;object-fit:contain;margin-bottom:6px;" /> }
             <div style="font-weight:800;font-size:14px;letter-spacing:.5px;text-transform:uppercase;" [style.color]="dark">{{ orgName() }}</div>
             @if (orgAddress()) { <div style="font-size:9.5px;color:var(--muted);margin-top:3px;">{{ orgAddress() }}</div> }
-            <div style="font-size:11px;font-weight:700;margin-top:8px;" [style.color]="accentColor()">TAX INVOICE</div>
+            <div style="font-size:11px;font-weight:700;margin-top:8px;text-transform:uppercase;" [style.color]="accentColor()">{{ title('Tax Invoice') }}</div>
             <div style="font-size:9.5px;margin-top:4px;color:var(--muted);">{{ invoice().invoiceNumber }} · {{ fmtDate(invoice().date) }}</div>
           </div>
         }
@@ -138,7 +140,7 @@ export interface InvoiceDocClient {
                 @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:32px;max-width:100px;object-fit:contain;" /> }
                 <div style="font-weight:700;font-size:16px;" [style.color]="dark">{{ orgName() }}</div>
               </div>
-              <span [style.background]="accentColor()" style="color:#fff;font-weight:700;font-size:10px;letter-spacing:.5px;padding:5px 14px;border-radius:0 8px 0 8px;">INVOICE</span>
+              <span [style.background]="accentColor()" style="color:#fff;font-weight:700;font-size:10px;letter-spacing:.5px;padding:5px 14px;border-radius:0 8px 0 8px;text-transform:uppercase;">{{ title('Invoice') }}</span>
             </div>
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px;background:var(--surface-alt);border-radius:10px;padding:10px 14px;">
               <div><div style="font-size:9px;color:var(--faint);text-transform:uppercase;">Invoice No</div><div style="font-size:11px;font-weight:600;margin-top:2px;" [style.color]="dark">{{ invoice().invoiceNumber }}</div></div>
@@ -152,8 +154,140 @@ export interface InvoiceDocClient {
             @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:34px;max-width:110px;object-fit:contain;margin-bottom:8px;" /> }
             <div style="font-weight:700;font-size:17px;letter-spacing:.5px;" [style.color]="dark">{{ orgName() }}</div>
             @if (orgAddress()) { <div style="font-size:10.5px;color:var(--muted);margin-top:4px;">{{ orgAddress() }}</div> }
-            <div style="font-style:italic;font-size:16px;margin-top:10px;" [style.color]="accentColor()">Invoice</div>
+            <div style="font-style:italic;font-size:16px;margin-top:10px;" [style.color]="accentColor()">{{ title('Invoice') }}</div>
             <div style="font-size:10.5px;margin-top:4px;" [style.color]="dark">{{ invoice().invoiceNumber }} · Due {{ fmtDate(invoice().dueDate) }}</div>
+          </div>
+        }
+        @case ('sidebarStripe') {
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap;">
+            <div style="display:flex;gap:10px;align-items:center;">
+              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:32px;max-width:100px;object-fit:contain;" /> }
+              <div>
+                <div style="font-weight:800;font-size:17px;text-transform:uppercase;letter-spacing:.5px;" [style.color]="dark">{{ orgName() }}</div>
+                <div style="font-size:10px;color:var(--faint);margin-top:3px;">
+                  @if (orgAddress()) { {{ orgAddress() }} }
+                  @if (orgGstin()) { <span> · GSTIN: {{ orgGstin() }}</span> }
+                </div>
+              </div>
+            </div>
+            <div style="text-align:right;">
+              <div [style.color]="accentColor()" style="font-weight:800;font-size:17px;text-transform:uppercase;">{{ title('Invoice') }}</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:4px;line-height:1.6;">
+                {{ invoice().invoiceNumber }}<br />{{ fmtDate(invoice().date) }} · Due {{ fmtDate(invoice().dueDate) }}
+              </div>
+            </div>
+          </div>
+        }
+        @case ('bannerBlock') {
+          <div [style.background]="accentColor()" style="border-radius:10px;padding:18px 20px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
+            <div style="display:flex;gap:10px;align-items:center;">
+              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
+              <div style="font-weight:800;font-size:17px;color:#fff;">{{ orgName() }}</div>
+            </div>
+            <div style="text-align:right;color:#fff;">
+              <div style="font-weight:800;font-size:16px;letter-spacing:.3px;">{{ title('Invoice') }}</div>
+              <div style="font-size:10px;opacity:.9;margin-top:2px;">{{ invoice().invoiceNumber }} · Due {{ fmtDate(invoice().dueDate) }}</div>
+            </div>
+          </div>
+          @if (orgAddress() || orgGstin()) {
+            <div style="font-size:10px;color:var(--muted);margin-top:10px;">
+              @if (orgAddress()) { {{ orgAddress() }} }
+              @if (orgGstin()) { <span> · GSTIN: {{ orgGstin() }}</span> }
+            </div>
+          }
+        }
+        @case ('underlineAccent') {
+          <div [style.borderBottom]="'3px solid ' + accentColor()" style="padding-bottom:14px;display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap;">
+            <div style="display:flex;gap:10px;align-items:center;">
+              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
+              <div>
+                <div style="font-weight:700;font-size:16px;" [style.color]="dark">{{ orgName() }}</div>
+                <div style="font-size:10px;color:var(--faint);margin-top:2px;">
+                  @if (orgAddress()) { {{ orgAddress() }} }
+                  @if (orgGstin()) { <span> · GSTIN: {{ orgGstin() }}</span> }
+                </div>
+              </div>
+            </div>
+            <div style="text-align:right;">
+              <div [style.color]="accentColor()" style="font-weight:800;font-size:16px;text-transform:uppercase;letter-spacing:.5px;">{{ title('Invoice') }}</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:4px;line-height:1.6;">
+                {{ invoice().invoiceNumber }}<br />{{ fmtDate(invoice().date) }} · Due {{ fmtDate(invoice().dueDate) }}
+              </div>
+            </div>
+          </div>
+        }
+        @case ('watermarkGhost') {
+          <div style="text-align:center;">
+            @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;margin-bottom:6px;" /> }
+            <div style="font-weight:800;font-size:16px;" [style.color]="dark">{{ orgName() }}</div>
+            @if (orgAddress()) { <div style="font-size:10px;color:var(--muted);margin-top:3px;">{{ orgAddress() }}</div> }
+            <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-top:8px;" [style.color]="accentColor()">{{ title('Tax Invoice') }}</div>
+            <div style="font-size:10px;margin-top:4px;color:var(--muted);">{{ invoice().invoiceNumber }} · Due {{ fmtDate(invoice().dueDate) }}</div>
+          </div>
+        }
+        @case ('mastheadGrid') {
+          <div style="display:grid;grid-template-columns:1.4fr 1fr;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
+            <div style="padding:14px 16px;">
+              <div style="display:flex;gap:10px;align-items:center;">
+                @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:28px;max-width:90px;object-fit:contain;" /> }
+                <div style="font-weight:800;font-size:14px;" [style.color]="dark">{{ orgName() }}</div>
+              </div>
+              <div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.7;">
+                @if (orgAddress()) { <div>{{ orgAddress() }}</div> }
+                @if (orgGstin()) { <div>GSTIN: {{ orgGstin() }}</div> }
+              </div>
+            </div>
+            <div style="border-left:1px solid var(--border);">
+              <div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:8px;">
+                <span style="font-size:9px;color:var(--faint);text-transform:uppercase;">{{ title('Invoice') }} No</span>
+                <span style="font-size:11px;font-weight:700;" [style.color]="dark">{{ invoice().invoiceNumber }}</span>
+              </div>
+              <div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:8px;">
+                <span style="font-size:9px;color:var(--faint);text-transform:uppercase;">Date</span>
+                <span style="font-size:11px;font-weight:700;" [style.color]="dark">{{ fmtDate(invoice().date) }}</span>
+              </div>
+              <div style="padding:8px 14px;display:flex;justify-content:space-between;gap:8px;">
+                <span style="font-size:9px;color:var(--faint);text-transform:uppercase;">Due</span>
+                <span style="font-size:11px;font-weight:700;color:var(--red);">{{ fmtDate(invoice().dueDate) }}</span>
+              </div>
+            </div>
+          </div>
+        }
+        @case ('badgeCentered') {
+          <div style="text-align:center;">
+            @if (showLogo() && logoUrl()) {
+              <img [src]="logoUrl()" style="height:44px;max-width:44px;object-fit:contain;border-radius:50%;margin-bottom:8px;" />
+            } @else {
+              <div [style.background]="accentColor()" style="width:44px;height:44px;border-radius:50%;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px;">{{ initials() }}</div>
+            }
+            <div style="font-weight:700;font-size:16px;letter-spacing:.3px;" [style.color]="dark">{{ orgName() }}</div>
+            @if (orgAddress()) { <div style="font-size:10px;color:var(--muted);margin-top:3px;">{{ orgAddress() }}</div> }
+            <div style="width:60px;height:1px;background:var(--faint);margin:10px auto;"></div>
+            <div style="font-size:10.5px;color:var(--muted);">
+              <span [style.color]="accentColor()" style="font-weight:700;">{{ title('Invoice') }}</span>
+              · {{ invoice().invoiceNumber }} · Due {{ fmtDate(invoice().dueDate) }}
+            </div>
+          </div>
+        }
+        @case ('twoToneSplit') {
+          <div style="display:flex;align-items:stretch;border-radius:8px;overflow:hidden;flex-wrap:wrap;">
+            <div style="flex:1 1 55%;padding:16px 18px;display:flex;gap:10px;align-items:flex-start;">
+              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
+              <div>
+                <div style="font-weight:800;font-size:15px;" [style.color]="dark">{{ orgName() }}</div>
+                <div style="font-size:10px;color:var(--muted);line-height:1.7;margin-top:4px;">
+                  @if (orgAddress()) { <div>{{ orgAddress() }}</div> }
+                  @if (orgGstin()) { <div>GSTIN: {{ orgGstin() }}</div> }
+                </div>
+              </div>
+            </div>
+            <div [style.background]="accentColor()" style="flex:1 1 45%;padding:16px 18px;text-align:right;color:#fff;">
+              <div style="font-weight:800;font-size:18px;letter-spacing:.3px;text-transform:uppercase;">{{ title('Invoice') }}</div>
+              <div style="font-size:10px;opacity:.9;margin-top:6px;line-height:1.7;">
+                <div>{{ invoice().invoiceNumber }}</div>
+                <div>{{ fmtDate(invoice().date) }} · Due {{ fmtDate(invoice().dueDate) }}</div>
+              </div>
+            </div>
           </div>
         }
         @default {
@@ -172,7 +306,7 @@ export interface InvoiceDocClient {
               </div>
             </div>
             <div style="text-align:right;">
-              <div [style.color]="accentColor()" style="font-size:26px;font-weight:800;letter-spacing:-0.5px;">TAX INVOICE</div>
+              <div [style.color]="accentColor()" style="font-size:26px;font-weight:800;letter-spacing:-0.5px;text-transform:uppercase;">{{ title('Tax Invoice') }}</div>
               <div class="mono" style="font-size:15px;font-weight:700;margin-top:4px;">{{ invoice().invoiceNumber }}</div>
               <div style="font-size:12px;color:var(--muted);margin-top:6px;">Invoice date: {{ fmtDate(invoice().date) }}</div>
               <div style="font-size:12px;color:var(--red);">Due date: {{ fmtDate(invoice().dueDate) }}</div>
@@ -344,39 +478,14 @@ export interface InvoiceDocClient {
     .inv-receipt-desc { font-weight:700; font-size:12px; }
     .inv-receipt-meta { font-size:10.5px; color:var(--muted); margin-top:2px; }
 
-    /* A real viewport query, not a container query: the template picker's
-       sticky live-preview column squeezes .invoice-doc-wrap to ~320-380px
-       even on a wide desktop screen, but that panel should show a shrunk
-       true-to-scale A4 thumbnail (via the --doc-fit zoom in styles.css),
-       not this stacked-card reflow — a container query would incorrectly
-       fire there. Only an actual narrow physical viewport (a phone opening
-       the print/view page) should get the readable stacked-card layout,
-       shown at full phone width rather than a further zoomed-down page. */
-    @media (max-width: 640px) {
-      .invoice-doc { padding: 16px 14px; zoom: 1 !important; width: 100%; }
-
-      .inv-2col { grid-template-columns: 1fr; }
-      .inv-2col-right { text-align: left; }
-
-      .inv-diag-bold { flex-direction: column; gap: 12px; }
-      .inv-diag-bold-left { max-width: 100%; }
-      .inv-diag-bold-block { clip-path: none; min-width: 0; width: 100%; text-align: left; border-radius: 8px; padding: 12px 16px; }
-
-      .inv-items-table thead { display: none; }
-      .inv-items-table, .inv-items-table tbody, .inv-items-table tr, .inv-items-table td { display: block; width: 100%; }
-      .inv-items-table tr { border: 1px solid #e5e7eb !important; border-radius: 8px; margin-bottom: 10px; padding: 10px 12px; }
-      .inv-items-table td { padding: 2px 0 !important; border: none !important; text-align: left !important; background: transparent !important; }
-      .inv-items-table td[data-label="#"] { display: none; }
-      .inv-items-table td[data-label]::before { content: attr(data-label) ": "; color: var(--faint); font-weight: 600; }
-      .inv-items-table td[data-label="Description"]::before { content: ""; }
-      .inv-items-table td[data-label="Description"] { font-size: 13px !important; margin-bottom: 2px; }
-      .inv-items-table td[data-label="HSN/SAC"] { font-size: 10.5px !important; margin-bottom: 6px; }
-      .inv-items-table td[data-label="Qty"],
-      .inv-items-table td[data-label="Rate"],
-      .inv-items-table td[data-label="GST %"] { display: inline-block !important; width: auto !important; margin-right: 14px; font-size: 11px !important; }
-      .inv-items-table td[data-label="Tax Amt"] { font-size: 11px !important; margin-top: 4px; }
-      .inv-items-table td[data-label="Total"] { font-weight: 800 !important; font-size: 14px !important; border-top: 1px dashed #e5e7eb !important; margin-top: 8px; padding-top: 6px !important; }
-    }
+    /* Mobile keeps true A4 page proportions — same --doc-fit shrink-to-fit
+       zoom (from styles.css, driven by the .invoice-doc-wrap container
+       query) that the desktop template-picker thumbnail uses, rather than
+       reflowing into a stacked mobile-friendly card list. A phone viewing
+       the print/download page or the template picker should see a
+       correctly-scaled miniature of the exact page that gets downloaded —
+       users can pinch-zoom (the app's viewport meta allows it) to read
+       fine detail, same as viewing any PDF thumbnail on a phone. */
   `]
 })
 export class InvoiceDocumentComponent {
@@ -394,6 +503,8 @@ export class InvoiceDocumentComponent {
   showSignature = input(true);
   showBankDetails = input(true);
   showAmountInWords = input(true);
+  /** Overrides every template's default title word ("Invoice"/"Tax Invoice") — e.g. "Proforma Invoice", "Bill", "Receipt". Empty keeps each template's own default. */
+  invoiceTitleLabel = input('');
 
   dark = '#1e1b4b';
   readonly perforationDots = Array.from({ length: 40 });
@@ -406,6 +517,32 @@ export class InvoiceDocumentComponent {
   fontStack = computed(() => FONT_STACKS[this.tpl().font] || 'Arial, sans-serif');
   paperBg = computed(() => PAPER_TONE_COLORS[this.tpl().paperTone] || '#ffffff');
   panelBg = computed(() => (this.tpl().paperTone === 'cream' ? '#f6efe0' : '#f5f6ff'));
+
+  /** A full-height inset color spine down the left edge (Agency Spine) — sits within the existing page padding so it never overlaps text.
+   *  Layered on top of (not replacing) .invoice-doc's own CSS elevation shadow; returns null otherwise so that base CSS shadow applies undisturbed. */
+  sidebarShadow = computed<string | null>(() => {
+    if (this.tpl().headerStyle !== 'sidebarStripe') return null;
+    return `inset 9mm 0 0 0 ${this.accentColor()}, 0 4px 24px rgba(79, 70, 229, 0.1)`;
+  });
+
+  /** A faint rotated "INVOICE" wordmark as the document's own background-image (always painted below descendant content, unlike an absolutely-positioned overlay). */
+  watermarkBg = computed(() => {
+    if (this.tpl().headerStyle !== 'watermarkGhost') return 'none';
+    const label = (this.invoiceTitleLabel() || 'Invoice').toUpperCase();
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='500' height='500'><text x='250' y='265' font-size='72' font-family='Arial, sans-serif' font-weight='800' fill='#94a3b8' fill-opacity='0.14' text-anchor='middle' transform='rotate(-30 250 250)'>${label}</text></svg>`;
+    return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+  });
+
+  /** Custom-template-wide title override, falling back to each header case's own default word. */
+  title(def: string): string {
+    return this.invoiceTitleLabel() || def;
+  }
+
+  initials(): string {
+    const n = (this.orgName() || 'Y').trim();
+    const parts = n.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+    return parts || 'Y';
+  }
 
   rowBg(i: number): string {
     if (this.tpl().tableStyle === 'zebra') {

@@ -15,7 +15,7 @@ import { downloadBlob } from '../../core/format';
   standalone: true,
   imports: [CommonModule, RouterLink, IconComponent, ToastsComponent, InvoiceDocumentComponent],
   template: `
-    <div style="min-height:100vh;background:var(--bg);padding:28px 20px;">
+    <div style="min-height:100vh;background:var(--bg);padding:28px clamp(8px, 4vw, 20px);">
       <div class="no-print" style="max-width:210mm;margin:0 auto 18px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
         <a class="btn secondary" [routerLink]="['/invoices', invoiceId, 'edit']">← Back to editor</a>
         <div style="display:flex;gap:10px;">
@@ -42,7 +42,8 @@ import { downloadBlob } from '../../core/format';
             [showLogo]="org()?.brandingConfig?.invoiceContent?.showLogo !== false"
             [showSignature]="org()?.brandingConfig?.invoiceContent?.showSignature !== false"
             [showBankDetails]="org()?.brandingConfig?.invoiceContent?.showBankDetails !== false"
-            [showAmountInWords]="org()?.brandingConfig?.invoiceContent?.showAmountInWords !== false" />
+            [showAmountInWords]="org()?.brandingConfig?.invoiceContent?.showAmountInWords !== false"
+            [invoiceTitleLabel]="org()?.brandingConfig?.invoiceTitleLabel || ''" />
         </div>
       } @else if (!loading()) {
         <div class="card" style="max-width:520px;margin:60px auto;text-align:center;">
