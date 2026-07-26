@@ -332,6 +332,143 @@ function drawHeader(doc, { template, org, invoice, brand, left, right, width, fo
     return y + 96;
   }
 
+  if (template.headerStyle === 'stampSeal') {
+    if (logo) drawLogoAt(left, y, 28);
+    const textX = logo ? left + 38 : left;
+    doc.fillColor(DARK).font(fontBold).fontSize(14).text(orgName, textX, y, { width: width * 0.55 });
+    doc.font(font).fontSize(8).fillColor(MUTED);
+    let iy = y + 18;
+    if (org?.address) { doc.text(org.address, textX, iy, { width: width * 0.5 }); iy += 12; }
+    if (org?.gstin) doc.text(`GSTIN: ${org.gstin}`, textX, iy, { width: width * 0.5 });
+    const cx = right - 36, cy = y + 32;
+    doc.save();
+    doc.translate(cx, cy).rotate(-8);
+    doc.dash(3, { space: 2 }).circle(0, 0, 32).lineWidth(1.5).strokeColor(brand).stroke().undash();
+    doc.fillColor(brand).font(fontBold).fontSize(7).text(T('Invoice').toUpperCase(), -30, -10, { width: 60, align: 'center' });
+    doc.fontSize(6).text('VERIFIED', -30, 2, { width: 60, align: 'center' });
+    doc.restore();
+    doc.fillColor(MUTED).font(font).fontSize(7.5).text(invoice.invoiceNumber, cx - 40, cy + 40, { width: 80, align: 'center' });
+    return y + 88;
+  }
+
+  if (template.headerStyle === 'spreadsheetGrid') {
+    const rowH = 22, colW = width / 2;
+    const rows = [
+      [orgName, T('Invoice')],
+      [[org?.address, org?.gstin && `GSTIN: ${org.gstin}`].filter(Boolean).join('  ·  '), `No. ${invoice.invoiceNumber}`],
+      ['', `${fmtDate(invoice.date)}  ·  Due ${fmtDate(invoice.dueDate)}`]
+    ];
+    rows.forEach((r, i) => {
+      const ry = y + i * rowH;
+      doc.rect(left, ry, colW, rowH).strokeColor('#d1d5db').lineWidth(0.5).stroke();
+      doc.rect(left + colW, ry, width - colW, rowH).strokeColor('#d1d5db').lineWidth(0.5).stroke();
+      const boldRow = i === 0;
+      doc.fillColor(boldRow ? DARK : MUTED).font(boldRow ? fontBold : font).fontSize(boldRow ? 11 : 8.5)
+        .text(r[0], left + 8, ry + (boldRow ? 6 : 7), { width: colW - 16 });
+      doc.fillColor(boldRow ? brand : MUTED).font(boldRow ? fontBold : font).fontSize(boldRow ? 11 : 8.5)
+        .text(r[1], left + colW + 8, ry + (boldRow ? 6 : 7), { width: width - colW - 16, align: 'right' });
+    });
+    return y + rows.length * rowH + 12;
+  }
+
+  if (template.headerStyle === 'wideLogoBar') {
+    let ty = y;
+    if (logo) { drawLogoAt(left + width / 2 - 26, ty, 34); ty += 42; }
+    doc.fillColor(DARK).font(fontBold).fontSize(17).text(orgName, left, ty, { width, align: 'center' });
+    ty += 26;
+    doc.moveTo(left, ty).lineTo(right, ty).strokeColor(FAINT).lineWidth(0.75).stroke();
+    ty += 12;
+    const colW = width / 4;
+    const meta = [
+      [`${T('Invoice')} No`, invoice.invoiceNumber, DARK],
+      ['Order Date', fmtDate(invoice.date), DARK],
+      ['Due Date', fmtDate(invoice.dueDate), RED],
+      ['Payment', invoice.totals.isIGST ? 'IGST' : 'CGST+SGST', brand]
+    ];
+    meta.forEach((m, i) => {
+      const mx = left + i * colW;
+      doc.fillColor(FAINT).font(fontBold).fontSize(7).text(m[0].toUpperCase(), mx, ty, { width: colW - 10 });
+      doc.fillColor(m[2]).font(fontBold).fontSize(9).text(m[1], mx, ty + 12, { width: colW - 10 });
+    });
+    ty += 30;
+    doc.moveTo(left, ty).lineTo(right, ty).strokeColor(FAINT).lineWidth(0.75).stroke();
+    return ty + 14;
+  }
+
+  if (template.headerStyle === 'columnRule') {
+    const half = width / 2;
+    if (logo) drawLogoAt(left, y, 26);
+    const textY = logo ? y + 32 : y;
+    doc.fillColor(DARK).font(fontBold).fontSize(14).text(orgName, left, textY, { width: half - 20 });
+    doc.font(font).fontSize(8).fillColor(MUTED);
+    let iy = textY + 18;
+    if (org?.address) { doc.text(org.address, left, iy, { width: half - 20 }); iy += 12; }
+    if (org?.gstin) doc.text(`GSTIN: ${org.gstin}`, left, iy, { width: half - 20 });
+    doc.moveTo(left + half, y).lineTo(left + half, y + 70).strokeColor('#d1d5db').lineWidth(1).stroke();
+    doc.fillColor(brand).font(fontBold).fontSize(13).text(T('Invoice'), left + half + 20, y, { width: half - 20, align: 'right' });
+    doc.fillColor(MUTED).font(font).fontSize(8.5);
+    doc.text(invoice.invoiceNumber, left + half + 20, y + 18, { width: half - 20, align: 'right' });
+    doc.text(fmtDate(invoice.date), left + half + 20, y + 30, { width: half - 20, align: 'right' });
+    doc.text(`Due ${fmtDate(invoice.dueDate)}`, left + half + 20, y + 42, { width: half - 20, align: 'right' });
+    return y + 78;
+  }
+
+  if (template.headerStyle === 'qrCorner') {
+    if (logo) drawLogoAt(left, y, 26);
+    const textX = logo ? left + 34 : left;
+    doc.fillColor(DARK).font(fontBold).fontSize(15).text(orgName, textX, y, { width: width * 0.5 });
+    doc.font(font).fontSize(8).fillColor(FAINT);
+    const line2 = [org?.address, org?.gstin && `GSTIN: ${org.gstin}`].filter(Boolean).join('  ·  ');
+    if (line2) doc.text(line2, textX, y + 18, { width: width * 0.45 });
+    const qrSize = 36, qrX = right - qrSize, qrY = y;
+    doc.rect(qrX, qrY, qrSize, qrSize).strokeColor(brand).lineWidth(1).stroke();
+    const cell = qrSize / 6;
+    for (let r = 0; r < 6; r++) {
+      for (let c = 0; c < 6; c++) {
+        if ((r * 6 + c) * 7919 % 13 < 6) doc.rect(qrX + c * cell + 1, qrY + r * cell + 1, cell - 2, cell - 2).fill(DARK);
+      }
+    }
+    doc.fillColor(brand).font(fontBold).fontSize(13).text(T('Tax Invoice'), left, y, { width: width - qrSize - 14, align: 'right' });
+    doc.fillColor(MUTED).font(font).fontSize(8.5);
+    doc.text(invoice.invoiceNumber, left, y + 18, { width: width - qrSize - 14, align: 'right' });
+    doc.text(`Due ${fmtDate(invoice.dueDate)}`, left, y + 30, { width: width - qrSize - 14, align: 'right' });
+    return y + qrSize + 14;
+  }
+
+  if (template.headerStyle === 'carbonBillBook') {
+    doc.fillColor(DARK).font(fontBold).fontSize(14).text(orgName, left, y, { width: width * 0.6 });
+    if (org?.address) doc.font(font).fontSize(8).fillColor(MUTED).text(org.address, left, y + 16, { width: width * 0.55 });
+    const boxW = 110, boxX = right - boxW;
+    doc.roundedRect(boxX, y - 4, boxW, 36, 4).strokeColor(brand).lineWidth(1.25).stroke();
+    doc.fillColor(FAINT).font(fontBold).fontSize(7).text('BILL NO.', boxX, y + 2, { width: boxW, align: 'center' });
+    doc.fillColor(brand).font(fontBold).fontSize(12).text(invoice.invoiceNumber, boxX, y + 12, { width: boxW, align: 'center' });
+    const iy = y + 40;
+    doc.fillColor(MUTED).font(font).fontSize(8).text(`Date: ${fmtDate(invoice.date)}    Due: ${fmtDate(invoice.dueDate)}`, left, iy, { width });
+    return iy + 16;
+  }
+
+  if (template.headerStyle === 'fintechPills') {
+    if (logo) drawLogoAt(left, y, 26);
+    const textX = logo ? left + 34 : left;
+    doc.fillColor(DARK).font(fontBold).fontSize(16).text(orgName, textX, y + 4, { width: width * 0.6 });
+    const [pr, pg, pb] = hexToRgbTriplet(brand);
+    const pillY = y + 30, pillH = 20;
+    const pills = [
+      [`${T('Invoice')} ${invoice.invoiceNumber}`, brand, `rgba(${pr}, ${pg}, ${pb}, 0.12)`],
+      [fmtDate(invoice.date), MUTED, '#f3f4f6'],
+      [`Due ${fmtDate(invoice.dueDate)}`, RED, '#f3f4f6']
+    ];
+    let px = left;
+    doc.font(fontBold).fontSize(8.5);
+    pills.forEach(p => {
+      const pw = doc.widthOfString(p[0]) + 24;
+      doc.roundedRect(px, pillY, pw, pillH, pillH / 2).fill(p[2]);
+      doc.fillColor(p[1]).text(p[0], px + 12, pillY + 6, { width: pw - 24 });
+      px += pw + 8;
+    });
+    return pillY + pillH + 14;
+  }
+
   // Fallback — should not normally be reached since resolveTemplate always
   // yields one of the 15 headerStyle values above, kept only as a safety net.
   if (logo) drawLogoAt(left, y, 32);

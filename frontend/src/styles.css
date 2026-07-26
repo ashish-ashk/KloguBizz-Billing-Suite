@@ -404,6 +404,12 @@ textarea { resize: vertical; font-family: inherit; }
   border-bottom: 1px solid var(--border);
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
+/* Tenant-customisable brand mark (Invoice Templates > Company Logo) shown in
+   the persistent topbar — unlike the sidebar's own logo, this stays visible
+   even when the mobile drawer is closed/collapsed, and for every user in the
+   org (it's read from the shared `organisation` record, not per-user state). */
+.topbar-brand { display: flex; align-items: center; flex-shrink: 0; }
+.topbar-brand .brand-mark, .topbar-brand .brand-logo-img { width: 30px; height: 30px; font-size: 12px; }
 .topbar-crumb { display: flex; align-items: center; gap: 6px; font-size: 12.5px; min-width: 0; flex-shrink: 1; }
 .crumb-org { color: var(--muted); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
 .crumb-sep { color: var(--faint); flex-shrink: 0; }
@@ -433,6 +439,15 @@ app-quick-search { display: contents; }
 }
 .qsearch:hover, .qsearch.open { border-color: var(--border-hard); background: var(--card); box-shadow: var(--shadow-sm); }
 .qsearch-icon { flex-shrink: 0; }
+/* The icon is a real button (not just decorative) so a tap anywhere on the
+   collapsed mobile pill — where the input itself is squeezed to width:0 and
+   has no tappable area of its own — still calls focusInput(), which is what
+   actually opens the dropdown (dropdownOpen is only set true on the input's
+   own focus event). Reset to look identical to a plain inline icon. */
+.qsearch-icon-btn {
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  border: 0; background: transparent; padding: 0; margin: 0; color: inherit; cursor: pointer;
+}
 .qsearch-input {
   flex: 1; min-width: 0; border: 0; outline: none; background: transparent;
   font-size: 12.5px; color: var(--text); padding: 0;
@@ -1095,18 +1110,49 @@ app-quick-search { display: contents; }
   .auth-page { grid-template-columns: 1fr; }
   .auth-art { display: none; }
   .auth-panel { padding: 32px clamp(20px, 6vw, 40px); }
-  .sidebar { transition: transform 0.25s ease; }
-  .sidebar { transform: translateX(-100%); }
+  /* Drawer slide: a single consolidated rule (was previously split across
+     three separate `.sidebar` blocks, which worked but read as if pieced
+     together over time) with `will-change` to keep the transform on its own
+     GPU layer — without it, the backdrop-filter blur on the sticky `.topbar`
+     plus the sidebar's own box-shadow/overflow can force the browser to
+     repaint the whole region every frame instead of just compositing a
+     moved layer, which is what actually reads as a stuttery, not-smooth
+     slide on lower-powered devices. Uses the app's own --ease curve (the
+     mobile block previously hardcoded the plain `ease` keyword) so open and
+     close both animate with the same easing the rest of the app uses. */
+  .sidebar {
+    will-change: transform;
+    transition: transform 0.3s var(--ease);
+    transform: translateX(-100%);
+  }
   .sidebar.open { transform: translateX(0); box-shadow: 0 0 60px rgba(15, 13, 42, 0.5); }
   .sidebar-toggle-btn { display: none; }
-  .menu-toggle { display: flex; }
+  .menu-toggle { display: flex; transition: opacity 0.2s var(--ease), transform 0.2s var(--ease); }
+  /* The floating hamburger sits at the same top-left corner the drawer's own
+     logo occupies once open, and its z-index (60) is above the sidebar's
+     (50) so it visually covers that logo — fade it out instead of letting
+     it sit on top. Backdrop-tap and nav-link-tap already close the drawer,
+     so losing the toggle button while open costs no functionality. */
+  .menu-toggle.drawer-open { opacity: 0; transform: scale(0.85); pointer-events: none; }
   .main { margin-left: 0; width: 100%; }
   .page { padding: 16px 14px 22px; }
   .topbar { padding: 0 12px 0 60px; gap: 8px; }
   .crumb-org { display: none; }
   .crumb-sep { display: none; }
-  .qsearch { max-width: none; margin: 0; }
+  /* Quick-search is icon-only for the entire mobile range (not just very
+     narrow phones) — expands to a full-width overlay only once focused (see
+     .qsearch.open below), so it never competes for topbar space with the
+     crumb title and right-side icons. */
+  .qsearch { flex: 0 0 34px; width: 34px; max-width: none; margin: 0; padding: 0; border-color: transparent; background: transparent; overflow: hidden; }
+  .qsearch-input { width: 0; padding: 0; }
   .qsearch-kbd { display: none; }
+  .qsearch.open {
+    flex: 1 1 auto; width: auto; padding: 6px 10px;
+    background: var(--surface-alt); border-color: var(--border);
+    position: absolute; left: 8px; right: 8px; top: 8px; z-index: 41;
+    box-shadow: var(--shadow-md); overflow: visible;
+  }
+  .qsearch.open .qsearch-input { width: auto; padding: 0; }
   .grid-wide, .grid-main, .appearance-layout { grid-template-columns: 1fr; }
   .grid-2, .grid-3, .grid-4, .grid-5 { grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); }
   .search-box input { width: 100%; }
@@ -1228,22 +1274,6 @@ app-quick-search { display: contents; }
      that density is fine on a desktop table but is the primary tap target in
      the stacked mobile card view, so it needs to clear a real touch target. */
   table.table.stack-mobile td .actions .btn.sm { padding: 8px 12px; font-size: 12px; min-height: 34px; }
-
-  /* Below ~480px the always-visible quick-search input has to share the
-     topbar with the crumb title and right-side icons — collapse it to an
-     icon that expands to a full-width overlay input once focused (the
-     `.open` class is already toggled on focus by quick-search.component.ts). */
-  @media (max-width: 480px) {
-    .qsearch { flex: 0 0 34px; width: 34px; padding: 0; border-color: transparent; background: transparent; overflow: hidden; }
-    .qsearch-input { width: 0; padding: 0; }
-    .qsearch.open {
-      flex: 1 1 auto; width: auto; padding: 6px 10px;
-      background: var(--surface-alt); border-color: var(--border);
-      position: absolute; left: 8px; right: 8px; top: 8px; z-index: 41;
-      box-shadow: var(--shadow-md);
-    }
-    .qsearch.open .qsearch-input { width: auto; padding: 0; }
-  }
 
   /* Bar chart: fixed-width scrollable columns beat squeezed, overlapping
      labels once there are ~6+ months of data on a narrow screen. */

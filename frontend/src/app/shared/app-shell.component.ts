@@ -13,7 +13,7 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
   standalone: true,
   imports: [RouterLink, RouterLinkActive, ToastsComponent, AvatarComponent, PillComponent, IconComponent, QuickSearchComponent],
   template: `
-    <button class="menu-toggle no-print" type="button" (click)="menuOpen.set(!menuOpen())" aria-label="Toggle menu">
+    <button class="menu-toggle no-print" type="button" [class.drawer-open]="menuOpen()" (click)="menuOpen.set(!menuOpen())" aria-label="Toggle menu">
       <app-icon name="menu" [size]="17" />
     </button>
     <div class="drawer-backdrop no-print" [class.show]="menuOpen()" (click)="menuOpen.set(false)"></div>
@@ -77,6 +77,13 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
             [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'" [title]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'">
             <app-icon name="menu" [size]="17" />
           </button>
+          <div class="topbar-brand" title="{{ auth.organisation()?.name }}">
+            @if (auth.organisation()?.brandingConfig?.logoUrl) {
+              <img [src]="auth.organisation()?.brandingConfig?.logoUrl" alt="Logo" class="brand-logo-img" />
+            } @else {
+              <div class="brand-mark">{{ orgInitials() }}</div>
+            }
+          </div>
           <div class="topbar-crumb">
             <span class="crumb-org">{{ auth.organisation()?.name || 'Workspace' }}</span>
             <app-icon name="chevronRight" [size]="12" class="crumb-sep" />

@@ -18,8 +18,10 @@ export interface CommandItem {
   standalone: true,
   imports: [IconComponent],
   template: `
-    <div class="qsearch" [class.open]="dropdownOpen()">
-      <app-icon name="search" [size]="15" class="qsearch-icon" />
+    <div class="qsearch" [class.open]="dropdownOpen()" (click)="focusInput()">
+      <button type="button" class="qsearch-icon-btn" tabindex="-1" aria-label="Search" (click)="focusInput()">
+        <app-icon name="search" [size]="15" class="qsearch-icon" />
+      </button>
       <input #inputEl class="qsearch-input" type="text" placeholder="Search or jump to&hellip;"
         [value]="query()" (input)="onInput($event)" (focus)="onFocus()" (keydown)="onKeydown($event)" autocomplete="off" />
       @if (!dropdownOpen() || !query()) { <span class="kbd qsearch-kbd">Ctrl K</span> }

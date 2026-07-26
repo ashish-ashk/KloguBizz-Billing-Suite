@@ -23,7 +23,7 @@ const SUPER_ADMIN_COMMANDS: CommandItem[] = [
   standalone: true,
   imports: [RouterLink, RouterLinkActive, RouterOutlet, ToastsComponent, AvatarComponent, IconComponent, QuickSearchComponent],
   template: `
-    <button class="menu-toggle no-print" type="button" (click)="menuOpen.set(!menuOpen())" aria-label="Toggle menu">
+    <button class="menu-toggle no-print" type="button" [class.drawer-open]="menuOpen()" (click)="menuOpen.set(!menuOpen())" aria-label="Toggle menu">
       <app-icon name="menu" [size]="17" />
     </button>
     <div class="shell" [class.sidebar-collapsed]="collapsed()">

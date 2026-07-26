@@ -1,18 +1,20 @@
 /**
- * Business-authentic invoice/bill layouts — 15 genuinely distinct, coordinated
+ * Business-authentic invoice/bill layouts — 22 genuinely distinct, coordinated
  * designs (header layout + typography + color role + table style + divider +
  * paper tone chosen together as a system, not independent knobs recombined),
  * mirrored from backend/src/services/invoiceTemplates.js so the on-screen
  * print/preview view and the tenant template picker match what the downloaded
  * PDF shows. Styles are inspired by the layouts real, widely-used invoicing
- * tools (Xero, QuickBooks, Wave, Bonsai, Stripe Invoicing, statutory GST
- * registers, till receipts, agency decks) are built around — not copies of
- * any one product's branding, just familiar, battle-tested archetypes.
+ * tools and conventions are built around (Xero, QuickBooks, Wave, Bonsai,
+ * Stripe Invoicing, e-commerce order invoices, Indian GST e-invoice QR
+ * panels, statutory GST registers, till receipts, agency decks) — not
+ * copies of any one product's branding, just familiar, battle-tested archetypes.
  */
 
 export type HeaderStyle =
   | 'minimalPlain' | 'formalFramed' | 'diagonalBold' | 'splitCompact' | 'letterheadLedger' | 'receiptCentered' | 'ribbonCard' | 'framedCentered'
-  | 'sidebarStripe' | 'bannerBlock' | 'underlineAccent' | 'watermarkGhost' | 'mastheadGrid' | 'badgeCentered' | 'twoToneSplit';
+  | 'sidebarStripe' | 'bannerBlock' | 'underlineAccent' | 'watermarkGhost' | 'mastheadGrid' | 'badgeCentered' | 'twoToneSplit'
+  | 'stampSeal' | 'spreadsheetGrid' | 'wideLogoBar' | 'columnRule' | 'qrCorner' | 'carbonBillBook' | 'fintechPills';
 export type TableStyle = 'bordered' | 'zebra' | 'minimal' | 'boxed' | 'ledger';
 export type DividerStyle = 'solid' | 'double' | 'dotted' | 'none' | 'perforated';
 export type PaperTone = 'white' | 'cream' | 'graypaper';
@@ -87,7 +89,14 @@ export const INVOICE_TEMPLATES: InvoiceTemplate[] = [
   { id: 'statutory-watermark', name: 'Statutory Watermark', description: 'Formal and legal-adjacent — a faint diagonal INVOICE watermark behind a fully gridded ledger table.', category: 'Statutory', font: 'Times-Roman', headerStyle: 'watermarkGhost', titleAlign: 'center', tableStyle: 'ledger', dividerStyle: 'double', paperTone: 'white' },
   { id: 'enterprise-grid', name: 'Enterprise Grid', description: 'ERP-style hard-bordered masthead — company block and a gridded invoice-meta table side by side.', category: 'Corporate', font: 'Helvetica', headerStyle: 'mastheadGrid', titleAlign: 'left', tableStyle: 'bordered', dividerStyle: 'solid', paperTone: 'graypaper' },
   { id: 'boutique-badge', name: 'Boutique Badge', description: 'Storefront-friendly — a centered circular logo badge, centered company name, a soft boxed table.', category: 'Boutique', font: 'Times-Roman', headerStyle: 'badgeCentered', titleAlign: 'center', tableStyle: 'boxed', dividerStyle: 'dotted', paperTone: 'cream' },
-  { id: 'split-corporate', name: 'Split Corporate', description: 'Confident two-tone header — a solid color block holds the invoice title and dates opposite your company details.', category: 'Corporate', font: 'Helvetica-Bold', headerStyle: 'twoToneSplit', titleAlign: 'right', tableStyle: 'bordered', dividerStyle: 'double', paperTone: 'white' }
+  { id: 'split-corporate', name: 'Split Corporate', description: 'Confident two-tone header — a solid color block holds the invoice title and dates opposite your company details.', category: 'Corporate', font: 'Helvetica-Bold', headerStyle: 'twoToneSplit', titleAlign: 'right', tableStyle: 'bordered', dividerStyle: 'double', paperTone: 'white' },
+  { id: 'govt-contractor', name: 'Government Contractor', description: 'Tender and PSU-billing style — a rotated dashed verification stamp opposite plain letterhead details.', category: 'Statutory', font: 'Times-Roman', headerStyle: 'stampSeal', titleAlign: 'left', tableStyle: 'bordered', dividerStyle: 'solid', paperTone: 'white' },
+  { id: 'spreadsheet-export', name: 'Spreadsheet Export', description: 'Reads like an accounting-software export — a fully bordered header grid, cell by cell.', category: 'Minimal', font: 'Helvetica', headerStyle: 'spreadsheetGrid', titleAlign: 'left', tableStyle: 'ledger', dividerStyle: 'none', paperTone: 'white' },
+  { id: 'marketplace-order', name: 'Marketplace Order', description: 'E-commerce order-invoice style — a big centered wordmark over a 4-column order/date/due/payment strip.', category: 'Corporate', font: 'Helvetica-Bold', headerStyle: 'wideLogoBar', titleAlign: 'center', tableStyle: 'minimal', dividerStyle: 'solid', paperTone: 'white' },
+  { id: 'consulting-rule', name: 'Consulting Rule', description: 'Quiet two-column header split by a single vertical rule — no boxes, no color fills, just clean alignment.', category: 'Minimal', font: 'Helvetica', headerStyle: 'columnRule', titleAlign: 'right', tableStyle: 'minimal', dividerStyle: 'solid', paperTone: 'white' },
+  { id: 'gst-einvoice-qr', name: 'GST e-Invoice QR', description: 'Digital-ready statutory look — a corner QR motif alongside the tax invoice details, gridded ledger table.', category: 'Statutory', font: 'Helvetica', headerStyle: 'qrCorner', titleAlign: 'right', tableStyle: 'bordered', dividerStyle: 'double', paperTone: 'white' },
+  { id: 'carbon-billbook', name: 'Carbon Bill Book', description: 'Small-shop bill-book feel — a boxed "Bill No." stub and tear-line dividers, monospace throughout.', category: 'Receipt', font: 'Courier', headerStyle: 'carbonBillBook', titleAlign: 'left', tableStyle: 'minimal', dividerStyle: 'perforated', paperTone: 'cream', compact: true },
+  { id: 'fintech-pills', name: 'Fintech Pills', description: 'Modern payments-app look — invoice number, date and due date as rounded status pills under a plain wordmark.', category: 'Corporate', font: 'Helvetica', headerStyle: 'fintechPills', titleAlign: 'left', tableStyle: 'minimal', dividerStyle: 'none', paperTone: 'white' }
 ];
 
 // Old (pre-redesign) ids/headerStyles mapped to their nearest new archetype,
@@ -130,7 +139,8 @@ const LEGACY_HEADER_MAP: Record<string, HeaderStyle> = {
 
 const NEW_HEADER_STYLES = new Set<string>([
   'minimalPlain', 'formalFramed', 'diagonalBold', 'splitCompact', 'letterheadLedger', 'receiptCentered', 'ribbonCard', 'framedCentered',
-  'sidebarStripe', 'bannerBlock', 'underlineAccent', 'watermarkGhost', 'mastheadGrid', 'badgeCentered', 'twoToneSplit'
+  'sidebarStripe', 'bannerBlock', 'underlineAccent', 'watermarkGhost', 'mastheadGrid', 'badgeCentered', 'twoToneSplit',
+  'stampSeal', 'spreadsheetGrid', 'wideLogoBar', 'columnRule', 'qrCorner', 'carbonBillBook', 'fintechPills'
 ]);
 
 /** Migrates a possibly-old headerStyle value (saved on a tenant's custom template) to one of the 8 current values. */
@@ -191,7 +201,14 @@ export const HEADER_STYLE_OPTIONS: Array<{ value: HeaderStyle; label: string }> 
   { value: 'watermarkGhost', label: 'Watermark Ghost — faint diagonal INVOICE watermark' },
   { value: 'mastheadGrid', label: 'Masthead Grid — bordered ERP-style header table' },
   { value: 'badgeCentered', label: 'Badge Centered — circular logo badge, centered' },
-  { value: 'twoToneSplit', label: 'Two-Tone Split — solid color block opposite company details' }
+  { value: 'twoToneSplit', label: 'Two-Tone Split — solid color block opposite company details' },
+  { value: 'stampSeal', label: 'Stamp Seal — rotated dashed verification stamp' },
+  { value: 'spreadsheetGrid', label: 'Spreadsheet Grid — fully bordered header cells' },
+  { value: 'wideLogoBar', label: 'Wide Logo Bar — big centered wordmark + meta strip' },
+  { value: 'columnRule', label: 'Column Rule — two columns split by a single vertical line' },
+  { value: 'qrCorner', label: 'QR Corner — digital-ready corner QR motif' },
+  { value: 'carbonBillBook', label: 'Carbon Bill Book — boxed bill-no. stub, monospace' },
+  { value: 'fintechPills', label: 'Fintech Pills — rounded status-pill meta row' }
 ];
 
 export const TITLE_ALIGN_OPTIONS: Array<{ value: 'left' | 'right' | 'center'; label: string }> = [

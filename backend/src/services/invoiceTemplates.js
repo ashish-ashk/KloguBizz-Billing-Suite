@@ -108,6 +108,55 @@ const INVOICE_TEMPLATES = [
     description: 'Confident two-tone header — a solid color block holds the invoice title and dates opposite your company details.',
     font: 'Helvetica-Bold', fontBold: 'Helvetica-Bold',
     headerStyle: 'twoToneSplit', titleAlign: 'right', tableStyle: 'bordered', dividerStyle: 'double', paperTone: 'white'
+  },
+  {
+    id: 'govt-contractor',
+    name: 'Government Contractor',
+    description: 'Tender and PSU-billing style — a rotated dashed verification stamp opposite plain letterhead details.',
+    font: 'Times-Roman', fontBold: 'Times-Bold',
+    headerStyle: 'stampSeal', titleAlign: 'left', tableStyle: 'bordered', dividerStyle: 'solid', paperTone: 'white'
+  },
+  {
+    id: 'spreadsheet-export',
+    name: 'Spreadsheet Export',
+    description: 'Reads like an accounting-software export — a fully bordered header grid, cell by cell.',
+    font: 'Helvetica', fontBold: 'Helvetica-Bold',
+    headerStyle: 'spreadsheetGrid', titleAlign: 'left', tableStyle: 'ledger', dividerStyle: 'none', paperTone: 'white'
+  },
+  {
+    id: 'marketplace-order',
+    name: 'Marketplace Order',
+    description: 'E-commerce order-invoice style — a big centered wordmark over a 4-column order/date/due/payment strip.',
+    font: 'Helvetica-Bold', fontBold: 'Helvetica-Bold',
+    headerStyle: 'wideLogoBar', titleAlign: 'center', tableStyle: 'minimal', dividerStyle: 'solid', paperTone: 'white'
+  },
+  {
+    id: 'consulting-rule',
+    name: 'Consulting Rule',
+    description: 'Quiet two-column header split by a single vertical rule — no boxes, no color fills, just clean alignment.',
+    font: 'Helvetica', fontBold: 'Helvetica-Bold',
+    headerStyle: 'columnRule', titleAlign: 'right', tableStyle: 'minimal', dividerStyle: 'solid', paperTone: 'white'
+  },
+  {
+    id: 'gst-einvoice-qr',
+    name: 'GST e-Invoice QR',
+    description: 'Digital-ready statutory look — a corner QR motif alongside the tax invoice details, gridded ledger table.',
+    font: 'Helvetica', fontBold: 'Helvetica-Bold',
+    headerStyle: 'qrCorner', titleAlign: 'right', tableStyle: 'bordered', dividerStyle: 'double', paperTone: 'white'
+  },
+  {
+    id: 'carbon-billbook',
+    name: 'Carbon Bill Book',
+    description: 'Small-shop bill-book feel — a boxed "Bill No." stub and tear-line dividers, monospace throughout.',
+    font: 'Courier', fontBold: 'Courier-Bold',
+    headerStyle: 'carbonBillBook', titleAlign: 'left', tableStyle: 'minimal', dividerStyle: 'perforated', paperTone: 'cream', compact: true
+  },
+  {
+    id: 'fintech-pills',
+    name: 'Fintech Pills',
+    description: 'Modern payments-app look — invoice number, date and due date as rounded status pills under a plain wordmark.',
+    font: 'Helvetica', fontBold: 'Helvetica-Bold',
+    headerStyle: 'fintechPills', titleAlign: 'left', tableStyle: 'minimal', dividerStyle: 'none', paperTone: 'white'
   }
 ];
 
@@ -181,7 +230,8 @@ const NEW_HEADER_STYLES = new Set([
   'minimalPlain', 'formalFramed', 'diagonalBold', 'splitCompact',
   'letterheadLedger', 'receiptCentered', 'ribbonCard', 'framedCentered',
   'sidebarStripe', 'bannerBlock', 'underlineAccent', 'watermarkGhost',
-  'mastheadGrid', 'badgeCentered', 'twoToneSplit'
+  'mastheadGrid', 'badgeCentered', 'twoToneSplit',
+  'stampSeal', 'spreadsheetGrid', 'wideLogoBar', 'columnRule', 'qrCorner', 'carbonBillBook', 'fintechPills'
 ]);
 
 // Mirrors frontend/src/app/core/invoice-templates.ts's resolveInvoiceTemplate —

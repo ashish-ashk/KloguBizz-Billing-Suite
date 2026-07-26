@@ -853,6 +853,17 @@ textarea {
   border-bottom: 1px solid var(--border);
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.topbar-brand .brand-mark,
+.topbar-brand .brand-logo-img {
+  width: 30px;
+  height: 30px;
+  font-size: 12px;
+}
 .topbar-crumb {
   display: flex;
   align-items: center;
@@ -911,6 +922,18 @@ app-quick-search {
 }
 .qsearch-icon {
   flex-shrink: 0;
+}
+.qsearch-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  cursor: pointer;
 }
 .qsearch-input {
   flex: 1;
@@ -2315,9 +2338,8 @@ app-quick-search {
     padding: 32px clamp(20px, 6vw, 40px);
   }
   .sidebar {
-    transition: transform 0.25s ease;
-  }
-  .sidebar {
+    will-change: transform;
+    transition: transform 0.3s var(--ease);
     transform: translateX(-100%);
   }
   .sidebar.open {
@@ -2329,6 +2351,12 @@ app-quick-search {
   }
   .menu-toggle {
     display: flex;
+    transition: opacity 0.2s var(--ease), transform 0.2s var(--ease);
+  }
+  .menu-toggle.drawer-open {
+    opacity: 0;
+    transform: scale(0.85);
+    pointer-events: none;
   }
   .main {
     margin-left: 0;
@@ -2348,11 +2376,39 @@ app-quick-search {
     display: none;
   }
   .qsearch {
+    flex: 0 0 34px;
+    width: 34px;
     max-width: none;
     margin: 0;
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+    overflow: hidden;
+  }
+  .qsearch-input {
+    width: 0;
+    padding: 0;
   }
   .qsearch-kbd {
     display: none;
+  }
+  .qsearch.open {
+    flex: 1 1 auto;
+    width: auto;
+    padding: 6px 10px;
+    background: var(--surface-alt);
+    border-color: var(--border);
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    top: 8px;
+    z-index: 41;
+    box-shadow: var(--shadow-md);
+    overflow: visible;
+  }
+  .qsearch.open .qsearch-input {
+    width: auto;
+    padding: 0;
   }
   .grid-wide,
   .grid-main,
@@ -2554,37 +2610,6 @@ app-quick-search {
     padding: 8px 12px;
     font-size: 12px;
     min-height: 34px;
-  }
-  @media (max-width: 480px) {
-    .qsearch {
-      flex: 0 0 34px;
-      width: 34px;
-      padding: 0;
-      border-color: transparent;
-      background: transparent;
-      overflow: hidden;
-    }
-    .qsearch-input {
-      width: 0;
-      padding: 0;
-    }
-    .qsearch.open {
-      flex: 1 1 auto;
-      width: auto;
-      padding: 6px 10px;
-      background: var(--surface-alt);
-      border-color: var(--border);
-      position: absolute;
-      left: 8px;
-      right: 8px;
-      top: 8px;
-      z-index: 41;
-      box-shadow: var(--shadow-md);
-    }
-    .qsearch.open .qsearch-input {
-      width: auto;
-      padding: 0;
-    }
   }
   .bar-chart {
     overflow-x: auto;

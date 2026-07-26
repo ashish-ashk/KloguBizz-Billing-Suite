@@ -94,7 +94,7 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
         <div style="display:grid;gap:20px;">
           <section class="card">
             <div class="card-title" style="margin-bottom:4px;">Company Logo</div>
-            <div class="card-sub" style="margin-bottom:12px;">Shown in your sidebar and on every invoice header</div>
+            <div class="card-sub" style="margin-bottom:12px;">Shown in your sidebar, the top bar, and on every invoice header — visible to everyone in your organisation</div>
             <button type="button" (click)="logoInput.click()"
               style="width:100%;border:2px dashed var(--border);border-radius:10px;padding:20px;text-align:center;background:var(--card);cursor:pointer;">
               @if (logoUrl()) {

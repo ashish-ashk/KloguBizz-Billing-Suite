@@ -1,13 +1,11 @@
 import {
   ThemeService
-} from "./chunk-KA6UE4DJ.js";
+} from "./chunk-3NIVYA3E.js";
 import {
   AuthService
-} from "./chunk-CQ7MHBIQ.js";
+} from "./chunk-O5XMHUYX.js";
 import "./chunk-WHZ3LIXQ.js";
-import {
-  ToastService
-} from "./chunk-GAHW2XA4.js";
+import "./chunk-GAHW2XA4.js";
 import {
   Router,
   RouterOutlet,
@@ -106,36 +104,36 @@ var tenantAdminGuard = () => {
 
 // src/app/app.routes.ts
 var routes = [
-  { path: "login", loadComponent: () => import("./chunk-YKXCH33U.js").then((m) => m.LoginComponent) },
-  { path: "register", loadComponent: () => import("./chunk-E6NOWJ2N.js").then((m) => m.RegisterComponent) },
+  { path: "login", loadComponent: () => import("./chunk-DUBPYCPM.js").then((m) => m.LoginComponent) },
+  { path: "register", loadComponent: () => import("./chunk-6QHES62B.js").then((m) => m.RegisterComponent) },
   { path: "terms", data: { type: "terms" }, loadComponent: () => import("./chunk-7RT4D47J.js").then((m) => m.LegalPageComponent) },
   { path: "sla", data: { type: "sla" }, loadComponent: () => import("./chunk-7RT4D47J.js").then((m) => m.LegalPageComponent) },
   {
     path: "",
     canActivate: [authGuard],
     children: [
-      { path: "dashboard", loadComponent: () => import("./chunk-RH7KAXAC.js").then((m) => m.DashboardComponent) },
-      { path: "invoices", loadComponent: () => import("./chunk-AHE4G75H.js").then((m) => m.InvoicesComponent) },
-      { path: "invoices/new", loadComponent: () => import("./chunk-T3X375DG.js").then((m) => m.InvoiceEditorComponent) },
-      { path: "invoices/:id/edit", loadComponent: () => import("./chunk-T3X375DG.js").then((m) => m.InvoiceEditorComponent) },
-      { path: "invoices/:id/print", loadComponent: () => import("./chunk-JVEGCBML.js").then((m) => m.InvoicePrintComponent) },
-      { path: "bill-generator", loadComponent: () => import("./chunk-FD75P2WD.js").then((m) => m.BillGeneratorComponent) },
-      { path: "bill-generator/:id/edit", loadComponent: () => import("./chunk-FD75P2WD.js").then((m) => m.BillGeneratorComponent) },
-      { path: "clients", loadComponent: () => import("./chunk-3ZKLYBUQ.js").then((m) => m.ClientsComponent) },
-      { path: "items", loadComponent: () => import("./chunk-UY76WJ7L.js").then((m) => m.ItemsComponent) },
-      { path: "payments", loadComponent: () => import("./chunk-2D76TKRT.js").then((m) => m.PaymentsComponent) },
-      { path: "reports", loadComponent: () => import("./chunk-LCPENN7Z.js").then((m) => m.ReportsComponent) },
-      { path: "users", loadComponent: () => import("./chunk-DZ53RTLZ.js").then((m) => m.UsersComponent) },
-      { path: "subscription", loadComponent: () => import("./chunk-EUDYXBZ6.js").then((m) => m.SubscriptionComponent) },
-      { path: "appearance", canActivate: [tenantAdminGuard], loadComponent: () => import("./chunk-3JLPYXGH.js").then((m) => m.AppearanceComponent) },
-      { path: "invoice-templates", canActivate: [tenantAdminGuard], loadComponent: () => import("./chunk-2A3X2NJH.js").then((m) => m.InvoiceTemplatesComponent) },
+      { path: "dashboard", loadComponent: () => import("./chunk-NUQHIXXB.js").then((m) => m.DashboardComponent) },
+      { path: "invoices", loadComponent: () => import("./chunk-7EFC5VQE.js").then((m) => m.InvoicesComponent) },
+      { path: "invoices/new", loadComponent: () => import("./chunk-OGC3DANF.js").then((m) => m.InvoiceEditorComponent) },
+      { path: "invoices/:id/edit", loadComponent: () => import("./chunk-OGC3DANF.js").then((m) => m.InvoiceEditorComponent) },
+      { path: "invoices/:id/print", loadComponent: () => import("./chunk-ZKO33DUF.js").then((m) => m.InvoicePrintComponent) },
+      { path: "bill-generator", loadComponent: () => import("./chunk-DNDDEE4O.js").then((m) => m.BillGeneratorComponent) },
+      { path: "bill-generator/:id/edit", loadComponent: () => import("./chunk-DNDDEE4O.js").then((m) => m.BillGeneratorComponent) },
+      { path: "clients", loadComponent: () => import("./chunk-DIHQFYFS.js").then((m) => m.ClientsComponent) },
+      { path: "items", loadComponent: () => import("./chunk-5EYENIYH.js").then((m) => m.ItemsComponent) },
+      { path: "payments", loadComponent: () => import("./chunk-AS7ZYYDM.js").then((m) => m.PaymentsComponent) },
+      { path: "reports", loadComponent: () => import("./chunk-LCRB3THR.js").then((m) => m.ReportsComponent) },
+      { path: "users", loadComponent: () => import("./chunk-XKOCWKTH.js").then((m) => m.UsersComponent) },
+      { path: "subscription", loadComponent: () => import("./chunk-MEQQAB5Z.js").then((m) => m.SubscriptionComponent) },
+      { path: "appearance", canActivate: [tenantAdminGuard], loadComponent: () => import("./chunk-L5S24PCH.js").then((m) => m.AppearanceComponent) },
+      { path: "invoice-templates", canActivate: [tenantAdminGuard], loadComponent: () => import("./chunk-JNJ2JFRS.js").then((m) => m.InvoiceTemplatesComponent) },
       { path: "", pathMatch: "full", redirectTo: "dashboard" }
     ]
   },
   {
     path: "super-admin",
     canActivate: [superAdminGuard],
-    loadComponent: () => import("./chunk-H6ZHEHL7.js").then((m) => m.SuperAdminLayoutComponent),
+    loadComponent: () => import("./chunk-3YL74G6R.js").then((m) => m.SuperAdminLayoutComponent),
     children: [
       { path: "", pathMatch: "full", redirectTo: "organisations" },
       { path: "organisations", loadComponent: () => import("./chunk-NC2LOM23.js").then((m) => m.SuperOrganisationsComponent) },
@@ -144,7 +142,7 @@ var routes = [
       { path: "reminders", loadComponent: () => import("./chunk-LVI24WHE.js").then((m) => m.SuperRemindersComponent) },
       { path: "plans", loadComponent: () => import("./chunk-LWSEA3GL.js").then((m) => m.SuperPlansComponent) },
       { path: "branding", loadComponent: () => import("./chunk-VLOVL2HG.js").then((m) => m.SuperBrandingComponent) },
-      { path: "profile", loadComponent: () => import("./chunk-272G6CXP.js").then((m) => m.SuperProfileComponent) }
+      { path: "profile", loadComponent: () => import("./chunk-IJYAR6YP.js").then((m) => m.SuperProfileComponent) }
     ]
   },
   { path: "**", redirectTo: "dashboard" }
@@ -152,19 +150,13 @@ var routes = [
 
 // src/app/core/auth.interceptor.ts
 var authInterceptor = (req, next) => {
-  const router = inject(Router);
-  const toast = inject(ToastService);
+  const auth = inject(AuthService);
   const token = localStorage.getItem("klogubizz_token");
   const authedReq = token ? req.clone({ setHeaders: { Authorization: `Bearer ${token}` } }) : req;
   return next(authedReq).pipe(catchError((err) => {
     if (err.status === 401 && !req.url.includes("/auth/login") && !req.url.includes("/auth/register")) {
-      if (err.error?.code === "SESSION_REVOKED") {
-        toast.info("You were signed out because your account signed in on another device.");
-      }
-      localStorage.removeItem("klogubizz_token");
-      localStorage.removeItem("klogubizz_user");
-      localStorage.removeItem("klogubizz_org");
-      router.navigateByUrl("/login");
+      const message = err.error?.code === "SESSION_REVOKED" ? "You were signed out because your account signed in on another device." : "Your session has expired. Please sign in again.";
+      auth.forceLogout(message);
     }
     return throwError(() => err);
   }));

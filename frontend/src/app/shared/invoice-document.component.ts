@@ -290,6 +290,132 @@ export interface InvoiceDocClient {
             </div>
           </div>
         }
+        @case ('stampSeal') {
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
+            <div style="display:flex;gap:10px;align-items:center;">
+              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
+              <div>
+                <div style="font-weight:700;font-size:15px;" [style.color]="dark">{{ orgName() }}</div>
+                <div style="font-size:10px;color:var(--muted);margin-top:3px;line-height:1.6;">
+                  @if (orgAddress()) { <div>{{ orgAddress() }}</div> }
+                  @if (orgGstin()) { <div>GSTIN: {{ orgGstin() }}</div> }
+                </div>
+              </div>
+            </div>
+            <div style="text-align:center;flex-shrink:0;">
+              <div [style.borderColor]="accentColor()" style="width:64px;height:64px;border-radius:50%;border:2px dashed;display:flex;align-items:center;justify-content:center;transform:rotate(-8deg);">
+                <div [style.color]="accentColor()" style="font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;text-align:center;line-height:1.3;">{{ title('Invoice') }}<br />Verified</div>
+              </div>
+              <div style="font-size:9.5px;color:var(--muted);margin-top:6px;">{{ invoice().invoiceNumber }}</div>
+            </div>
+          </div>
+          <div style="font-size:10px;color:var(--muted);margin-top:10px;">Date: {{ fmtDate(invoice().date) }} &nbsp;·&nbsp; Due {{ fmtDate(invoice().dueDate) }}</div>
+        }
+        @case ('spreadsheetGrid') {
+          <table style="width:100%;border-collapse:collapse;font-size:11px;">
+            <tr>
+              <td style="border:1px solid var(--border);padding:8px 10px;font-weight:700;" [style.color]="dark">{{ orgName() }}</td>
+              <td style="border:1px solid var(--border);padding:8px 10px;font-weight:700;text-align:right;" [style.color]="accentColor()">{{ title('Invoice') }}</td>
+            </tr>
+            <tr>
+              <td style="border:1px solid var(--border);padding:6px 10px;font-size:10px;color:var(--muted);">
+                @if (orgAddress()) { {{ orgAddress() }} }
+                @if (orgGstin()) { <span> · GSTIN: {{ orgGstin() }}</span> }
+              </td>
+              <td style="border:1px solid var(--border);padding:6px 10px;font-size:10px;color:var(--muted);text-align:right;">No. {{ invoice().invoiceNumber }}</td>
+            </tr>
+            <tr>
+              <td style="border:1px solid var(--border);padding:6px 10px;font-size:10px;color:var(--muted);">&nbsp;</td>
+              <td style="border:1px solid var(--border);padding:6px 10px;font-size:10px;color:var(--muted);text-align:right;">{{ fmtDate(invoice().date) }} · Due {{ fmtDate(invoice().dueDate) }}</td>
+            </tr>
+          </table>
+        }
+        @case ('wideLogoBar') {
+          <div style="text-align:center;">
+            @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:38px;max-width:160px;object-fit:contain;margin-bottom:8px;" /> }
+            <div style="font-weight:800;font-size:19px;letter-spacing:-0.3px;" [style.color]="dark">{{ orgName() }}</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px;padding:10px 0;border-top:1px solid var(--faint);border-bottom:1px solid var(--faint);">
+            <div><div style="font-size:8.5px;color:var(--faint);text-transform:uppercase;">{{ title('Invoice') }} No</div><div style="font-size:10.5px;font-weight:700;margin-top:2px;" [style.color]="dark">{{ invoice().invoiceNumber }}</div></div>
+            <div><div style="font-size:8.5px;color:var(--faint);text-transform:uppercase;">Order Date</div><div style="font-size:10.5px;font-weight:700;margin-top:2px;" [style.color]="dark">{{ fmtDate(invoice().date) }}</div></div>
+            <div><div style="font-size:8.5px;color:var(--faint);text-transform:uppercase;">Due Date</div><div style="font-size:10.5px;font-weight:700;margin-top:2px;color:var(--red);">{{ fmtDate(invoice().dueDate) }}</div></div>
+            <div><div style="font-size:8.5px;color:var(--faint);text-transform:uppercase;">Payment</div><div style="font-size:10.5px;font-weight:700;margin-top:2px;" [style.color]="accentColor()">{{ invoice().totals.isIGST ? 'IGST' : 'CGST+SGST' }}</div></div>
+          </div>
+        }
+        @case ('columnRule') {
+          <div style="display:flex;gap:24px;">
+            <div style="flex:1;">
+              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:28px;max-width:100px;object-fit:contain;margin-bottom:6px;" /> }
+              <div style="font-weight:700;font-size:15px;" [style.color]="dark">{{ orgName() }}</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:4px;line-height:1.6;">
+                @if (orgAddress()) { <div>{{ orgAddress() }}</div> }
+                @if (orgGstin()) { <div>GSTIN: {{ orgGstin() }}</div> }
+              </div>
+            </div>
+            <div style="width:1px;background:var(--border);align-self:stretch;"></div>
+            <div style="flex:1;text-align:right;">
+              <div [style.color]="accentColor()" style="font-weight:700;font-size:14px;">{{ title('Invoice') }}</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:6px;line-height:1.8;">
+                <div>{{ invoice().invoiceNumber }}</div>
+                <div>{{ fmtDate(invoice().date) }}</div>
+                <div>Due {{ fmtDate(invoice().dueDate) }}</div>
+              </div>
+            </div>
+          </div>
+        }
+        @case ('qrCorner') {
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
+            <div style="display:flex;gap:10px;align-items:center;">
+              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
+              <div>
+                <div style="font-weight:700;font-size:16px;" [style.color]="dark">{{ orgName() }}</div>
+                <div style="font-size:10px;color:var(--faint);margin-top:2px;">
+                  @if (orgAddress()) { {{ orgAddress() }} }
+                  @if (orgGstin()) { <span> · GSTIN: {{ orgGstin() }}</span> }
+                </div>
+              </div>
+            </div>
+            <div style="text-align:right;display:flex;gap:10px;align-items:flex-start;">
+              <div>
+                <div [style.color]="accentColor()" style="font-weight:700;font-size:15px;">{{ title('Tax Invoice') }}</div>
+                <div style="font-size:10px;color:var(--muted);margin-top:4px;line-height:1.6;">
+                  {{ invoice().invoiceNumber }}<br />Due {{ fmtDate(invoice().dueDate) }}
+                </div>
+              </div>
+              <div class="inv-qr-grid" [style.borderColor]="accentColor()">
+                @for (cell of qrCells; track $index) {
+                  <span [style.background]="cell ? dark : 'transparent'"></span>
+                }
+              </div>
+            </div>
+          </div>
+        }
+        @case ('carbonBillBook') {
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;">
+            <div>
+              <div style="font-weight:700;font-size:15px;" [style.color]="dark">{{ orgName() }}</div>
+              @if (orgAddress()) { <div style="font-size:9.5px;color:var(--muted);margin-top:2px;">{{ orgAddress() }}</div> }
+            </div>
+            <div [style.borderColor]="accentColor()" style="border:1.5px solid;border-radius:4px;padding:6px 12px;text-align:center;">
+              <div style="font-size:8px;color:var(--faint);text-transform:uppercase;">Bill No.</div>
+              <div [style.color]="accentColor()" class="mono" style="font-weight:700;font-size:13px;">{{ invoice().invoiceNumber }}</div>
+            </div>
+          </div>
+          <div style="font-size:9.5px;color:var(--muted);margin-top:8px;">Date: {{ fmtDate(invoice().date) }} &nbsp;&nbsp; Due: {{ fmtDate(invoice().dueDate) }}</div>
+        }
+        @case ('fintechPills') {
+          <div>
+            <div style="display:flex;gap:10px;align-items:center;">
+              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:28px;max-width:100px;object-fit:contain;" /> }
+              <div style="font-weight:800;font-size:17px;letter-spacing:-0.3px;" [style.color]="dark">{{ orgName() }}</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+              <span [style.background]="hexToRgba(accentColor(), 0.12)" [style.color]="accentColor()" style="font-size:10px;font-weight:700;padding:5px 12px;border-radius:999px;">{{ title('Invoice') }} {{ invoice().invoiceNumber }}</span>
+              <span style="font-size:10px;font-weight:600;padding:5px 12px;border-radius:999px;background:var(--surface-alt);color:var(--muted);">{{ fmtDate(invoice().date) }}</span>
+              <span style="font-size:10px;font-weight:600;padding:5px 12px;border-radius:999px;background:var(--surface-alt);color:var(--red);">Due {{ fmtDate(invoice().dueDate) }}</span>
+            </div>
+          </div>
+        }
         @default {
           <div style="display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;">
             <div style="display:flex;gap:12px;align-items:flex-start;">
@@ -478,6 +604,13 @@ export interface InvoiceDocClient {
     .inv-receipt-desc { font-weight:700; font-size:12px; }
     .inv-receipt-meta { font-size:10.5px; color:var(--muted); margin-top:2px; }
 
+    .inv-qr-grid {
+      display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px;
+      width: 36px; height: 36px; flex-shrink: 0;
+      border: 1px solid; padding: 2px; box-sizing: border-box;
+    }
+    .inv-qr-grid span { display: block; }
+
     /* Mobile keeps true A4 page proportions — same --doc-fit shrink-to-fit
        zoom (from styles.css, driven by the .invoice-doc-wrap container
        query) that the desktop template-picker thumbnail uses, rather than
@@ -508,6 +641,9 @@ export class InvoiceDocumentComponent {
 
   dark = '#1e1b4b';
   readonly perforationDots = Array.from({ length: 40 });
+  /** Purely decorative pixel-grid motif for QR Corner — evokes the QR panel
+   *  on Indian GST e-invoices without claiming to encode real, scannable data. */
+  readonly qrCells = Array.from({ length: 36 }, (_, i) => (i * 7919) % 13 < 6);
   fmtINR = fmtINR;
   fmtDate = fmtDate;
   numberToWords = numberToWords;
@@ -552,7 +688,7 @@ export class InvoiceDocumentComponent {
     return i % 2 && this.tpl().tableStyle !== 'minimal' ? '#fafbff' : 'transparent';
   }
 
-  private hexToRgba(hex: string, alpha: number): string {
+  hexToRgba(hex: string, alpha: number): string {
     const h = (hex || '#4f46e5').replace('#', '');
     const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
     const n = parseInt(full, 16) || 0x4f46e5;
