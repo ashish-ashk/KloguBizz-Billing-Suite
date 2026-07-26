@@ -24,7 +24,7 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
             @if (auth.organisation()?.brandingConfig?.logoUrl) {
               <img [src]="auth.organisation()?.brandingConfig?.logoUrl" alt="Logo" class="brand-logo-img" />
             } @else {
-              <div class="brand-mark">K</div>
+              <img src="klogu-logo.png" alt="Klogu Bizz" class="brand-logo-img" />
             }
             <div class="brand-text">
               <div class="brand-name">Klogu Bizz</div>
@@ -81,7 +81,7 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
             @if (auth.organisation()?.brandingConfig?.logoUrl) {
               <img [src]="auth.organisation()?.brandingConfig?.logoUrl" alt="Logo" class="brand-logo-img" />
             } @else {
-              <div class="brand-mark">{{ orgInitials() }}</div>
+              <img src="klogu-logo.png" alt="Klogu Bizz" class="brand-logo-img" />
             }
           </div>
           <div class="topbar-crumb">

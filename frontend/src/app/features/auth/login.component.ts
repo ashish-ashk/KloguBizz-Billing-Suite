@@ -22,7 +22,7 @@ import { LegalContentComponent } from '../../shared/legal-content.component';
             @if (branding()?.logoUrl) {
               <img [src]="branding()?.logoUrl" alt="Logo" style="width:36px;height:36px;border-radius:10px;object-fit:contain;flex-shrink:0;" />
             } @else {
-              <div class="brand-mark" [style.background]="'linear-gradient(135deg,' + (branding()?.accentColor || '#818cf8') + ',' + (branding()?.primaryColor || '#4f46e5') + ')'">K</div>
+              <img src="klogu-logo.png" alt="Klogu Bizz" style="width:36px;height:36px;border-radius:10px;object-fit:contain;flex-shrink:0;" />
             }
             <div>
               <div class="brand-name" style="color:var(--text)">{{ branding()?.appName || 'Klogu Bizz' }}</div>
