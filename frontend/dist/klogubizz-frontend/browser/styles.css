@@ -2376,8 +2376,13 @@ app-quick-search {
     display: none;
   }
   .qsearch {
+    position: absolute;
+    left: calc(50% + 24px);
+    top: 50%;
+    transform: translate(-50%, -50%);
     flex: 0 0 34px;
     width: 34px;
+    height: 34px;
     max-width: none;
     margin: 0;
     padding: 0;
@@ -2387,21 +2392,27 @@ app-quick-search {
   }
   .qsearch-input {
     width: 0;
+    min-width: 0;
     padding: 0;
   }
   .qsearch-kbd {
     display: none;
   }
+  .qsearch-input::placeholder {
+    color: transparent;
+  }
   .qsearch.open {
     flex: 1 1 auto;
     width: auto;
+    height: auto;
     padding: 6px 10px;
     background: var(--surface-alt);
     border-color: var(--border);
     position: absolute;
-    left: 8px;
+    left: 68px;
     right: 8px;
     top: 8px;
+    transform: none;
     z-index: 41;
     box-shadow: var(--shadow-md);
     overflow: visible;

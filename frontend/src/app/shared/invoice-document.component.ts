@@ -42,6 +42,13 @@ export interface InvoiceDocClient {
       [style.backgroundColor]="paperBg()" [style.boxShadow]="sidebarShadow()"
       [style.backgroundImage]="watermarkBg()" [style.backgroundRepeat]="'no-repeat'" [style.backgroundPosition]="'center'" [style.backgroundSize]="'65% 65%'">
 
+      @if (headerImageUrl()) {
+        <!-- A tenant-uploaded letterhead/banner image replaces the coded
+             header entirely — it's expected to already carry the company's
+             branding, so layering the templated header (with its own logo
+             placement) on top of or above it would just duplicate that. -->
+        <img [src]="headerImageUrl()" alt="" style="width:100%;max-height:160px;display:block;margin:0 auto;" />
+      } @else {
       @switch (tpl().headerStyle) {
         @case ('minimalPlain') {
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap;">
@@ -440,6 +447,7 @@ export interface InvoiceDocClient {
           </div>
         }
       }
+      }
 
       @switch (tpl().dividerStyle) {
         @case ('double') {
@@ -632,6 +640,9 @@ export class InvoiceDocumentComponent {
   customTemplate = input<CustomInvoiceTemplate | null>(null);
   accentColor = input('#4f46e5');
   logoUrl = input('');
+  /** A full-width letterhead/banner image, uploaded on the Invoice Templates
+   *  page, that replaces the coded header entirely when set. */
+  headerImageUrl = input('');
   showLogo = input(true);
   showSignature = input(true);
   showBankDetails = input(true);

@@ -26,6 +26,7 @@ const customInvoiceTemplateSchema = new mongoose.Schema({
 
 const brandingSchema = new mongoose.Schema({
   logoUrl: String,
+  headerImageUrl: String,
   primaryColor: { type: String, default: '#4f46e5' },
   invoicePrefix: { type: String, default: 'KLG' },
   invoiceTitleLabel: { type: String, default: '' },

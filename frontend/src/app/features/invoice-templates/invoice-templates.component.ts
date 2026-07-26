@@ -114,6 +114,27 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
           </section>
 
           <section class="card">
+            <div class="card-title" style="margin-bottom:4px;">Invoice Header Image</div>
+            <div class="card-sub" style="margin-bottom:12px;">Optional — upload your own full-width letterhead/banner and it replaces the template's coded header entirely, on screen and in the downloaded PDF</div>
+            <button type="button" (click)="headerImageInput.click()"
+              style="width:100%;border:2px dashed var(--border);border-radius:10px;padding:20px;text-align:center;background:var(--card);cursor:pointer;">
+              @if (headerImageUrl()) {
+                <img [src]="headerImageUrl()" alt="Header" style="max-height:60px;max-width:100%;display:block;margin:0 auto 8px;" />
+                <div style="font-size:11px;color:var(--green);font-weight:600;display:flex;gap:4px;align-items:center;justify-content:center;">
+                  <app-icon name="checkCircle" [size]="13" /> Uploaded — click to replace
+                </div>
+              } @else {
+                <div style="color:var(--muted);display:flex;justify-content:center;"><app-icon name="upload" [size]="22" [strokeWidth]="1.5" /></div>
+                <div style="font-size:12px;color:var(--muted);margin-top:6px;">Click to upload a header image</div>
+              }
+            </button>
+            <input #headerImageInput type="file" accept="image/*" hidden (change)="onHeaderImageFile($event)" />
+            @if (headerImageUrl()) {
+              <button class="btn ghost sm" type="button" style="margin-top:8px;" (click)="removeHeaderImage()">Remove header image</button>
+            }
+          </section>
+
+          <section class="card">
             <div class="card-title" style="margin-bottom:4px;">Accent Color</div>
             <div class="card-sub" style="margin-bottom:12px;">Pick a curated color, or enter your own hex code</div>
             <div class="accent-row">
@@ -278,7 +299,8 @@ const SAMPLE_CLIENT: InvoiceDocClient = {
               [showSignature]="content().showSignature"
               [showBankDetails]="content().showBankDetails"
               [showAmountInWords]="content().showAmountInWords"
-              [invoiceTitleLabel]="invoiceTitleLabel()" />
+              [invoiceTitleLabel]="invoiceTitleLabel()"
+              [headerImageUrl]="headerImageUrl()" />
           </div>
         </div>
       </div>
@@ -301,6 +323,7 @@ export class InvoiceTemplatesComponent implements OnInit {
   sampleClient = SAMPLE_CLIENT;
 
   logoUrl = signal('');
+  headerImageUrl = signal('');
   accentColor = signal('#4f46e5');
   invoiceTitleLabel = signal('');
   mode = signal<PickerMode>('preset');
@@ -312,6 +335,7 @@ export class InvoiceTemplatesComponent implements OnInit {
   searchQuery = signal('');
 
   savedLogoUrl = signal('');
+  savedHeaderImageUrl = signal('');
   savedAccentColor = signal('#4f46e5');
   savedInvoiceTitleLabel = signal('');
   savedMode = signal<PickerMode>('preset');
@@ -339,6 +363,7 @@ export class InvoiceTemplatesComponent implements OnInit {
 
   dirty = computed(() =>
     this.logoUrl() !== this.savedLogoUrl() ||
+    this.headerImageUrl() !== this.savedHeaderImageUrl() ||
     this.accentColor() !== this.savedAccentColor() ||
     this.invoiceTitleLabel() !== this.savedInvoiceTitleLabel() ||
     this.mode() !== this.savedMode() ||
@@ -352,6 +377,7 @@ export class InvoiceTemplatesComponent implements OnInit {
   ngOnInit() {
     const branding = this.auth.organisation()?.brandingConfig || {};
     const logo = branding.logoUrl || '';
+    const headerImage = branding.headerImageUrl || '';
     const accent = branding.primaryColor || '#4f46e5';
     const titleLabel = branding.invoiceTitleLabel || '';
     const templateId = branding.invoiceTemplateId || 'modern-minimal';
@@ -360,6 +386,7 @@ export class InvoiceTemplatesComponent implements OnInit {
     const content = { ...DEFAULT_CONTENT, ...(branding.invoiceContent || {}) };
 
     this.logoUrl.set(logo); this.savedLogoUrl.set(logo);
+    this.headerImageUrl.set(headerImage); this.savedHeaderImageUrl.set(headerImage);
     this.accentColor.set(accent); this.savedAccentColor.set(accent);
     this.invoiceTitleLabel.set(titleLabel); this.savedInvoiceTitleLabel.set(titleLabel);
     this.mode.set(isCustom ? 'custom' : 'preset'); this.savedMode.set(isCustom ? 'custom' : 'preset');
@@ -396,8 +423,22 @@ export class InvoiceTemplatesComponent implements OnInit {
     this.logoUrl.set('');
   }
 
+  onHeaderImageFile(event: Event) {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    if (file.size > 700 * 1024) { this.toast.error('Header image must be under 700 KB.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => this.headerImageUrl.set(reader.result as string);
+    reader.readAsDataURL(file);
+  }
+
+  removeHeaderImage() {
+    this.headerImageUrl.set('');
+  }
+
   discard() {
     this.logoUrl.set(this.savedLogoUrl());
+    this.headerImageUrl.set(this.savedHeaderImageUrl());
     this.accentColor.set(this.savedAccentColor());
     this.invoiceTitleLabel.set(this.savedInvoiceTitleLabel());
     this.mode.set(this.savedMode());
@@ -413,6 +454,7 @@ export class InvoiceTemplatesComponent implements OnInit {
       brandingConfig: {
         ...current,
         logoUrl: this.logoUrl(),
+        headerImageUrl: this.headerImageUrl(),
         primaryColor: this.accentColor(),
         invoiceTitleLabel: this.invoiceTitleLabel(),
         invoiceTemplateId: this.effectiveTemplateId(),
@@ -424,6 +466,7 @@ export class InvoiceTemplatesComponent implements OnInit {
         this.saving.set(false);
         this.auth.setOrganisation(org);
         this.savedLogoUrl.set(this.logoUrl());
+        this.savedHeaderImageUrl.set(this.headerImageUrl());
         this.savedAccentColor.set(this.accentColor());
         this.savedInvoiceTitleLabel.set(this.invoiceTitleLabel());
         this.savedMode.set(this.mode());

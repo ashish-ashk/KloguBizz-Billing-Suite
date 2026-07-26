@@ -21,6 +21,7 @@ export interface Organisation {
   status: string;
   brandingConfig?: {
     logoUrl?: string;
+    headerImageUrl?: string;
     primaryColor?: string;
     invoicePrefix?: string;
     invoiceTitleLabel?: string;

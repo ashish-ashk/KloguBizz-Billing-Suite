@@ -116,7 +116,7 @@ var routes = [
       { path: "invoices", loadComponent: () => import("./chunk-7EFC5VQE.js").then((m) => m.InvoicesComponent) },
       { path: "invoices/new", loadComponent: () => import("./chunk-OGC3DANF.js").then((m) => m.InvoiceEditorComponent) },
       { path: "invoices/:id/edit", loadComponent: () => import("./chunk-OGC3DANF.js").then((m) => m.InvoiceEditorComponent) },
-      { path: "invoices/:id/print", loadComponent: () => import("./chunk-ZKO33DUF.js").then((m) => m.InvoicePrintComponent) },
+      { path: "invoices/:id/print", loadComponent: () => import("./chunk-DFRYQ35B.js").then((m) => m.InvoicePrintComponent) },
       { path: "bill-generator", loadComponent: () => import("./chunk-DNDDEE4O.js").then((m) => m.BillGeneratorComponent) },
       { path: "bill-generator/:id/edit", loadComponent: () => import("./chunk-DNDDEE4O.js").then((m) => m.BillGeneratorComponent) },
       { path: "clients", loadComponent: () => import("./chunk-DIHQFYFS.js").then((m) => m.ClientsComponent) },
@@ -126,7 +126,7 @@ var routes = [
       { path: "users", loadComponent: () => import("./chunk-XKOCWKTH.js").then((m) => m.UsersComponent) },
       { path: "subscription", loadComponent: () => import("./chunk-MEQQAB5Z.js").then((m) => m.SubscriptionComponent) },
       { path: "appearance", canActivate: [tenantAdminGuard], loadComponent: () => import("./chunk-L5S24PCH.js").then((m) => m.AppearanceComponent) },
-      { path: "invoice-templates", canActivate: [tenantAdminGuard], loadComponent: () => import("./chunk-JNJ2JFRS.js").then((m) => m.InvoiceTemplatesComponent) },
+      { path: "invoice-templates", canActivate: [tenantAdminGuard], loadComponent: () => import("./chunk-JSXIK3NV.js").then((m) => m.InvoiceTemplatesComponent) },
       { path: "", pathMatch: "full", redirectTo: "dashboard" }
     ]
   },

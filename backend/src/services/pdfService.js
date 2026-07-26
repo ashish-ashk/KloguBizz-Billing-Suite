@@ -534,7 +534,33 @@ function renderInvoicePdf({ invoice, client, org }) {
     const right = doc.page.width - doc.page.margins.right;
     const width = right - left;
 
-    let y = drawHeader(doc, { template, org, invoice, brand, left, right, width, font, fontBold, logo, titleLabel });
+    // A tenant-uploaded letterhead/banner image (Invoice Templates page)
+    // replaces the coded header entirely, same as the on-screen preview —
+    // it's expected to already carry the company's own branding, so drawing
+    // the templated header (with its own logo placement) alongside it would
+    // just duplicate that. Falls back to the normal drawHeader() on any
+    // decode/dimension failure (corrupt data, zero-size image, etc.).
+    let y;
+    const headerImage = logoBuffer(org?.brandingConfig?.headerImageUrl);
+    if (headerImage) {
+      try {
+        const img = doc.openImage(headerImage);
+        // Fit within (width x maxH) preserving aspect ratio — a naive
+        // width-only scale blows up a mistakenly-square/tall image (e.g. a
+        // logo uploaded here instead of a wide banner) into a page-filling
+        // block, since height would just follow width * aspect ratio unchecked.
+        const maxH = 130;
+        let drawW = width, drawH = width * (img.height / img.width);
+        if (drawH > maxH) { drawW = maxH * (img.width / img.height); drawH = maxH; }
+        const imgX = left + (width - drawW) / 2;
+        doc.image(headerImage, imgX, 40, { width: drawW, height: drawH });
+        y = 40 + drawH + 14;
+      } catch {
+        y = drawHeader(doc, { template, org, invoice, brand, left, right, width, font, fontBold, logo, titleLabel });
+      }
+    } else {
+      y = drawHeader(doc, { template, org, invoice, brand, left, right, width, font, fontBold, logo, titleLabel });
+    }
     drawDivider(doc, template.dividerStyle, left, right, y, brand);
     y += 14;
 

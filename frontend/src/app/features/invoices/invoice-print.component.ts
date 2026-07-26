@@ -39,6 +39,7 @@ import { downloadBlob } from '../../core/format';
             [customTemplate]="org()?.brandingConfig?.customInvoiceTemplate || null"
             [accentColor]="org()?.brandingConfig?.primaryColor || '#4f46e5'"
             [logoUrl]="org()?.brandingConfig?.logoUrl || ''"
+            [headerImageUrl]="org()?.brandingConfig?.headerImageUrl || ''"
             [showLogo]="org()?.brandingConfig?.invoiceContent?.showLogo !== false"
             [showSignature]="org()?.brandingConfig?.invoiceContent?.showSignature !== false"
             [showBankDetails]="org()?.brandingConfig?.invoiceContent?.showBankDetails !== false"
