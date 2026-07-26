@@ -11,6 +11,16 @@ const { Subscription } = require('../models/Subscription');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { logAudit } = require('../services/auditService');
+const { pickFields } = require('../utils/pickFields');
+
+// The super admin may change a tenant's plan and status (that's the point of
+// the panel), but not `invoiceSequence`/`invoiceSequenceFY` — those belong to
+// the atomic invoice counter and rewriting them hands out duplicate invoice
+// numbers, which cannot be undone once the documents are issued.
+const SUPERADMIN_ORG_FIELDS = [
+  'name', 'adminEmail', 'gstin', 'pan', 'phone', 'address', 'state', 'stateCode',
+  'plan', 'status', 'brandingConfig', 'themeConfig'
+];
 
 const overview = asyncHandler(async (req, res) => {
   const [organisations, users, invoices, payments, orgsByStatus, revenueAgg] = await Promise.all([
@@ -97,9 +107,10 @@ const createOrganisation = asyncHandler(async (req, res) => {
 });
 
 const updateOrganisation = asyncHandler(async (req, res) => {
-  const org = await Organisation.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+  const update = pickFields(req.body, SUPERADMIN_ORG_FIELDS);
+  const org = await Organisation.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
   if (!org) throw httpError(404, 'Organisation not found');
-  logAudit({ req, action: 'org.updated', entity: 'organisation', entityId: org._id, meta: { fields: Object.keys(req.body) } });
+  logAudit({ req, action: 'org.updated', entity: 'organisation', entityId: org._id, meta: { fields: Object.keys(update) } });
   res.json(org);
 });
 

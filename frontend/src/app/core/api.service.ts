@@ -52,11 +52,27 @@ export class ApiService {
   createPayment(payload: Partial<Payment> & { invoiceId: string }) {
     return this.http.post<Payment>(`${this.api}/payments`, payload);
   }
+  /** Reverses a recorded payment. Voids rather than deletes, so the original
+   *  stays in the audit trail while the invoice balance reopens. */
+  voidPayment(id: string, reason?: string) {
+    return this.http.post<{ payment: Payment; invoice: Invoice | null }>(`${this.api}/payments/${id}/void`, { reason });
+  }
   exportPaymentsCsv() { return this.http.get(`${this.api}/payments/export.csv`, { responseType: 'blob' }); }
 
   // ── Reports ──────────────────────────────────
-  gstSummary() { return this.http.get<GstSummary>(`${this.api}/reports/gst-summary`); }
-  exportGstSummaryCsv() { return this.http.get(`${this.api}/reports/gst-summary/export.csv`, { responseType: 'blob' }); }
+  /**
+   * GST summary for one financial year (start year, e.g. 2026 for FY2026-27).
+   * The endpoint is period-scoped — it used to aggregate the org's entire
+   * history on every page view.
+   */
+  gstSummary(fy?: number) {
+    const suffix = fy ? `?fy=${fy}` : '';
+    return this.http.get<GstSummary>(`${this.api}/reports/gst-summary${suffix}`);
+  }
+  exportGstSummaryCsv(fy?: number) {
+    const suffix = fy ? `?fy=${fy}` : '';
+    return this.http.get(`${this.api}/reports/gst-summary/export.csv${suffix}`, { responseType: 'blob' });
+  }
 
   // ── Users ────────────────────────────────────
   users() { return this.http.get<OrgUser[]>(`${this.api}/users`); }
@@ -74,8 +90,18 @@ export class ApiService {
   subscription() {
     return this.http.get<{ subscription: Subscription | null; usage: PlanUsage }>(`${this.api}/subscriptions/current`);
   }
+  /**
+   * Starts a plan change. For a paid plan this only creates the checkout —
+   * `pendingPayment` is true until a verified provider webhook confirms the
+   * money arrived, and the tenant stays on their current plan until then.
+   */
   startSubscription(payload: { planCode: string; billingCycle: string }) {
-    return this.http.post(`${this.api}/subscriptions/start`, payload);
+    return this.http.post<{
+      subscription: Subscription;
+      pendingPayment: boolean;
+      checkout: { keyId: string; subscriptionId: string } | null;
+      message: string;
+    }>(`${this.api}/subscriptions/start`, payload);
   }
   cancelSubscription() { return this.http.post<Subscription>(`${this.api}/subscriptions/cancel`, {}); }
 

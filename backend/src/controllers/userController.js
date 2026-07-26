@@ -8,6 +8,15 @@ const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { sendInviteEmail } = require('../services/emailService');
 const { assertUserQuota } = require('../services/planService');
 const { logAudit } = require('../services/auditService');
+const { pickFields } = require('../utils/pickFields');
+
+// Roles a tenant admin is allowed to hand out. Deliberately excludes
+// 'superadmin': that role is in the User enum because the platform owner
+// account uses it, and requireRole() only reads req.user.role — so letting an
+// org admin assign it through this route would hand out full platform control.
+const ASSIGNABLE_ROLES = ['admin', 'accountant', 'viewer'];
+// 'invited' is set by the invite flow itself, never by an edit.
+const ASSIGNABLE_STATUSES = ['active', 'disabled'];
 
 // An admin may not change the role/status of, or remove, the user who
 // currently holds Organisation.ownerId — ownership must be transferred
@@ -68,12 +77,28 @@ const changePassword = asyncHandler(async (req, res) => {
 
 const updateUser = asyncHandler(async (req, res) => {
   await assertNotProtectedOwner(req, req.params.id);
+  // Only these three fields — see ASSIGNABLE_ROLES above for why role in
+  // particular has to be checked rather than left to the schema enum.
+  const update = pickFields(req.body, ['name', 'role', 'status']);
+  if (update.role !== undefined && !ASSIGNABLE_ROLES.includes(update.role)) {
+    throw httpError(400, `Role must be one of: ${ASSIGNABLE_ROLES.join(', ')}`);
+  }
+  if (update.status !== undefined && !ASSIGNABLE_STATUSES.includes(update.status)) {
+    throw httpError(400, `Status must be one of: ${ASSIGNABLE_STATUSES.join(', ')}`);
+  }
   const user = await User.findOneAndUpdate(
     { _id: req.params.id, ...tenantFilter(req) },
-    req.body,
+    update,
     { new: true, runValidators: true }
   ).select('-passwordHash');
   if (!user) throw httpError(404, 'User not found');
+  // Disabling an account has to also cut its live sessions — the JWT stays
+  // valid for up to 12h otherwise, and protect() would keep honouring it
+  // until the next login bumped sessionVersion.
+  if (update.status === 'disabled' || update.role !== undefined) {
+    await User.updateOne({ _id: user._id }, { $inc: { sessionVersion: 1 } });
+  }
+  logAudit({ req, action: 'user.updated', entity: 'user', entityId: user._id, meta: { fields: Object.keys(update), role: update.role, status: update.status } });
   res.json(user);
 });
 
@@ -85,6 +110,9 @@ const removeUser = asyncHandler(async (req, res) => {
     { new: true }
   ).select('-passwordHash');
   if (!user) throw httpError(404, 'User not found');
+  // Same reasoning as updateUser: revoke the removed user's live sessions.
+  await User.updateOne({ _id: user._id }, { $inc: { sessionVersion: 1 } });
+  logAudit({ req, action: 'user.removed', entity: 'user', entityId: user._id, meta: { email: user.email } });
   res.json(user);
 });
 

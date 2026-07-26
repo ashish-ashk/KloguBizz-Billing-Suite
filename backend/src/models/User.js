@@ -17,7 +17,13 @@ const userSchema = new mongoose.Schema({
   termsVersion: String,
   // Bumped on every login (and password change) to invalidate JWTs issued
   // before the bump — enforces a single active session per user.
-  sessionVersion: { type: Number, default: 0 }
+  sessionVersion: { type: Number, default: 0 },
+  // Brute-force protection. The global rate limiter is per-IP and generous
+  // enough to allow hundreds of guesses; these two track the *account* so a
+  // distributed attempt against one password is still stopped.
+  failedLoginAttempts: { type: Number, default: 0 },
+  lockedUntil: Date,
+  lastFailedLoginAt: Date
 }, { timestamps: true });
 
 userSchema.index({ email: 1 }, { unique: true });

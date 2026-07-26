@@ -4,6 +4,23 @@ const { User } = require('../models/User');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { logAudit } = require('../services/auditService');
+const { pickFields } = require('../utils/pickFields');
+
+// What a tenant admin may change about their own organisation: business
+// profile, branding and theming. Everything else is platform-controlled and
+// must not be reachable from here —
+//   plan/status            → billing outcome, set only by the subscription
+//                            flow or the super admin (otherwise a tenant
+//                            simply PUTs itself onto the enterprise plan)
+//   ownerId                → guarded by the password-confirmed
+//                            transferOwnership flow below
+//   invoiceSequence(FY)    → the atomic invoice counter; rewriting it causes
+//                            duplicate invoice numbers
+//   adminEmail             → identity, changed via the user record
+const TENANT_EDITABLE_FIELDS = [
+  'name', 'gstin', 'pan', 'phone', 'address', 'state', 'stateCode',
+  'brandingConfig', 'themeConfig'
+];
 
 const getOrganisation = asyncHandler(async (req, res) => {
   const org = await Organisation.findById(req.orgId);
@@ -12,8 +29,10 @@ const getOrganisation = asyncHandler(async (req, res) => {
 });
 
 const updateOrganisation = asyncHandler(async (req, res) => {
-  const org = await Organisation.findByIdAndUpdate(req.orgId, req.body, { new: true, runValidators: true });
+  const update = pickFields(req.body, TENANT_EDITABLE_FIELDS);
+  const org = await Organisation.findByIdAndUpdate(req.orgId, update, { new: true, runValidators: true });
   if (!org) throw httpError(404, 'Organisation not found');
+  logAudit({ req, action: 'org.updated', entity: 'organisation', entityId: org._id, meta: { fields: Object.keys(update) } });
   res.json(org);
 });
 

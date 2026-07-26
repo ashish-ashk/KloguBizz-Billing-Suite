@@ -1,5 +1,6 @@
 const PDFDocument = require('pdfkit');
 const { resolveTemplate, ITALIC_VARIANTS } = require('./invoiceTemplates');
+const { calculateLine } = require('./gstService');
 
 const DARK = '#1e1b4b';
 const MUTED = '#6b7280';
@@ -602,13 +603,19 @@ function renderInvoicePdf({ invoice, client, org }) {
       doc.font(font).fontSize(8.5);
       invoice.items.forEach(item => {
         if (y > 700) { doc.addPage(); y = 50; }
-        const qty = Number(item.qty) || 0, rate = Number(item.rate) || 0, gstRate = Number(item.gstRate) || 0;
-        const lineAmt = qty * rate, tax = lineAmt * gstRate / 100, total = lineAmt + tax;
+        // Same shared pricing as the table layout below.
+        const line = calculateLine(item, invoice.discountPercent);
+        const parts = [
+          `${line.qty} × ${fmt(line.rate)}`,
+          `HSN ${item.hsn || '—'}`,
+          `GST ${line.gstRate}%${line.cessRate > 0 ? ` + cess ${line.cessRate}%` : ''}`
+        ];
+        if (line.discountPercent > 0) parts.push(`less ${line.discountPercent}%`);
         doc.fillColor(DARK).font(fontBold).fontSize(9).text(item.desc || '', left, y, { width });
         y += 12;
         doc.fillColor(MUTED).font(font).fontSize(8)
-          .text(`${qty} × ${fmt(rate)}  ·  HSN ${item.hsn || '—'}  ·  GST ${gstRate}%`, left, y, { width: width - 70 });
-        doc.fillColor(DARK).font(fontBold).fontSize(8.5).text(fmt(total), right - 70, y, { width: 70, align: 'right' });
+          .text(parts.join('  ·  '), left, y, { width: width - 70 });
+        doc.fillColor(DARK).font(fontBold).fontSize(8.5).text(fmt(line.total), right - 70, y, { width: 70, align: 'right' });
         y += 18;
       });
       doc.save().dash(1, { space: 2 }).moveTo(left, y).lineTo(right, y).lineWidth(1).strokeColor(FAINT).stroke().undash().restore();
@@ -654,9 +661,20 @@ function renderInvoicePdf({ invoice, client, org }) {
           cols.forEach(c => doc.moveTo(c.x, y).lineTo(c.x, y + rowH).strokeColor('#e5e7eb').lineWidth(0.5).stroke());
           doc.moveTo(right, y).lineTo(right, y + rowH).strokeColor('#e5e7eb').lineWidth(0.5).stroke();
         }
-        const qty = Number(item.qty) || 0, rate = Number(item.rate) || 0, gstRate = Number(item.gstRate) || 0;
-        const lineAmt = qty * rate, tax = lineAmt * gstRate / 100, total = lineAmt + tax;
-        const values = [String(i + 1), item.desc || '', item.hsn || '—', String(qty), fmt(rate), `${gstRate}%`, fmt(tax), fmt(total)];
+        // Priced by the shared engine, so the printed line agrees with the
+        // stored totals — discounts, cess and tax-inclusive rates included.
+        // This used to be a local `qty * rate`, which silently ignored all three.
+        const line = calculateLine(item, invoice.discountPercent);
+        const gstLabel = line.cessRate > 0 ? `${line.gstRate}%+${line.cessRate}%` : `${line.gstRate}%`;
+        // A discounted line shows the discount inline, since there is no
+        // dedicated column for it and the customer is entitled to see it.
+        const rateLabel = line.discountPercent > 0
+          ? `${fmt(line.rate)} −${line.discountPercent}%`
+          : fmt(line.rate);
+        const values = [
+          String(i + 1), item.desc || '', item.hsn || '—', String(line.qty),
+          rateLabel, gstLabel, fmt(line.tax + line.cess), fmt(line.total)
+        ];
         cols.forEach((c, idx) => {
           doc.fillColor(idx === 1 ? DARK : MUTED).font(idx === 1 ? fontBold : font)
             .text(values[idx], c.x + 5, y + (template.compact ? 4 : 5), { width: c.w - 8, align: idx >= 3 ? 'right' : 'left' });
@@ -689,33 +707,74 @@ function renderInvoicePdf({ invoice, client, org }) {
 
     const sx = left + width / 2 + 10;
     const sw = width / 2 - 10;
-    doc.rect(sx, summaryTop, sw, 108).fill(panelBg);
-    let ry = summaryTop + 14;
-    doc.fillColor(MUTED).font(font).fontSize(10);
-    doc.text('Subtotal', sx + 14, ry, { width: 110 });
-    doc.fillColor(DARK).font(fontBold).text(fmt(invoice.totals.subtotal), sx + 14, ry, { width: sw - 28, align: 'right' });
-    ry += 18;
-    if (invoice.totals.isIGST) {
-      doc.fillColor(MUTED).font(font).text('IGST', sx + 14, ry, { width: 110 });
-      doc.fillColor(DARK).font(fontBold).text(fmt(invoice.totals.igst), sx + 14, ry, { width: sw - 28, align: 'right' });
-      ry += 18;
-    } else {
-      doc.fillColor(MUTED).font(font).text('CGST', sx + 14, ry, { width: 110 });
-      doc.fillColor(DARK).font(fontBold).text(fmt(invoice.totals.cgst), sx + 14, ry, { width: sw - 28, align: 'right' });
-      ry += 18;
-      doc.fillColor(MUTED).font(font).text('SGST', sx + 14, ry, { width: 110 });
-      doc.fillColor(DARK).font(fontBold).text(fmt(invoice.totals.sgst), sx + 14, ry, { width: sw - 28, align: 'right' });
-      ry += 18;
+    const t = invoice.totals || {};
+
+    // Rows are assembled first so the panel can be sized to fit. It used to be
+    // a hardcoded 108pt box holding a fixed three or four rows, which cannot
+    // accommodate discount, cess, round-off and settlement lines — they only
+    // appear when they carry a value, so a plain invoice looks exactly as it
+    // did before.
+    const rows = [];
+    const hasDiscount = Number(t.discountTotal) > 0;
+    if (hasDiscount) {
+      rows.push({ label: 'Gross Amount', value: fmt(t.grossSubtotal ?? t.subtotal) });
+      rows.push({ label: 'Discount', value: `−${fmt(t.discountTotal)}` });
     }
+    rows.push({ label: hasDiscount ? 'Taxable Value' : 'Subtotal', value: fmt(t.subtotal) });
+    if (t.isIGST) {
+      rows.push({ label: 'IGST', value: fmt(t.igst) });
+    } else {
+      rows.push({ label: 'CGST', value: fmt(t.cgst) });
+      // UTGST in the Union Territories that levy it; the amount is the same field.
+      rows.push({ label: t.isUT ? 'UTGST' : 'SGST', value: fmt(t.sgst) });
+    }
+    if (Number(t.cess) > 0) rows.push({ label: 'Cess', value: fmt(t.cess) });
+    if (Number(t.roundOff)) {
+      const off = Number(t.roundOff);
+      rows.push({ label: 'Round Off', value: `${off > 0 ? '+' : '−'}${fmt(Math.abs(off))}` });
+    }
+
+    // Settlement, shown only once something has been received, so the customer
+    // can see what is still owed on a part-paid invoice.
+    const amountPaid = Number(invoice.amountPaid) || 0;
+    const settlementRows = amountPaid > 0
+      ? [
+        { label: 'Amount Paid', value: fmt(amountPaid) },
+        { label: 'Balance Due', value: fmt(Number(invoice.balanceDue) || 0), strong: true }
+      ]
+      : [];
+
+    const ROW_H = 18;
+    const panelH = 14 + rows.length * ROW_H + 18 + 22 + settlementRows.length * ROW_H;
+    doc.rect(sx, summaryTop, sw, panelH).fill(panelBg);
+
+    let ry = summaryTop + 14;
+    rows.forEach(row => {
+      doc.fillColor(MUTED).font(font).fontSize(10).text(row.label, sx + 14, ry, { width: 110 });
+      doc.fillColor(DARK).font(fontBold).fontSize(10).text(row.value, sx + 14, ry, { width: sw - 28, align: 'right' });
+      ry += ROW_H;
+    });
+
     doc.moveTo(sx + 14, ry + 4).lineTo(sx + sw - 14, ry + 4).strokeColor(brand).lineWidth(1.5).stroke();
     ry += 14;
     doc.fillColor(DARK).font(fontBold).fontSize(11).text('Total', sx + 14, ry, { width: 110 });
-    doc.fillColor(brand).fontSize(13).text(fmt(invoice.totals.total), sx + 14, ry - 1, { width: sw - 28, align: 'right' });
+    doc.fillColor(brand).fontSize(13).text(fmt(t.total), sx + 14, ry - 1, { width: sw - 28, align: 'right' });
+    ry += 22;
+
+    settlementRows.forEach(row => {
+      doc.fillColor(row.strong ? DARK : MUTED).font(row.strong ? fontBold : font).fontSize(10)
+        .text(row.label, sx + 14, ry, { width: 110 });
+      doc.fillColor(row.strong ? brand : DARK).font(fontBold).fontSize(10)
+        .text(row.value, sx + 14, ry, { width: sw - 28, align: 'right' });
+      ry += ROW_H;
+    });
 
     if (showAmountInWords) {
-      const wordsY = summaryTop + 118;
+      // Positioned below the panel's real height rather than a fixed offset,
+      // so it can't overlap once extra rows are present.
+      const wordsY = summaryTop + panelH + 10;
       doc.rect(sx, wordsY, sw, 40).fill('#eef2ff');
-      doc.fillColor(brand).font(font).fontSize(8).text(`Amount in words: ${numberToWords(invoice.totals.total)}`, sx + 10, wordsY + 8, { width: sw - 20 });
+      doc.fillColor(brand).font(font).fontSize(8).text(`Amount in words: ${numberToWords(t.total)}`, sx + 10, wordsY + 8, { width: sw - 20 });
     }
 
     // Footer

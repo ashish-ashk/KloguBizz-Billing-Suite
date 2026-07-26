@@ -3,10 +3,12 @@ const { getOrganisation, updateOrganisation, transferOwnership } = require('../c
 const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { requireTenant } = require('../middleware/tenantMiddleware');
+const { validate } = require('../middleware/validate');
+const { organisationUpdateSchema, transferOwnershipSchema } = require('../validators/schemas');
 
 router.use(protect, requireTenant);
 router.get('/current', getOrganisation);
-router.put('/current', requireRole('admin'), updateOrganisation);
-router.post('/current/transfer-ownership', requireRole('admin'), transferOwnership);
+router.put('/current', requireRole('admin'), validate(organisationUpdateSchema), updateOrganisation);
+router.post('/current/transfer-ownership', requireRole('admin'), validate(transferOwnershipSchema), transferOwnership);
 
 module.exports = router;

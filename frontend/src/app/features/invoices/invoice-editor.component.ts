@@ -88,9 +88,9 @@ import { fmtINR, fmtDate, today, addDays, numberToWords, stateName } from '../..
                 <button class="btn secondary sm" type="button" (click)="addItem()">+ Add item</button>
               </div>
               <div class="table-wrap">
-                <table class="table line-items-table" style="min-width:640px;">
+                <table class="table line-items-table" style="min-width:720px;">
                   <thead>
-                    <tr><th style="min-width:200px;">Description</th><th>HSN/SAC</th><th>Qty</th><th>Rate (₹)</th><th>GST %</th><th style="text-align:right;">Amount</th><th></th></tr>
+                    <tr><th style="min-width:200px;">Description</th><th>HSN/SAC</th><th>Qty</th><th>Rate (₹)</th><th>Disc %</th><th>GST %</th><th style="text-align:right;">Amount</th><th></th></tr>
                   </thead>
                   <tbody>
                     @for (item of items; track $index; let i = $index) {
@@ -99,12 +99,13 @@ import { fmtINR, fmtDate, today, addDays, numberToWords, stateName } from '../..
                         <td data-label="HSN/SAC"><input class="input mono li-w-hsn" [(ngModel)]="item.hsn" placeholder="9983xx" /></td>
                         <td data-label="Qty"><input class="input li-w-qty" type="number" min="0" [(ngModel)]="item.qty" /></td>
                         <td data-label="Rate (₹)"><input class="input li-w-rate" type="number" min="0" [(ngModel)]="item.rate" /></td>
+                        <td data-label="Disc %"><input class="input li-w-disc" type="number" min="0" max="100" [(ngModel)]="item.discountPercent" placeholder="0" /></td>
                         <td data-label="GST %">
                           <select class="input li-w-gst" [(ngModel)]="item.gstRate">
                             @for (r of gstRates; track r) { <option [ngValue]="r">{{ r }}%</option> }
                           </select>
                         </td>
-                        <td data-label="Amount" style="text-align:right;font-weight:600;">{{ fmtINR(lineAmount(item)) }}</td>
+                        <td data-label="Amount" style="text-align:right;font-weight:600;">{{ fmtINR(lineTaxable(item)) }}</td>
                         <td data-label="" style="text-align:right;">
                           @if (items.length > 1) {
                             <button class="btn danger sm" type="button" (click)="removeItem(i)">✕</button>
@@ -149,12 +150,22 @@ import { fmtINR, fmtDate, today, addDays, numberToWords, stateName } from '../..
             <section class="card">
               <div class="card-title" style="margin-bottom:14px;">Invoice Summary</div>
               <div style="display:grid;gap:9px;font-size:13px;">
-                <div style="display:flex;justify-content:space-between;"><span class="muted" style="color:var(--muted)">Subtotal</span><span style="font-weight:600;">{{ fmtINR(subtotal()) }}</span></div>
+                @if (discountTotal() > 0) {
+                  <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">Gross Amount</span><span style="font-weight:600;">{{ fmtINR(grossSubtotal()) }}</span></div>
+                  <div style="display:flex;justify-content:space-between;color:var(--red);"><span>Discount</span><span>−{{ fmtINR(discountTotal()) }}</span></div>
+                }
+                <div style="display:flex;justify-content:space-between;"><span class="muted" style="color:var(--muted)">{{ discountTotal() > 0 ? 'Taxable Value' : 'Subtotal' }}</span><span style="font-weight:600;">{{ fmtINR(subtotal()) }}</span></div>
                 @if (isIGST()) {
                   <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">IGST</span><span style="font-weight:600;">{{ fmtINR(totalTax()) }}</span></div>
                 } @else {
                   <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">CGST</span><span style="font-weight:600;">{{ fmtINR(totalTax() / 2) }}</span></div>
-                  <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">SGST</span><span style="font-weight:600;">{{ fmtINR(totalTax() / 2) }}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">{{ stateTaxLabel() }}</span><span style="font-weight:600;">{{ fmtINR(totalTax() / 2) }}</span></div>
+                }
+                @if (totalCess() > 0) {
+                  <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">Cess</span><span style="font-weight:600;">{{ fmtINR(totalCess()) }}</span></div>
+                }
+                @if (roundOff() !== 0) {
+                  <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted)">Round Off</span><span style="font-weight:600;">{{ roundOff() > 0 ? '+' : '−' }}{{ fmtINR(roundOff() < 0 ? -roundOff() : roundOff()) }}</span></div>
                 }
                 <div style="display:flex;justify-content:space-between;border-top:2px solid var(--border);padding-top:10px;margin-top:4px;">
                   <span style="font-weight:700;">Total</span>
@@ -217,7 +228,8 @@ import { fmtINR, fmtDate, today, addDays, numberToWords, stateName } from '../..
         font-weight: 600; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px;
       }
       .line-items-table .li-w-hsn, .line-items-table .li-w-qty,
-      .line-items-table .li-w-rate, .line-items-table .li-w-gst { width: 100% !important; }
+      .line-items-table .li-w-rate, .line-items-table .li-w-gst,
+      .line-items-table .li-w-disc { width: 100% !important; }
       .line-items-table td[data-label="Amount"] {
         display: flex; justify-content: space-between; align-items: baseline;
         border-top: 1px dashed var(--border); margin-top: 4px; padding-top: 10px; font-size: 15px;
@@ -333,6 +345,11 @@ export class InvoiceEditorComponent implements OnInit {
     row.hsn = it.hsn || row.hsn;
     row.rate = it.sellingPrice;
     row.gstRate = it.gstRate;
+    // Cess and tax-inclusive pricing come from the item master too. They used
+    // to be dropped here, so a cess-bearing or shelf-priced item was billed as
+    // if it were neither.
+    row.cessRate = it.cessRate || 0;
+    row.taxInclusive = !!it.taxInclusive;
   }
 
   selectedClient(): Client | null {
@@ -344,19 +361,78 @@ export class InvoiceEditorComponent implements OnInit {
     return !!client && client.stateCode !== this.orgStateCode;
   }
 
+  /**
+   * Union Territories that levy UTGST rather than SGST — mirrors
+   * UT_STATE_CODES in the backend's gstService.
+   */
+  private static readonly UT_CODES = new Set(['04', '26', '31', '35', '38', '97']);
+
+  stateTaxLabel(): string {
+    const code = String(this.selectedClient()?.stateCode || '').padStart(2, '0');
+    return !this.isIGST() && InvoiceEditorComponent.UT_CODES.has(code) ? 'UTGST' : 'SGST';
+  }
+
+  private r2(value: number): number {
+    return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  /**
+   * Prices one line the same way the backend's gstService.calculateLine does.
+   * These figures are a preview only — the stored totals always come from the
+   * server, and matching the arithmetic keeps the two from disagreeing.
+   */
+  private line(item: InvoiceItem) {
+    const qty = Number(item.qty) || 0;
+    const rawRate = Number(item.rate) || 0;
+    const gstRate = Number(item.gstRate) || 0;
+    const cessRate = Number(item.cessRate) || 0;
+    const discount = Math.min(100, Math.max(0, Number(item.discountPercent) || 0));
+    const rate = item.taxInclusive ? this.r2(rawRate / (1 + (gstRate + cessRate) / 100)) : rawRate;
+    const gross = this.r2(qty * rate);
+    const taxable = this.r2(gross - this.r2(gross * discount / 100));
+    return { gross, taxable, tax: this.r2(taxable * gstRate / 100), cess: this.r2(taxable * cessRate / 100) };
+  }
+
+  /** Gross value of a line, before its discount. */
   lineAmount(item: InvoiceItem): number {
-    return (Number(item.qty) || 0) * (Number(item.rate) || 0);
+    return this.line(item).gross;
+  }
+
+  /** Taxable value of a line, after its discount — what the Amount column shows. */
+  lineTaxable(item: InvoiceItem): number {
+    return this.line(item).taxable;
+  }
+
+  grossSubtotal(): number {
+    return this.r2(this.items.reduce((s, i) => s + this.line(i).gross, 0));
+  }
+
+  discountTotal(): number {
+    return this.r2(this.grossSubtotal() - this.subtotal());
   }
 
   subtotal(): number {
-    return this.items.reduce((s, i) => s + this.lineAmount(i), 0);
+    return this.r2(this.items.reduce((s, i) => s + this.line(i).taxable, 0));
   }
 
   totalTax(): number {
-    return this.items.reduce((s, i) => s + this.lineAmount(i) * (Number(i.gstRate) || 0) / 100, 0);
+    return this.r2(this.items.reduce((s, i) => s + this.line(i).tax, 0));
   }
 
-  grandTotal(): number { return this.subtotal() + this.totalTax(); }
+  totalCess(): number {
+    return this.r2(this.items.reduce((s, i) => s + this.line(i).cess, 0));
+  }
+
+  private rawTotal(): number {
+    return this.r2(this.subtotal() + this.totalTax() + this.totalCess());
+  }
+
+  /** The whole-rupee round-off the backend applies, mirrored for the preview. */
+  roundOff(): number {
+    return this.r2(Math.round(this.rawTotal()) - this.rawTotal());
+  }
+
+  grandTotal(): number { return Math.round(this.rawTotal()); }
 
   save(intent: 'draft' | 'pending') {
     if (!this.clientId) { this.clientError.set('Select a client for this invoice.'); return; }
@@ -371,7 +447,16 @@ export class InvoiceEditorComponent implements OnInit {
       status: this.isEdit() ? this.status : intent,
       paymentTerms: this.paymentTerms,
       notes: this.notes,
-      items: validItems.map(i => ({ desc: i.desc.trim(), hsn: i.hsn, qty: Number(i.qty), rate: Number(i.rate), gstRate: Number(i.gstRate) })),
+      items: validItems.map(i => ({
+        desc: i.desc.trim(),
+        hsn: i.hsn,
+        qty: Number(i.qty),
+        rate: Number(i.rate),
+        gstRate: Number(i.gstRate),
+        cessRate: Number(i.cessRate) || 0,
+        discountPercent: Number(i.discountPercent) || 0,
+        taxInclusive: !!i.taxInclusive
+      })),
       bankDetails: { ...this.bank }
     };
 

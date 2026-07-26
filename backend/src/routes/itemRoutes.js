@@ -5,6 +5,8 @@ const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { requireTenant } = require('../middleware/tenantMiddleware');
 const { httpError } = require('../utils/httpError');
+const { validate } = require('../middleware/validate');
+const { itemCreateSchema, itemUpdateSchema } = require('../validators/schemas');
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const upload = multer({
@@ -31,8 +33,8 @@ router.use(protect, requireTenant);
 router.get('/', listItems);
 router.get('/bulk-upload/template', requireRole('admin', 'accountant'), downloadItemTemplate);
 router.post('/bulk-upload', requireRole('admin', 'accountant'), excelUpload, bulkUploadItems);
-router.post('/', requireRole('admin', 'accountant'), createItem);
-router.put('/:id', requireRole('admin', 'accountant'), updateItem);
+router.post('/', requireRole('admin', 'accountant'), validate(itemCreateSchema), createItem);
+router.put('/:id', requireRole('admin', 'accountant'), validate(itemUpdateSchema), updateItem);
 router.delete('/:id', requireRole('admin'), deleteItem);
 
 module.exports = router;

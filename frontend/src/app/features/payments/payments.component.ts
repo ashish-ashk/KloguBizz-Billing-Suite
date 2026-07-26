@@ -98,6 +98,7 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                     <th>Invoice Date</th>
                     <th>Due Date</th>
                     <th>Amount</th>
+                    <th>Balance Due</th>
                     <th>Status</th>
                     <th>Days Due</th>
                     <th></th>
@@ -118,7 +119,15 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                       </td>
                       <td data-label="Invoice Date">{{ fmtDate(inv.date) }}</td>
                       <td data-label="Due Date">{{ fmtDate(inv.dueDate) }}</td>
-                      <td class="strong" data-label="Amount" data-priority="high">{{ fmtINR(inv.totals.total) }}</td>
+                      <td data-label="Amount">{{ fmtINR(inv.totals.total) }}</td>
+                      <!-- What is actually still owed. The tracker used to show the
+                           full invoice value even on a part-paid invoice. -->
+                      <td class="strong" data-label="Balance Due" data-priority="high">
+                        {{ fmtINR(remainingFor(inv)) }}
+                        @if ((inv.amountPaid || 0) > 0) {
+                          <div class="muted" style="font-size:11px;font-weight:500">{{ fmtINR(inv.amountPaid || 0) }} received</div>
+                        }
+                      </td>
                       <td data-label="Status" data-priority="high"><app-pill [status]="inv.status" /></td>
                       <td data-label="Days Due">
                         @if (overdueDays(inv) > 0) {
@@ -175,6 +184,7 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                     <th>Reference</th>
                     <th>Status</th>
                     <th>Note</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -191,6 +201,11 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                       </td>
                       <td data-label="Status" data-priority="high"><app-pill [status]="p.status" /></td>
                       <td class="muted" data-label="Note">{{ p.note || '—' }}</td>
+                      <td data-label="">
+                        @if (p.status === 'success' && isAdmin()) {
+                          <button class="btn ghost sm" type="button" (click)="voidTarget.set(p)">Void</button>
+                        }
+                      </td>
                     </tr>
                   }
                 </tbody>
@@ -269,11 +284,20 @@ type PayTab = 'tracker' | 'history' | 'reminders';
           <div class="info-box" style="margin-bottom:16px">
             <strong>{{ clientName(inv.clientId) }}</strong><br>
             <span class="mono">{{ inv.invoiceNumber }}</span> · Due {{ fmtDate(inv.dueDate) }} · {{ fmtINR(inv.totals.total) }}
+            @if ((inv.amountPaid || 0) > 0) {
+              <br><span style="color:var(--green)">{{ fmtINR(inv.amountPaid || 0) }} already received</span>
+              · <strong>{{ fmtINR(remainingFor(inv)) }} still due</strong>
+            }
           </div>
           <form class="form" (ngSubmit)="savePayment()">
             <div class="field">
               <label>Amount Received (₹)</label>
-              <input name="amount" type="number" min="0" step="0.01" [(ngModel)]="payAmount">
+              <!-- Capped at the outstanding balance: the API rejects an
+                   over-payment, so stop it here rather than round-tripping. -->
+              <input name="amount" type="number" min="0" step="0.01" [max]="remainingFor(inv)" [(ngModel)]="payAmount">
+              @if (payAmount && payAmount > remainingFor(inv)) {
+                <span class="error">Cannot exceed the {{ fmtINR(remainingFor(inv)) }} still due on this invoice.</span>
+              }
             </div>
             <div class="field">
               <label>Payment Method</label>
@@ -291,7 +315,7 @@ type PayTab = 'tracker' | 'history' | 'reminders';
             </div>
             <div class="modal-foot">
               <button class="btn ghost" type="button" (click)="payInvoice.set(null)">Cancel</button>
-              <button class="btn primary" type="submit" [disabled]="savingPay() || !payAmount || payAmount <= 0">
+              <button class="btn primary" type="submit" [disabled]="savingPay() || !payAmount || payAmount <= 0 || payAmount > remainingFor(inv)">
                 {{ savingPay() ? 'Saving…' : 'Record Payment' }}
               </button>
             </div>
@@ -331,6 +355,28 @@ type PayTab = 'tracker' | 'history' | 'reminders';
           </div>
         }
       </app-modal>
+      <!-- Void payment confirm modal. Voids rather than deletes: the record
+           stays in the audit trail while the invoice balance reopens. -->
+      <app-modal [open]="!!voidTarget()" title="Void this payment?" [width]="460" (close)="voidTarget.set(null)">
+        @if (voidTarget(); as p) {
+          <p style="margin:0 0 14px;color:var(--muted);line-height:1.6">
+            This reverses <strong style="color:var(--text)">{{ fmtINR(p.amount) }}</strong> recorded against
+            <strong style="color:var(--text)">{{ invoiceNo(p) }}</strong>. The payment stays in your history marked
+            as voided, and the invoice goes back to showing the amount as due.
+          </p>
+          <div class="field">
+            <label>Reason (optional)</label>
+            <input [(ngModel)]="voidReason" placeholder="e.g. entered twice">
+          </div>
+          <div class="modal-foot">
+            <button class="btn ghost" type="button" (click)="voidTarget.set(null)">Cancel</button>
+            <button class="btn danger" type="button" [disabled]="voiding()" (click)="confirmVoid()">
+              {{ voiding() ? 'Voiding…' : 'Void Payment' }}
+            </button>
+          </div>
+        }
+      </app-modal>
+
       <!-- Remind All confirm modal -->
       <app-modal [open]="confirmRemindAll()" title="Remind All" (close)="confirmRemindAll.set(false)">
         <p style="margin:0;color:var(--muted);line-height:1.6">
@@ -356,6 +402,9 @@ export class PaymentsComponent implements OnInit {
 
   // Record Payment modal
   payInvoice = signal<Invoice | null>(null);
+  voidTarget = signal<Payment | null>(null);
+  voiding = signal(false);
+  voidReason = '';
   savingPay = signal(false);
   payAmount: number | null = null;
   payMethod = 'Bank Transfer';
@@ -386,8 +435,11 @@ export class PaymentsComponent implements OnInit {
     this.payments().filter(p => p.status === 'success').reduce((s, p) => s + (p.amount || 0), 0)
   );
   successCount = computed(() => this.payments().filter(p => p.status === 'success').length);
-  pendingAmount = computed(() => this.pendingInvoices().reduce((s, i) => s + (i.totals?.total || 0), 0));
-  overdueAmount = computed(() => this.overdueInvoices().reduce((s, i) => s + (i.totals?.total || 0), 0));
+  // Outstanding money is the sum of unpaid *balances*. Summing invoice totals
+  // (what this did before) overstates the figure by everything already received
+  // against part-paid invoices.
+  pendingAmount = computed(() => this.pendingInvoices().reduce((s, i) => s + this.remainingFor(i), 0));
+  overdueAmount = computed(() => this.overdueInvoices().reduce((s, i) => s + this.remainingFor(i), 0));
 
   avgCollectionDays = computed<number | null>(() => {
     const paid = this.invoices().filter(i => i.status === 'paid' && !!i.paidDate);
@@ -482,11 +534,23 @@ export class PaymentsComponent implements OnInit {
     return daysBetween(inv.dueDate);
   }
 
-  remainingFor(inv: Invoice): number {
+  private derivedRemainingFor(inv: Invoice): number {
     const paid = this.payments()
       .filter(p => p.status === 'success' && this.invoiceIdOf(p) === inv._id)
       .reduce((s, p) => s + (p.amount || 0), 0);
     return Math.max(0, Math.round(((inv.totals?.total || 0) - paid) * 100) / 100);
+  }
+
+  /**
+   * Outstanding balance for an invoice.
+   *
+   * Prefers the server-computed `balanceDue`, which is authoritative and
+   * accounts for voided payments. Falls back to deriving it from the loaded
+   * payment list for invoices created before that field was persisted.
+   */
+  remainingFor(inv: Invoice): number {
+    if (inv.balanceDue !== undefined && inv.balanceDue !== null) return inv.balanceDue;
+    return this.derivedRemainingFor(inv);
   }
 
   orgName(): string {
@@ -520,6 +584,27 @@ export class PaymentsComponent implements OnInit {
         this.load();
       },
       error: err => { this.savingPay.set(false); this.toast.httpError(err); }
+    });
+  }
+
+  /** Only an admin may reverse a recorded collection — the API enforces this too. */
+  isAdmin(): boolean {
+    return this.auth.user()?.role === 'admin';
+  }
+
+  confirmVoid() {
+    const payment = this.voidTarget();
+    if (!payment || this.voiding()) return;
+    this.voiding.set(true);
+    this.api.voidPayment(payment._id, this.voidReason.trim() || undefined).subscribe({
+      next: () => {
+        this.voiding.set(false);
+        this.voidTarget.set(null);
+        this.voidReason = '';
+        this.toast.success('Payment voided');
+        this.load();
+      },
+      error: err => { this.voiding.set(false); this.toast.httpError(err); }
     });
   }
 

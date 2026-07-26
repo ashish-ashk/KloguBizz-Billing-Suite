@@ -69,18 +69,57 @@ const register = asyncHandler(async (req, res) => {
   res.status(201).json(authPayload(user, organisation));
 });
 
+// Account lockout thresholds. The global per-IP rate limiter still allows
+// hundreds of attempts per window and does nothing against a distributed
+// attempt, so the account itself has to keep score.
+const MAX_FAILED_ATTEMPTS = 8;
+const LOCKOUT_MINUTES = 15;
+// Failures older than this stop counting, so an honest user who mistyped their
+// password last week doesn't start today one attempt from a lockout.
+const ATTEMPT_WINDOW_MINUTES = 60;
+
 const login = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
-  const user = await User.findOne({ email: String(email).toLowerCase() });
+  const user = await User.findOne({ email: String(email || '').toLowerCase() });
+  // Deliberately the same message and code path for an unknown address as for
+  // a wrong password, so this endpoint can't be used to enumerate accounts.
   if (!user) throw httpError(401, 'Invalid email or password');
+
+  if (user.lockedUntil && user.lockedUntil > new Date()) {
+    const minutes = Math.max(1, Math.ceil((user.lockedUntil - Date.now()) / 60000));
+    throw httpError(
+      429,
+      `Too many failed sign-in attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+      'ACCOUNT_LOCKED'
+    );
+  }
+
   const ok = await bcrypt.compare(password || '', user.passwordHash);
-  if (!ok) throw httpError(401, 'Invalid email or password');
+  if (!ok) {
+    // Stale failures are discarded rather than accumulated forever.
+    const windowStart = Date.now() - ATTEMPT_WINDOW_MINUTES * 60000;
+    const recent = user.lastFailedLoginAt && user.lastFailedLoginAt.getTime() > windowStart;
+    user.failedLoginAttempts = (recent ? user.failedLoginAttempts || 0 : 0) + 1;
+    user.lastFailedLoginAt = new Date();
+    if (user.failedLoginAttempts >= MAX_FAILED_ATTEMPTS) {
+      user.lockedUntil = new Date(Date.now() + LOCKOUT_MINUTES * 60000);
+      user.failedLoginAttempts = 0;
+    }
+    await user.save();
+    logAudit({ req: { user }, action: 'auth.login_failed', entity: 'user', entityId: user._id, meta: { email: user.email, locked: Boolean(user.lockedUntil && user.lockedUntil > new Date()) } });
+    throw httpError(401, 'Invalid email or password');
+  }
+
+  user.failedLoginAttempts = 0;
+  user.lockedUntil = undefined;
+  user.lastFailedLoginAt = undefined;
   user.lastLoginAt = new Date();
   // Invalidate any tokens issued to this user before now — one active
   // session per user; signing in elsewhere logs out other devices.
   user.sessionVersion = (user.sessionVersion || 0) + 1;
   await user.save();
   const organisation = user.orgId ? await Organisation.findById(user.orgId) : null;
+  logAudit({ req: { orgId: user.orgId, user }, action: 'auth.login', entity: 'user', entityId: user._id });
   res.json(authPayload(user, organisation));
 });
 

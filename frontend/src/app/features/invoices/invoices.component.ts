@@ -72,7 +72,14 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft';
                         [style.fontWeight]="inv.status === 'overdue' ? '700' : ''">{{ fmtDate(inv.dueDate) }}</td>
                     <td class="muted" data-label="Subtotal">{{ fmtINR(inv.totals.subtotal) }}</td>
                     <td class="muted" data-label="GST">{{ fmtINR(gstAmount(inv)) }}</td>
-                    <td class="strong" data-label="Total" data-priority="high">{{ fmtINR(inv.totals.total) }}</td>
+                    <td class="strong" data-label="Total" data-priority="high">
+                      {{ fmtINR(inv.totals.total) }}
+                      <!-- A part-paid invoice reads as misleading without this:
+                           the total alone says nothing about what is still owed. -->
+                      @if ((inv.amountPaid || 0) > 0 && (inv.balanceDue || 0) > 0) {
+                        <div class="muted" style="font-size:11px;font-weight:500">{{ fmtINR(inv.balanceDue || 0) }} due</div>
+                      }
+                    </td>
                     <td data-label="Status" data-priority="high"><app-pill [status]="inv.status" /></td>
                     <td data-label="">
                       <div class="actions">

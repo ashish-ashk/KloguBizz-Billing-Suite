@@ -10,11 +10,20 @@ const paymentSchema = new mongoose.Schema({
   method: { type: String, default: 'Bank Transfer' },
   reference: String,
   note: String,
-  status: { type: String, enum: ['success', 'failed', 'pending'], default: 'success' },
+  // Server-derived, never accepted from a request body. 'void' is a reversal:
+  // the record stays for the audit trail but stops counting towards the
+  // invoice balance and towards collections.
+  status: { type: String, enum: ['success', 'failed', 'pending', 'void'], default: 'success' },
+  voidedAt: Date,
+  voidReason: String,
   date: { type: Date, default: Date.now }
 }, { timestamps: true });
 
 paymentSchema.index({ orgId: 1, date: -1 });
 paymentSchema.index({ orgId: 1, status: 1 });
+// Exactly the shape of the settlement aggregate in
+// invoiceController.recalculateSettlement, which runs on every payment,
+// mark-paid and repricing.
+paymentSchema.index({ invoiceId: 1, status: 1 });
 
 module.exports = { Payment: mongoose.model('Payment', paymentSchema) };

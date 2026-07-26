@@ -342,10 +342,17 @@ export class SubscriptionComponent implements OnInit {
     if (!plan || this.saving()) return;
     this.saving.set(true);
     this.api.startSubscription({ planCode: plan.code, billingCycle: this.cycle() }).subscribe({
-      next: () => {
+      next: result => {
         this.saving.set(false);
         this.upgradeOpen.set(false);
-        this.toast.success('Plan updated to ' + plan.name);
+        // The plan is only granted once payment is confirmed by the provider
+        // webhook, so don't claim success for a checkout that is still pending —
+        // the tenant would see "Plan updated" while remaining on their old plan.
+        if (result?.pendingPayment) {
+          this.toast.info(result.message || `Complete the payment to activate ${plan.name}. Your current plan stays active until then.`);
+        } else {
+          this.toast.success(result?.message || `Plan updated to ${plan.name}`);
+        }
         this.load();
       },
       error: err => { this.saving.set(false); this.toast.httpError(err); }

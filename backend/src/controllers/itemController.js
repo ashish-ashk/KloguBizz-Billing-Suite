@@ -4,6 +4,15 @@ const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { buildItemTemplateBuffer, parseItemWorkbook } = require('../services/itemImportService');
 const { logAudit } = require('../services/auditService');
+const { pickFields } = require('../utils/pickFields');
+
+// `orgId` is never accepted from the body — it comes from the token, so an
+// update can't relocate the record into another tenant.
+const ITEM_FIELDS = [
+  'itemCode', 'name', 'description', 'type', 'hsn', 'category', 'unit',
+  'gstRate', 'cessRate', 'sellingPrice', 'mrp', 'purchasePrice', 'taxInclusive',
+  'stockQty', 'reorderLevel', 'barcode', 'status'
+];
 
 const listItems = asyncHandler(async (req, res) => {
   const items = await Item.find(tenantFilter(req)).sort({ name: 1 });
@@ -11,23 +20,26 @@ const listItems = asyncHandler(async (req, res) => {
 });
 
 const createItem = asyncHandler(async (req, res) => {
-  const item = await Item.create({ ...req.body, orgId: req.orgId });
+  const item = await Item.create({ ...pickFields(req.body, ITEM_FIELDS), orgId: req.orgId });
+  logAudit({ req, action: 'item.created', entity: 'item', entityId: item._id, meta: { name: item.name } });
   res.status(201).json(item);
 });
 
 const updateItem = asyncHandler(async (req, res) => {
   const item = await Item.findOneAndUpdate(
     { _id: req.params.id, ...tenantFilter(req) },
-    req.body,
+    pickFields(req.body, ITEM_FIELDS),
     { new: true, runValidators: true }
   );
   if (!item) throw httpError(404, 'Item not found');
+  logAudit({ req, action: 'item.updated', entity: 'item', entityId: item._id, meta: { name: item.name } });
   res.json(item);
 });
 
 const deleteItem = asyncHandler(async (req, res) => {
   const item = await Item.findOneAndDelete({ _id: req.params.id, ...tenantFilter(req) });
   if (!item) throw httpError(404, 'Item not found');
+  logAudit({ req, action: 'item.deleted', entity: 'item', entityId: item._id, meta: { name: item.name } });
   res.status(204).end();
 });
 

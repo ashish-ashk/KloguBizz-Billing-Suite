@@ -9,7 +9,12 @@ export interface InvoiceDocData {
   date: string;
   dueDate: string;
   items: InvoiceItem[];
+  /** Invoice-level discount, needed to price each line for display. */
+  discountPercent?: number;
   totals: InvoiceTotals;
+  /** Settlement, so a part-paid invoice can show what is still owed. */
+  amountPaid?: number;
+  balanceDue?: number;
   notes?: string;
   paymentTerms?: string;
   bankDetails?: { bank?: string; account?: string; ifsc?: string };
@@ -346,7 +351,7 @@ export interface InvoiceDocClient {
             <div><div style="font-size:8.5px;color:var(--faint);text-transform:uppercase;">{{ title('Invoice') }} No</div><div style="font-size:10.5px;font-weight:700;margin-top:2px;" [style.color]="dark">{{ invoice().invoiceNumber }}</div></div>
             <div><div style="font-size:8.5px;color:var(--faint);text-transform:uppercase;">Order Date</div><div style="font-size:10.5px;font-weight:700;margin-top:2px;" [style.color]="dark">{{ fmtDate(invoice().date) }}</div></div>
             <div><div style="font-size:8.5px;color:var(--faint);text-transform:uppercase;">Due Date</div><div style="font-size:10.5px;font-weight:700;margin-top:2px;color:var(--red);">{{ fmtDate(invoice().dueDate) }}</div></div>
-            <div><div style="font-size:8.5px;color:var(--faint);text-transform:uppercase;">Payment</div><div style="font-size:10.5px;font-weight:700;margin-top:2px;" [style.color]="accentColor()">{{ invoice().totals.isIGST ? 'IGST' : 'CGST+SGST' }}</div></div>
+            <div><div style="font-size:8.5px;color:var(--faint);text-transform:uppercase;">Payment</div><div style="font-size:10.5px;font-weight:700;margin-top:2px;" [style.color]="accentColor()">{{ invoice().totals.isIGST ? 'IGST' : 'CGST+' + stateTaxLabel() }}</div></div>
           </div>
         }
         @case ('columnRule') {
@@ -490,7 +495,7 @@ export interface InvoiceDocClient {
           [style.borderRadius]="tpl().infoCard ? '10px' : '0'" [style.padding]="tpl().infoCard ? '14px 16px' : '0'">
           <div style="font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;font-weight:700;">Supply Details</div>
           <div style="font-size:12px;color:var(--muted);line-height:1.9;margin-top:6px;">
-            <div>Tax type: <strong [style.color]="dark">{{ invoice().totals.isIGST ? 'IGST (Inter-state)' : 'CGST + SGST (Intra-state)' }}</strong></div>
+            <div>Tax type: <strong [style.color]="dark">{{ invoice().totals.isIGST ? 'IGST (Inter-state)' : 'CGST + ' + stateTaxLabel() + ' (Intra-state)' }}</strong></div>
             <div>Place of supply: {{ stateName(client()?.stateCode || '') }}</div>
             <div>Terms: {{ invoice().paymentTerms || 'Net 15' }}</div>
           </div>
@@ -506,7 +511,7 @@ export interface InvoiceDocClient {
             <div class="inv-receipt-row">
               <div class="inv-receipt-desc" [style.color]="dark">{{ item.desc }}</div>
               <div class="inv-receipt-meta">
-                {{ item.qty }} × {{ fmtINR(item.rate) }} · HSN {{ item.hsn || '—' }} · GST {{ item.gstRate }}%
+                {{ item.qty }} × {{ fmtINR(itemRate(item)) }} · HSN {{ item.hsn || '—' }} · GST {{ itemTaxLabel(item) }}@if (item.discountPercent) { · less {{ item.discountPercent }}% }
                 <span style="float:right;font-weight:700;" [style.color]="dark">{{ fmtINR(itemTotal(item)) }}</span>
               </div>
             </div>
@@ -534,8 +539,13 @@ export interface InvoiceDocClient {
                 <td data-label="Description" [style.borderRight]="ledgerRule()" style="padding:11px 12px;font-weight:600;" [style.color]="dark">{{ item.desc }}</td>
                 <td data-label="HSN/SAC" class="mono" [style.borderRight]="ledgerRule()" style="padding:11px 12px;color:var(--muted);">{{ item.hsn || '—' }}</td>
                 <td data-label="Qty" [style.borderRight]="ledgerRule()" style="padding:11px 12px;text-align:right;color:var(--muted);">{{ item.qty }}</td>
-                <td data-label="Rate" [style.borderRight]="ledgerRule()" style="padding:11px 12px;text-align:right;color:var(--muted);">{{ fmtINR(item.rate) }}</td>
-                <td data-label="GST %" [style.borderRight]="ledgerRule()" style="padding:11px 12px;text-align:right;color:var(--muted);">{{ item.gstRate }}%</td>
+                <td data-label="Rate" [style.borderRight]="ledgerRule()" style="padding:11px 12px;text-align:right;color:var(--muted);">
+                  {{ fmtINR(itemRate(item)) }}
+                  <!-- A discounted line shows its discount inline; there is no
+                       dedicated column and the customer is entitled to see it. -->
+                  @if (item.discountPercent) { <span style="display:block;font-size:10px;color:var(--faint);">less {{ item.discountPercent }}%</span> }
+                </td>
+                <td data-label="GST %" [style.borderRight]="ledgerRule()" style="padding:11px 12px;text-align:right;color:var(--muted);">{{ itemTaxLabel(item) }}</td>
                 <td data-label="Tax Amt" [style.borderRight]="ledgerRule()" style="padding:11px 12px;text-align:right;color:#374151;">{{ fmtINR(itemTax(item)) }}</td>
                 <td data-label="Total" style="padding:11px 12px;text-align:right;font-weight:600;" [style.color]="dark">{{ fmtINR(itemTotal(item)) }}</td>
               </tr>
@@ -564,18 +574,37 @@ export interface InvoiceDocClient {
           }
         </div>
         <div>
+          <!-- Discount, cess, round-off and settlement rows only render when
+               they carry a value, so a plain invoice looks exactly as before. -->
           <div style="border-radius:10px;padding:16px 18px;display:grid;gap:8px;font-size:13px;" [style.background]="panelBg()">
-            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Subtotal</span><span style="font-weight:600;">{{ fmtINR(invoice().totals.subtotal) }}</span></div>
+            @if (hasDiscount()) {
+              <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Gross Amount</span><span style="font-weight:600;">{{ fmtINR(invoice().totals.grossSubtotal ?? invoice().totals.subtotal) }}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Discount</span><span style="font-weight:600;">−{{ fmtINR(invoice().totals.discountTotal ?? 0) }}</span></div>
+            }
+            <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">{{ hasDiscount() ? 'Taxable Value' : 'Subtotal' }}</span><span style="font-weight:600;">{{ fmtINR(invoice().totals.subtotal) }}</span></div>
             @if (invoice().totals.isIGST) {
               <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">IGST</span><span style="font-weight:600;">{{ fmtINR(invoice().totals.igst) }}</span></div>
             } @else {
               <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">CGST</span><span style="font-weight:600;">{{ fmtINR(invoice().totals.cgst) }}</span></div>
-              <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">SGST</span><span style="font-weight:600;">{{ fmtINR(invoice().totals.sgst) }}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">{{ stateTaxLabel() }}</span><span style="font-weight:600;">{{ fmtINR(invoice().totals.sgst) }}</span></div>
+            }
+            @if (cess() > 0) {
+              <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Cess</span><span style="font-weight:600;">{{ fmtINR(cess()) }}</span></div>
+            }
+            @if (roundOff() !== 0) {
+              <div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Round Off</span><span style="font-weight:600;">{{ roundOff() > 0 ? '+' : '−' }}{{ fmtINR(roundOff() < 0 ? -roundOff() : roundOff()) }}</span></div>
             }
             <div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:2px;" [style.borderTop]="'2px solid ' + accentColor()">
               <span style="font-weight:700;">Total</span>
               <span style="font-weight:800;font-size:17px;" [style.color]="accentColor()">{{ fmtINR(invoice().totals.total) }}</span>
             </div>
+            @if (amountPaid() > 0) {
+              <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px dashed #d1d5db;"><span style="color:var(--muted);">Amount Paid</span><span style="font-weight:600;">{{ fmtINR(amountPaid()) }}</span></div>
+              <div style="display:flex;justify-content:space-between;">
+                <span style="font-weight:700;">Balance Due</span>
+                <span style="font-weight:800;" [style.color]="accentColor()">{{ fmtINR(balanceDue()) }}</span>
+              </div>
+            }
           </div>
           @if (showAmountInWords()) {
             <div style="font-size:12px;background:#eef2ff;border-radius:8px;padding:10px 12px;margin-top:10px;line-height:1.6;" [style.color]="accentColor()">
@@ -710,11 +739,76 @@ export class InvoiceDocumentComponent {
     return this.tpl().tableStyle === 'ledger' ? '1px solid #e5e7eb' : 'none';
   }
 
-  itemTax(item: { qty: number; rate: number; gstRate: number }): number {
-    return item.qty * item.rate * item.gstRate / 100;
+  /**
+   * Prices one line the same way the backend's gstService.calculateLine does.
+   *
+   * These figures are display-only — the authoritative totals always come from
+   * `invoice().totals`, computed server-side. Keeping the arithmetic identical
+   * matters because this is the document the customer reads: the old version
+   * was a bare `qty * rate * gstRate`, which ignored discounts, cess and
+   * tax-inclusive rates and so disagreed with the total printed below it.
+   */
+  private line(item: InvoiceItem) {
+    const qty = Number(item.qty) || 0;
+    const rawRate = Number(item.rate) || 0;
+    const gstRate = Number(item.gstRate) || 0;
+    const cessRate = Number(item.cessRate) || 0;
+    const lineDiscount = Math.min(100, Math.max(0, Number(item.discountPercent) || 0));
+    const invoiceDiscount = Math.min(100, Math.max(0, Number(this.invoice().discountPercent) || 0));
+    const r2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
+
+    const rate = item.taxInclusive ? r2(rawRate / (1 + (gstRate + cessRate) / 100)) : rawRate;
+    const gross = r2(qty * rate);
+    const afterLine = r2(gross - r2(gross * lineDiscount / 100));
+    const taxable = r2(afterLine - r2(afterLine * invoiceDiscount / 100));
+    const tax = r2(taxable * gstRate / 100);
+    const cess = r2(taxable * cessRate / 100);
+    return { qty, rate, gstRate, cessRate, discountPercent: lineDiscount, gross, taxable, tax, cess, total: r2(taxable + tax + cess) };
   }
 
-  itemTotal(item: { qty: number; rate: number; gstRate: number }): number {
-    return item.qty * item.rate + this.itemTax(item);
+  /** Taxable unit rate — differs from what was typed on a tax-inclusive line. */
+  itemRate(item: InvoiceItem): number {
+    return this.line(item).rate;
+  }
+
+  /** GST plus cess for the line, which is what the "Tax Amt" column shows. */
+  itemTax(item: InvoiceItem): number {
+    const line = this.line(item);
+    return line.tax + line.cess;
+  }
+
+  itemTotal(item: InvoiceItem): number {
+    return this.line(item).total;
+  }
+
+  /** "18%" or "28% + 12%" when the line also carries cess. */
+  itemTaxLabel(item: InvoiceItem): string {
+    const line = this.line(item);
+    return line.cessRate > 0 ? `${line.gstRate}% + ${line.cessRate}%` : `${line.gstRate}%`;
+  }
+
+  /** The state share is UTGST in the Union Territories that levy it. */
+  stateTaxLabel(): string {
+    return this.invoice().totals.isUT ? 'UTGST' : 'SGST';
+  }
+
+  hasDiscount(): boolean {
+    return Number(this.invoice().totals.discountTotal) > 0;
+  }
+
+  roundOff(): number {
+    return Number(this.invoice().totals.roundOff) || 0;
+  }
+
+  cess(): number {
+    return Number(this.invoice().totals.cess) || 0;
+  }
+
+  amountPaid(): number {
+    return Number(this.invoice().amountPaid) || 0;
+  }
+
+  balanceDue(): number {
+    return Number(this.invoice().balanceDue) || 0;
   }
 }

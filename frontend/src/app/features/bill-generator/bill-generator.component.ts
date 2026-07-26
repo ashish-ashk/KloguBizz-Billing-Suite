@@ -284,8 +284,14 @@ interface BillRow {
                   <span style="font-weight:600">{{ fmtINR(halfTax()) }}</span>
                 </div>
                 <div style="display:flex;justify-content:space-between">
-                  <span style="color:var(--muted)">SGST</span>
+                  <span style="color:var(--muted)">{{ stateTaxLabel() }}</span>
                   <span style="font-weight:600">{{ fmtINR(halfTax()) }}</span>
+                </div>
+              }
+              @if (roundOff() !== 0) {
+                <div style="display:flex;justify-content:space-between">
+                  <span style="color:var(--muted)">Round Off</span>
+                  <span style="font-weight:600">{{ roundOff() > 0 ? '+' : '−' }}{{ fmtINR(roundOff() < 0 ? -roundOff() : roundOff()) }}</span>
                 </div>
               }
               <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border);padding-top:10px;margin-top:2px">
@@ -425,7 +431,10 @@ export class BillGeneratorComponent implements OnInit {
         this.rows = inv.items.length
           ? inv.items.map(i => ({ desc: i.desc, hsn: i.hsn || '', unit: 'Nos', qty: i.qty, rate: i.rate, gstRate: i.gstRate }))
           : [this.blankRow()];
-        this.discount = 0;
+        // Restore the saved discount rather than zeroing it — the discount is
+        // now a stored field, so dropping it here would silently reprice the
+        // bill on every edit.
+        this.discount = inv.discountPercent || 0;
         this.notes = inv.notes || '';
       },
       error: err => {
@@ -472,6 +481,20 @@ export class BillGeneratorComponent implements OnInit {
     const org = this.orgState();
     const buyer = this.buyerState();
     return !!org && !!buyer && org !== buyer;
+  }
+
+  /**
+   * Union Territories that levy UTGST rather than SGST. Delhi (07),
+   * Puducherry (34) and Jammu & Kashmir (01) have their own legislatures and
+   * levy SGST, so they are deliberately absent. Mirrors UT_STATE_CODES in the
+   * backend's gstService.
+   */
+  private static readonly UT_CODES = new Set(['04', '26', '31', '35', '38', '97']);
+
+  /** Label for the state share of an intra-state supply. */
+  stateTaxLabel(): string {
+    const buyer = String(this.buyerState() || '').padStart(2, '0');
+    return !this.isIGST() && BillGeneratorComponent.UT_CODES.has(buyer) ? 'UTGST' : 'SGST';
   }
 
   orgStateName(): string {
@@ -529,8 +552,21 @@ export class BillGeneratorComponent implements OnInit {
     return this.r2(this.totalTax() / 2);
   }
 
-  total(): number {
+  /** Pre-rounding payable amount. */
+  private rawTotal(): number {
     return this.r2(this.subtotal() - this.discountAmount() + this.totalTax());
+  }
+
+  /**
+   * The whole-rupee round-off the backend applies, mirrored here so the
+   * preview shows the same total the saved bill will carry.
+   */
+  roundOff(): number {
+    return this.r2(Math.round(this.rawTotal()) - this.rawTotal());
+  }
+
+  total(): number {
+    return Math.round(this.rawTotal());
   }
 
   // ── Save as invoice / bill ────────────────────
@@ -551,15 +587,16 @@ export class BillGeneratorComponent implements OnInit {
 
   save() {
     if (!this.canSave() || this.saving()) return;
-    const f = this.discFactor();
-    const hasDiscount = (this.discount || 0) > 0;
-    // Backend computes totals from items and ignores discount,
-    // so the discount is folded into each item's rate before sending.
+    // The discount is sent as its own field. It used to be folded into each
+    // item's rate, because the backend had nowhere to store it — which
+    // destroyed the gross value, hid the discount from the customer's copy,
+    // and left the GST report's taxable value with no record of the original
+    // price. The rate now goes out exactly as it was typed.
     const items: InvoiceItem[] = this.validItems().map(r => ({
       desc: r.desc.trim(),
       hsn: r.hsn.trim(),
       qty: r.qty,
-      rate: hasDiscount ? this.r2(r.rate * f) : r.rate,
+      rate: r.rate,
       gstRate: r.gstRate
     }));
 
@@ -583,6 +620,7 @@ export class BillGeneratorComponent implements OnInit {
       date: this.billDate,
       dueDate: this.dueDate,
       items,
+      discountPercent: Math.min(100, Math.max(0, this.discount || 0)),
       notes: this.notes.trim(),
       paymentTerms: 'Net 15'
     };

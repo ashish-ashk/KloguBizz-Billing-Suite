@@ -25,6 +25,9 @@ export interface Organisation {
     primaryColor?: string;
     invoicePrefix?: string;
     invoiceTitleLabel?: string;
+    /** Round the payable total to a whole rupee (the Indian billing
+     *  convention). Defaults to true when unset. */
+    roundOffTotal?: boolean;
     invoiceTemplateId?: string;
     customInvoiceTemplate?: import('./invoice-templates').CustomInvoiceTemplate | null;
     invoiceContent?: {
@@ -104,13 +107,30 @@ export interface ItemBulkUploadResult {
   failed: ItemBulkUploadFailure[];
 }
 
+/**
+ * Produced entirely by the backend's gstService — never assembled in the
+ * browser, so the on-screen document, the PDF and the GST report always agree.
+ * The optional fields are absent on invoices created before they existed, so
+ * every read site must tolerate `undefined`.
+ */
 export interface InvoiceTotals {
+  /** Value before any discount, so the discount stays auditable. */
+  grossSubtotal?: number;
+  discountTotal?: number;
+  /** Taxable value: gross less discounts. This is what GST is charged on. */
   subtotal: number;
   cgst: number;
   sgst: number;
   igst: number;
+  /** GST compensation cess (tobacco, automobiles, aerated drinks...). */
+  cess?: number;
+  /** Adjustment that brings the payable total to a whole rupee. */
+  roundOff?: number;
   total: number;
   isIGST: boolean;
+  /** Intra-territory supply to a UT that levies UTGST rather than SGST — the
+   *  amount is still in `sgst`, this only changes the label. */
+  isUT?: boolean;
 }
 
 export interface InvoiceItem {
@@ -119,6 +139,13 @@ export interface InvoiceItem {
   qty: number;
   rate: number;
   gstRate: number;
+  /** GST compensation cess rate for this line. */
+  cessRate?: number;
+  /** Per-line trade discount. Kept separate from `rate` so the gross value
+   *  survives and the customer can see what they were given. */
+  discountPercent?: number;
+  /** When true, `rate` already includes GST and cess. */
+  taxInclusive?: boolean;
 }
 
 export interface BankDetails {
@@ -149,25 +176,40 @@ export interface Invoice {
   paidDate?: string | null;
   status: 'draft' | 'pending' | 'partial' | 'paid' | 'overdue';
   items: InvoiceItem[];
+  /** Invoice-level discount, on top of any per-line discounts. */
+  discountPercent?: number;
   totals: InvoiceTotals;
+  /** Settlement state, persisted by the backend from successful payments. */
+  amountPaid?: number;
+  balanceDue?: number;
   notes?: string;
   paymentTerms?: string;
   bankDetails?: BankDetails;
 }
 
 export interface InvoiceStats {
+  /** Money actually received (successful payments), not the face value of
+   *  invoices whose status happens to be 'paid'. */
   totalRevenue: number;
+  /** Outstanding balances, not invoice totals — a part-paid invoice
+   *  contributes only what is still owed. */
   pendingAmount: number;
   overdueAmount: number;
+  outstandingAmount?: number;
   counts: { total: number; paid: number; pending: number; overdue: number; draft: number };
   monthlyRevenue: Array<{ month: string; revenue: number }>;
   topClients: Array<{ name: string; revenue: number }>;
 }
 
 export interface GstSummary {
-  byMonth: Array<{ month: string; taxable: number; cgst: number; sgst: number; igst: number; total: number; invoiceCount: number }>;
-  byRate: Array<{ rate: number; taxable: number; tax: number }>;
-  totals: { taxable: number; tax: number; invoiceCount: number };
+  /** The period covered — the report is financial-year scoped rather than
+   *  aggregating all history. */
+  period: { from: string; to: string; label: string };
+  byMonth: Array<{ month: string; gross: number; discount: number; taxable: number; cgst: number; sgst: number; igst: number; cess: number; total: number; invoiceCount: number }>;
+  byRate: Array<{ rate: number; taxable: number; tax: number; cess: number }>;
+  /** HSN/SAC-wise summary — a required table in GSTR-1. */
+  byHsn: Array<{ hsn: string; description?: string; qty: number; taxable: number; tax: number; cess: number }>;
+  totals: { gross: number; discount: number; taxable: number; cgst: number; sgst: number; igst: number; cess: number; tax: number; total: number; invoiceCount: number };
 }
 
 export interface Payment {
@@ -178,7 +220,10 @@ export interface Payment {
   method: string;
   reference?: string;
   note?: string;
-  status: 'success' | 'failed' | 'pending';
+  /** 'void' is a reversal: kept for the audit trail, excluded from balances. */
+  status: 'success' | 'failed' | 'pending' | 'void';
+  voidedAt?: string;
+  voidReason?: string;
   date: string;
 }
 
