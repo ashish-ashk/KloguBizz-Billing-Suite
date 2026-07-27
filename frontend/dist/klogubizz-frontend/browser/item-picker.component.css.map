@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": ["angular:styles/component:css;d136d30c2bfdad97f2cce556d4d7a339e5e32cf4bd26d4e36e333e692f2889d0;C:/Users/Ashish/Desktop/KloguBiz/frontend/src/app/shared/item-picker.component.ts"],
-  "sourcesContent": ["\n    :host { display: block; width: 100%; }\n    .item-picker { position: relative; }\n    .item-picker-dropdown {\n      position: fixed; min-width: 260px; max-width: 420px;\n      max-height: 300px; overflow-y: auto;\n      background: var(--card); border: 1px solid var(--border); border-radius: 12px;\n      box-shadow: var(--shadow-lg); padding: 6px; z-index: 1000;\n    }\n    .item-picker-dropdown .cmdk-item { width: 100%; justify-content: space-between; }\n  "],
-  "mappings": ";AACI;AAAQ,WAAS;AAAO,SAAO;AAAM;AACrC,CAAC;AAAc,YAAU;AAAU;AACnC,CAAC;AACC,YAAU;AAAO,aAAW;AAAO,aAAW;AAC9C,cAAY;AAAO,cAAY;AAC/B,cAAY,IAAI;AAAS,UAAQ,IAAI,MAAM,IAAI;AAAW,iBAAe;AACzE,cAAY,IAAI;AAAc,WAAS;AAAK,WAAS;AACvD;AACA,CANC,qBAMqB,CAAC;AAAY,SAAO;AAAM,mBAAiB;AAAe;",
-  "names": []
-}

@@ -961,6 +961,23 @@ app-quick-search { display: contents; }
   display: flex; flex-direction: column; justify-content: center;
   border-right: 1px solid var(--border);
 }
+/* Auth-page lockup is deliberately larger than the sidebar's `.brand` (which
+   has to stay compact to fit the collapsed rail) — the login/register screens
+   are the first thing a user sees, so mark and wordmark are scaled up here to
+   read clearly. Scoped to `.auth-brand` so `.brand-name`/`.brand-sub` keep
+   their sidebar sizes everywhere else. */
+.auth-brand { gap: 13px; }
+.auth-brand .auth-brand-logo {
+  width: 52px; height: 52px;
+  border-radius: 14px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+/* Unlike the sidebar, there is no fixed-width rail to protect here, so a long
+   tenant `appName`/tagline wraps instead of being clipped by `nowrap`. */
+.auth-brand .brand-name { font-size: 22px; letter-spacing: -0.5px; white-space: normal; line-height: 1.2; }
+.auth-brand .brand-sub { font-size: 12.5px; margin-top: 2px; white-space: normal; }
+
 .auth-eyebrow {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 11px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase;
@@ -1106,6 +1123,8 @@ app-quick-search { display: contents; }
   .auth-page { grid-template-columns: 1fr; }
   .auth-art { display: none; }
   .auth-panel { padding: 32px clamp(20px, 6vw, 40px); }
+  .auth-brand .auth-brand-logo { width: 46px; height: 46px; border-radius: 13px; }
+  .auth-brand .brand-name { font-size: 20px; }
   /* Drawer slide: a single consolidated rule (was previously split across
      three separate `.sidebar` blocks, which worked but read as if pieced
      together over time) with `will-change` to keep the transform on its own

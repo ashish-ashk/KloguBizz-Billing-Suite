@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": ["angular:styles/component:css;566f4812daaa582c0af74b20531871897a50bea17608dde6848dab4c1bcf5061;C:/Users/Ashish/Desktop/KloguBiz/frontend/src/app/features/users/users.component.ts"],
-  "sourcesContent": ["\n    .member-row:not(:last-child) { border-bottom: 1px solid var(--border); }\n  "],
-  "mappings": ";AACI,CAAC,UAAU,KAAK;AAAe,iBAAe,IAAI,MAAM,IAAI;AAAW;",
-  "names": []
-}

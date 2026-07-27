@@ -18,11 +18,11 @@ import { LegalContentComponent } from '../../shared/legal-content.component';
     <div class="auth-page">
       <section class="auth-panel page-enter">
         <div style="max-width:360px;width:100%;margin:0 auto;">
-          <div class="brand" style="margin-bottom:30px;">
+          <div class="brand auth-brand" style="margin-bottom:30px;">
             @if (branding()?.logoUrl) {
-              <img [src]="branding()?.logoUrl" alt="Logo" style="width:36px;height:36px;border-radius:10px;object-fit:contain;flex-shrink:0;" />
+              <img [src]="branding()?.logoUrl" alt="Logo" class="auth-brand-logo" />
             } @else {
-              <img src="klogu-logo.png" alt="Klogu Bizz" style="width:36px;height:36px;border-radius:10px;object-fit:contain;flex-shrink:0;" />
+              <img src="klogu-logo.png" alt="Klogu Bizz" class="auth-brand-logo" />
             }
             <div>
               <div class="brand-name" style="color:var(--text)">{{ branding()?.appName || 'Klogu Bizz' }}</div>
