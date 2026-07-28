@@ -4,7 +4,11 @@
   "scripts": {
     "start": "ng serve --host 0.0.0.0 --port 4200",
     "build": "ng build",
-    "test": "ng test --watch=false"
+    "test": "ng test --watch=false",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --check \"src/**/*.{ts,html,css}\"",
+    "format:write": "prettier --write \"src/**/*.{ts,html,css}\""
   },
   "private": true,
   "dependencies": {
@@ -17,7 +21,6 @@
     "@angular/platform-browser-dynamic": "^18.2.0",
     "@angular/router": "^18.2.0",
     "@angular/service-worker": "^18.2.0",
-    "chart.js": "^4.4.3",
     "rxjs": "~7.8.1",
     "tslib": "^2.6.3",
     "zone.js": "~0.14.10"
@@ -26,7 +29,11 @@
     "@angular-devkit/build-angular": "^18.2.0",
     "@angular/cli": "^18.2.0",
     "@angular/compiler-cli": "^18.2.0",
-    "typescript": "~5.5.4"
+    "angular-eslint": "^18.4.3",
+    "eslint": "^9.39.5",
+    "prettier": "^3.9.6",
+    "typescript": "~5.5.4",
+    "typescript-eslint": "^8.65.0"
   },
   "overrides": {
     "vite": "5.4.17"

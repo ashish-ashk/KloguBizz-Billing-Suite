@@ -1,5 +1,6 @@
 const { GlobalSetting } = require('../models/Settings');
 const { asyncHandler } = require('../utils/asyncHandler');
+const { platformAssetUrl } = require('../services/brandingAssetService');
 
 const DEFAULT_BRANDING = {
   appName: 'Klogu Bizz',
@@ -14,16 +15,24 @@ const DEFAULT_BRANDING = {
 // Unauthenticated: the login/register screens need the platform's branding
 // before anyone has signed in, so this only exposes the safe display fields.
 const publicBranding = asyncHandler(async (req, res) => {
-  const setting = await GlobalSetting.findOne({ key: 'branding' });
+  const setting = await GlobalSetting.findOne({ key: 'branding' }).lean();
   const branding = { ...DEFAULT_BRANDING, ...(setting?.value || {}) };
+  // The logo and favicon go out as cacheable asset URLs rather than base64. This
+  // endpoint is unauthenticated and is hit by *every* visitor to the login page,
+  // so inlining them meant re-sending up to a megabyte of image to every visitor
+  // on every visit, with no way for the browser to cache it.
   res.json({
     appName: branding.appName,
     tagline: branding.tagline,
     primaryColor: branding.primaryColor,
     secondaryColor: branding.secondaryColor,
     accentColor: branding.accentColor,
-    logoUrl: branding.logoUrl,
-    faviconUrl: branding.faviconUrl
+    logoAssetUrl: platformAssetUrl('logo', branding.logoUrl),
+    faviconAssetUrl: platformAssetUrl('favicon', branding.faviconUrl),
+    // Kept in the shape for compatibility, but deliberately empty — the bytes
+    // now come from the asset endpoints above.
+    logoUrl: '',
+    faviconUrl: ''
   });
 });
 

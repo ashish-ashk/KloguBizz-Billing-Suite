@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -7,7 +7,8 @@ import { IconComponent } from '../../shared/icons';
 import { AvatarComponent, EmptyStateComponent, ModalComponent, OverflowMenuComponent, PagerComponent, PillComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
-import { CreditNoteReason, CreditSummary, Invoice } from '../../core/models';
+import { CreditNoteReason, CreditSummary, Invoice, InvoiceStats } from '../../core/models';
+import { ServerList } from '../../core/server-list';
 import { AuthService } from '../../core/auth.service';
 import { fmtINR, fmtDate, downloadBlob } from '../../core/format';
 
@@ -18,7 +19,7 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft' | 'cancelle
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, AppShellComponent, IconComponent, PillComponent, AvatarComponent, EmptyStateComponent, ModalComponent, SkeletonRowsComponent, PagerComponent, OverflowMenuComponent],
   template: `
-    <app-shell title="Invoices" [subtitle]="invoices().length + ' total invoices'">
+    <app-shell title="Invoices" [subtitle]="subtitle()">
       <button actions class="btn ghost" type="button" [disabled]="exporting()" (click)="exportCsv()">
         @if (exporting()) { <span class="spinner"></span> } <app-icon name="download" [size]="14" /> Export CSV
       </button>
@@ -35,15 +36,15 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft' | 'cancelle
         </div>
         <div class="search-box">
           <span class="search-icon">⌕</span>
-          <input class="input" type="search" placeholder="Search invoice or client…"
-            [ngModel]="query()" (ngModelChange)="onSearch($event)" />
+          <input class="input" type="search" placeholder="Search invoice number or buyer…"
+            [ngModel]="list.search()" (ngModelChange)="list.onSearch($event)" />
         </div>
       </div>
 
       <section class="card flush">
-        @if (loading()) {
+        @if (list.loading()) {
           <app-skeleton-rows [count]="6" />
-        } @else if (filtered().length) {
+        } @else if (list.rows().length) {
           <div class="table-wrap">
             <table class="table stack-mobile">
               <thead>
@@ -53,7 +54,7 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft' | 'cancelle
                 </tr>
               </thead>
               <tbody>
-                @for (inv of paged(); track inv._id) {
+                @for (inv of list.rows(); track inv._id) {
                   <tr [class.row-danger]="inv.status === 'overdue'">
                     <td class="num" data-label="Invoice #">{{ inv.invoiceNumber }}</td>
                     <td data-label="Client">
@@ -119,11 +120,11 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft' | 'cancelle
               </tbody>
             </table>
           </div>
-          <app-pager [page]="page()" [pageSize]="pageSize()" [total]="filtered().length"
-            (pageChange)="page.set($event)" (pageSizeChange)="onPageSize($event)" />
+          <app-pager [page]="list.page()" [pageSize]="list.pageSize()" [total]="list.total()"
+            (pageChange)="list.onPage($event)" (pageSizeChange)="list.onPageSize($event)" />
         } @else {
           <app-empty-state icon="◧" title="No invoices found"
-            [message]="query() ? 'Try a different search or filter.' : 'Create your first invoice to get started.'" />
+            [message]="list.search() || filter() !== 'all' ? 'Try a different search or filter.' : 'Create your first invoice to get started.'" />
         }
       </section>
 
@@ -218,7 +219,7 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft' | 'cancelle
     </app-shell>
   `
 })
-export class InvoicesComponent implements OnInit {
+export class InvoicesComponent implements OnInit, OnDestroy {
   readonly filters: Array<{ key: StatusFilter; label: string }> = [
     { key: 'all', label: 'All' },
     { key: 'paid', label: 'Paid' },
@@ -230,13 +231,20 @@ export class InvoicesComponent implements OnInit {
     { key: 'cancelled', label: 'Cancelled' }
   ];
 
-  invoices = signal<Invoice[]>([]);
-  loading = signal(true);
+  /**
+   * One page of invoices, filtered and searched in the database. The status tabs
+   * become a server-side filter — and 'overdue' is derived from the due date
+   * server-side, so it is right the moment an invoice falls due.
+   */
+  list = new ServerList<Invoice>(params => this.api.invoices(params));
+  /** Whole-organisation counts for the status tabs. They cannot come from the
+   *  current page, and filtering a fully-downloaded array was only ever correct
+   *  because the list was unpaginated. */
+  stats = signal<InvoiceStats | null>(null);
   busy = signal(false);
   exporting = signal(false);
   downloadingId = signal<string | null>(null);
   filter = signal<StatusFilter>('all');
-  query = signal('');
   confirmDelete = signal<Invoice | null>(null);
   confirmCancel = signal<Invoice | null>(null);
   cancelReason = '';
@@ -258,46 +266,48 @@ export class InvoicesComponent implements OnInit {
     { key: 'other', label: 'Other' }
   ];
 
-  filtered = computed(() => {
-    const q = this.query().trim().toLowerCase();
-    return this.invoices().filter(inv => {
-      const statusOk = this.filter() === 'all'
-        || inv.status === this.filter()
-        || (this.filter() === 'pending' && inv.status === 'partial');
-      const text = `${inv.invoiceNumber} ${this.clientName(inv)}`.toLowerCase();
-      return statusOk && (!q || text.includes(q));
-    });
-  });
-
-  page = signal(1);
-  pageSize = signal(10);
-
-  paged = computed(() => {
-    const start = (this.page() - 1) * this.pageSize();
-    return this.filtered().slice(start, start + this.pageSize());
-  });
-
   fmtINR = fmtINR;
   fmtDate = fmtDate;
 
   constructor(private api: ApiService, private toast: ToastService, private auth: AuthService) {}
 
-  ngOnInit() { this.load(); }
+  ngOnInit() {
+    this.list.load();
+    this.loadStats();
+  }
+  ngOnDestroy() { this.list.dispose(); }
 
-  onSearch(v: string) { this.query.set(v); this.page.set(1); }
-  onFilter(key: StatusFilter) { this.filter.set(key); this.page.set(1); }
-  onPageSize(v: number) { this.pageSize.set(v); this.page.set(1); }
+  subtitle() {
+    const total = this.stats()?.counts.total ?? this.list.total();
+    return `${total} total ${total === 1 ? 'invoice' : 'invoices'}`;
+  }
 
+  onFilter(key: StatusFilter) {
+    this.filter.set(key);
+    // 'all' clears the filter rather than sending status=all, which the API would
+    // treat as a literal status and match nothing.
+    this.list.setFilter('status', key === 'all' ? undefined : key);
+  }
+
+  /** Reloads the page *and* the counts — a status change moves both. */
   load() {
-    this.api.invoices().subscribe({
-      next: list => { this.invoices.set(list); this.loading.set(false); },
-      error: err => { this.loading.set(false); this.toast.httpError(err, 'Could not load invoices.'); }
+    this.list.refresh();
+    this.loadStats();
+  }
+
+  private loadStats() {
+    this.api.invoiceStats().subscribe({
+      next: stats => this.stats.set(stats),
+      error: () => {}
     });
   }
 
   countFor(key: StatusFilter): number {
-    if (key === 'all') return this.invoices().length;
-    return this.invoices().filter(i => i.status === key || (key === 'pending' && i.status === 'partial')).length;
+    const counts = this.stats()?.counts;
+    if (!counts) return 0;
+    if (key === 'all') return counts.total;
+    if (key === 'cancelled') return counts.cancelled ?? 0;
+    return counts[key as 'paid' | 'pending' | 'overdue' | 'draft'] ?? 0;
   }
 
   clientName(inv: Invoice): string {
@@ -381,7 +391,9 @@ export class InvoicesComponent implements OnInit {
 
   exportCsv() {
     this.exporting.set(true);
-    this.api.exportInvoicesCsv().subscribe({
+    // Exports the full filtered set, streamed server-side — not just the page
+    // currently on screen.
+    this.api.exportInvoicesCsv(this.list.params()).subscribe({
       next: blob => { this.exporting.set(false); downloadBlob(blob, 'invoices.csv'); },
       error: err => { this.exporting.set(false); this.toast.httpError(err); }
     });

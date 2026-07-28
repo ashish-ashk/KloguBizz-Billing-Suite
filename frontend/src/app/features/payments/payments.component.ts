@@ -1,15 +1,15 @@
-import { Component, OnInit, computed, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { forkJoin } from 'rxjs';
 import { AppShellComponent } from '../../shared/app-shell.component';
 import { IconComponent } from '../../shared/icons';
 import { AvatarComponent, EmptyStateComponent, ModalComponent, PagerComponent, PillComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
-import { Client, Invoice, Payment } from '../../core/models';
+import { Client, Invoice, InvoiceStats, Payment } from '../../core/models';
 import { daysBetween, downloadBlob, fmtDate, fmtINR } from '../../core/format';
+import { ServerList } from '../../core/server-list';
 
 type PayTab = 'tracker' | 'history' | 'reminders';
 
@@ -41,7 +41,7 @@ type PayTab = 'tracker' | 'history' | 'reminders';
             <span class="m-icon"><app-icon name="clock" [size]="15" /></span>
           </div>
           <div class="value">{{ fmtINR(pendingAmount()) }}</div>
-          <div class="sub">{{ pendingInvoices().length }} open invoice{{ pendingInvoices().length === 1 ? '' : 's' }}</div>
+          <div class="sub">{{ openCount() }} open invoice{{ openCount() === 1 ? '' : 's' }}</div>
         </div>
         <div class="card metric danger">
           <div class="accent"></div>
@@ -50,7 +50,7 @@ type PayTab = 'tracker' | 'history' | 'reminders';
             <span class="m-icon"><app-icon name="alertTriangle" [size]="15" /></span>
           </div>
           <div class="value" style="color:var(--red)">{{ fmtINR(overdueAmount()) }}</div>
-          <div class="sub">{{ overdueInvoices().length }} invoice{{ overdueInvoices().length === 1 ? '' : 's' }} past due</div>
+          <div class="sub">{{ overdueCount() }} invoice{{ overdueCount() === 1 ? '' : 's' }} past due</div>
         </div>
         <div class="card metric indigo">
           <div class="accent"></div>
@@ -77,16 +77,16 @@ type PayTab = 'tracker' | 'history' | 'reminders';
         <div class="toolbar">
           <div class="search-box">
             <span class="search-icon">⌕</span>
-            <input class="input" type="search" placeholder="Search invoice or client…"
-              [ngModel]="trackerQuery()" (ngModelChange)="onTrackerSearch($event)">
+            <input class="input" type="search" placeholder="Search invoice number or buyer…"
+              [ngModel]="due.search()" (ngModelChange)="due.onSearch($event)">
           </div>
         </div>
         <div class="card flush">
-          @if (loading()) {
+          @if (due.loading()) {
             <app-skeleton-rows [count]="5" />
-          } @else if (dueInvoices().length === 0) {
+          } @else if (due.total() === 0 && !due.search()) {
             <app-empty-state icon="✓" title="All invoices are paid" message="No pending, partial or overdue invoices right now." />
-          } @else if (filteredDue().length === 0) {
+          } @else if (due.rows().length === 0) {
             <app-empty-state icon="⌕" title="No matching invoices" message="Try a different search term." />
           } @else {
             <div class="table-wrap">
@@ -105,7 +105,7 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                   </tr>
                 </thead>
                 <tbody>
-                  @for (inv of pagedDue(); track inv._id) {
+                  @for (inv of due.rows(); track inv._id) {
                     <tr [class.row-danger]="inv.status === 'overdue'">
                       <td class="num" data-label="Invoice #">{{ inv.invoiceNumber }}</td>
                       <td data-label="Client">
@@ -149,8 +149,8 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                 </tbody>
               </table>
             </div>
-            <app-pager [page]="trackerPage()" [pageSize]="trackerPageSize()" [total]="filteredDue().length"
-              (pageChange)="trackerPage.set($event)" (pageSizeChange)="onTrackerPageSize($event)" />
+            <app-pager [page]="due.page()" [pageSize]="due.pageSize()" [total]="due.total()"
+              (pageChange)="due.onPage($event)" (pageSizeChange)="due.onPageSize($event)" />
           }
         </div>
       }
@@ -158,19 +158,24 @@ type PayTab = 'tracker' | 'history' | 'reminders';
       <!-- History -->
       @if (tab() === 'history') {
         <div class="toolbar">
-          <div class="search-box">
-            <span class="search-icon">⌕</span>
-            <input class="input" type="search" placeholder="Search invoice, client, method or reference…"
-              [ngModel]="historyQuery()" (ngModelChange)="onHistorySearch($event)">
-          </div>
+          <!-- A method filter rather than a free-text search: payment history is
+               filtered in the database now, and method is the axis that is both
+               indexed and actually useful here. Finding a specific payment is done
+               from its invoice. -->
+          <select class="input" style="max-width:200px"
+            [ngModel]="history.filters()['method'] || ''"
+            (ngModelChange)="history.setFilter('method', $event)">
+            <option value="">All payment methods</option>
+            @for (m of methods; track m) { <option [value]="m">{{ m }}</option> }
+          </select>
         </div>
         <div class="card flush">
-          @if (loading()) {
+          @if (history.loading()) {
             <app-skeleton-rows [count]="5" />
-          } @else if (payments().length === 0) {
+          } @else if (history.total() === 0 && !history.filters()['method']) {
             <app-empty-state icon="◈" title="No payments recorded yet" message="Payments you record will show up here." />
-          } @else if (filteredPayments().length === 0) {
-            <app-empty-state icon="⌕" title="No matching payments" message="Try a different search term." />
+          } @else if (history.rows().length === 0) {
+            <app-empty-state icon="⌕" title="No matching payments" message="Try a different filter." />
           } @else {
             <div class="table-wrap">
               <table class="table stack-mobile">
@@ -188,7 +193,7 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                   </tr>
                 </thead>
                 <tbody>
-                  @for (p of pagedPayments(); track p._id) {
+                  @for (p of history.rows(); track p._id) {
                     <tr>
                       <td data-label="Date">{{ fmtDate(p.date) }}</td>
                       <td class="num" data-label="Invoice #">{{ invoiceNo(p) }}</td>
@@ -211,28 +216,28 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                 </tbody>
               </table>
             </div>
-            <app-pager [page]="historyPage()" [pageSize]="historyPageSize()" [total]="filteredPayments().length"
-              (pageChange)="historyPage.set($event)" (pageSizeChange)="onHistoryPageSize($event)" />
+            <app-pager [page]="history.page()" [pageSize]="history.pageSize()" [total]="history.total()"
+              (pageChange)="history.onPage($event)" (pageSizeChange)="history.onPageSize($event)" />
           }
         </div>
       }
 
       <!-- Reminders -->
       @if (tab() === 'reminders') {
-        @if (loading()) {
+        @if (due.loading()) {
           <div class="card flush"><app-skeleton-rows [count]="4" /></div>
-        } @else if (dueInvoices().length === 0) {
+        } @else if (due.total() === 0) {
           <div class="card flush">
             <app-empty-state icon="📧" title="No pending invoices requiring reminders" message="You are all caught up." />
           </div>
         } @else {
           <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
             <button class="btn secondary sm" type="button" [disabled]="remindingAll()" (click)="confirmRemindAll.set(true)">
-              @if (remindingAll()) { <span class="spinner"></span> } <app-icon name="mail" [size]="13" /> Remind All ({{ dueInvoices().length }})
+              @if (remindingAll()) { <span class="spinner"></span> } <app-icon name="mail" [size]="13" /> Remind All ({{ due.total() }})
             </button>
           </div>
           <div class="grid grid-2">
-            @for (inv of dueInvoices(); track inv._id) {
+            @for (inv of due.rows(); track inv._id) {
               <div class="card">
                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
                   <app-avatar [name]="clientName(inv.clientId)" [size]="36" />
@@ -381,7 +386,7 @@ type PayTab = 'tracker' | 'history' | 'reminders';
       <app-modal [open]="confirmRemindAll()" title="Remind All" (close)="confirmRemindAll.set(false)">
         <p style="margin:0;color:var(--muted);line-height:1.6">
           Chases every client with a pending, partial or overdue invoice
-          (<strong style="color:var(--text)">{{ dueInvoices().length }}</strong> invoice{{ dueInvoices().length === 1 ? '' : 's' }}).
+          (<strong style="color:var(--text)">{{ due.total() }}</strong> invoice{{ due.total() === 1 ? '' : 's' }}).
           Invoices with no email on file are skipped, and anyone already reminded at
           this stage will not be emailed twice. This runs in the background, so you
           can carry on working.
@@ -396,10 +401,21 @@ type PayTab = 'tracker' | 'history' | 'reminders';
     </app-shell>
   `
 })
-export class PaymentsComponent implements OnInit {
-  loading = signal(true);
-  invoices = signal<Invoice[]>([]);
-  payments = signal<Payment[]>([]);
+export class PaymentsComponent implements OnInit, OnDestroy {
+  /**
+   * Two independently-paged lists plus one stats call, replacing what used to be
+   * "fetch every payment and every invoice, then derive everything in the
+   * browser".
+   *
+   * `due` is the open-invoice tracker: the status filter is applied server-side,
+   * and because the API derives 'overdue' from the due date, an invoice that fell
+   * due an hour ago is included without waiting for a background sweep.
+   */
+  due = new ServerList<Invoice>(params => this.api.invoices(params));
+  history = new ServerList<Payment>(params => this.api.payments(params));
+  /** Organisation-wide collection figures. These are sums over *all* invoices and
+   *  payments, so they can only come from the server once the lists are paged. */
+  stats = signal<InvoiceStats | null>(null);
   tab = signal<PayTab>('tracker');
 
   // Record Payment modal
@@ -425,89 +441,41 @@ export class PaymentsComponent implements OnInit {
   fmtINR = fmtINR;
   fmtDate = fmtDate;
 
-  dueInvoices = computed(() =>
-    this.invoices()
-      .filter(i => i.status === 'pending' || i.status === 'partial' || i.status === 'overdue')
-      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
-  );
-  pendingInvoices = computed(() => this.invoices().filter(i => i.status === 'pending' || i.status === 'partial'));
-  overdueInvoices = computed(() => this.invoices().filter(i => i.status === 'overdue'));
+  // Every figure below is organisation-wide, so it comes from the stats
+  // endpoint's aggregation rather than from a reduction over a downloaded array.
+  totalCollected = computed(() => this.stats()?.totalRevenue ?? 0);
+  successCount = computed(() => this.history.total());
+  // Outstanding money is the sum of unpaid *balances*, not of invoice totals —
+  // the latter overstates it by everything already received against part-paid
+  // invoices.
+  pendingAmount = computed(() => this.stats()?.pendingAmount ?? 0);
+  overdueAmount = computed(() => this.stats()?.overdueAmount ?? 0);
+  openCount = computed(() => this.stats()?.counts.pending ?? 0);
+  overdueCount = computed(() => this.stats()?.counts.overdue ?? 0);
+  avgCollectionDays = computed<number | null>(() => this.stats()?.avgCollectionDays ?? null);
 
-  totalCollected = computed(() =>
-    this.payments().filter(p => p.status === 'success').reduce((s, p) => s + (p.amount || 0), 0)
-  );
-  successCount = computed(() => this.payments().filter(p => p.status === 'success').length);
-  // Outstanding money is the sum of unpaid *balances*. Summing invoice totals
-  // (what this did before) overstates the figure by everything already received
-  // against part-paid invoices.
-  pendingAmount = computed(() => this.pendingInvoices().reduce((s, i) => s + this.remainingFor(i), 0));
-  overdueAmount = computed(() => this.overdueInvoices().reduce((s, i) => s + this.remainingFor(i), 0));
-
-  avgCollectionDays = computed<number | null>(() => {
-    const paid = this.invoices().filter(i => i.status === 'paid' && !!i.paidDate);
-    if (paid.length === 0) return null;
-    const sum = paid.reduce((s, i) => s + daysBetween(i.date, i.paidDate as string), 0);
-    return Math.round(sum / paid.length);
-  });
-
-  sortedPayments = computed(() =>
-    [...this.payments()].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-  );
-
-  // ── Tracker search/pagination ─────────────────
-  trackerQuery = signal('');
-  trackerPage = signal(1);
-  trackerPageSize = signal(10);
-
-  filteredDue = computed(() => {
-    const q = this.trackerQuery().trim().toLowerCase();
-    if (!q) return this.dueInvoices();
-    return this.dueInvoices().filter(inv =>
-      `${inv.invoiceNumber} ${this.clientName(inv.clientId)}`.toLowerCase().includes(q)
-    );
-  });
-
-  pagedDue = computed(() => {
-    const start = (this.trackerPage() - 1) * this.trackerPageSize();
-    return this.filteredDue().slice(start, start + this.trackerPageSize());
-  });
-
-  // ── History search/pagination ─────────────────
-  historyQuery = signal('');
-  historyPage = signal(1);
-  historyPageSize = signal(10);
-
-  filteredPayments = computed(() => {
-    const q = this.historyQuery().trim().toLowerCase();
-    if (!q) return this.sortedPayments();
-    return this.sortedPayments().filter(p =>
-      `${this.invoiceNo(p)} ${this.clientName(p.clientId)} ${p.method} ${p.reference || ''}`.toLowerCase().includes(q)
-    );
-  });
-
-  pagedPayments = computed(() => {
-    const start = (this.historyPage() - 1) * this.historyPageSize();
-    return this.filteredPayments().slice(start, start + this.historyPageSize());
-  });
-
-  constructor(private api: ApiService, private toast: ToastService, private auth: AuthService) {}
-
-  onTrackerSearch(v: string) { this.trackerQuery.set(v); this.trackerPage.set(1); }
-  onTrackerPageSize(v: number) { this.trackerPageSize.set(v); this.trackerPage.set(1); }
-  onHistorySearch(v: string) { this.historyQuery.set(v); this.historyPage.set(1); }
-  onHistoryPageSize(v: number) { this.historyPageSize.set(v); this.historyPage.set(1); }
+  constructor(private api: ApiService, private toast: ToastService, private auth: AuthService) {
+    // The tracker only ever shows invoices with money outstanding, and the
+    // soonest-due first — which is the order someone chasing payment works in.
+    this.due.filters.set({ status: 'unpaid' });
+    this.due.sort.set('dueDate');
+    this.due.pageSize.set(10);
+    this.history.pageSize.set(10);
+  }
 
   ngOnInit() { this.load(); }
 
+  ngOnDestroy() {
+    this.due.dispose();
+    this.history.dispose();
+  }
+
   load() {
-    this.loading.set(true);
-    forkJoin({ payments: this.api.payments(), invoices: this.api.invoices() }).subscribe({
-      next: res => {
-        this.payments.set(res.payments);
-        this.invoices.set(res.invoices);
-        this.loading.set(false);
-      },
-      error: err => { this.loading.set(false); this.toast.httpError(err); }
+    this.due.load();
+    this.history.load();
+    this.api.invoiceStats().subscribe({
+      next: stats => this.stats.set(stats),
+      error: err => this.toast.httpError(err)
     });
   }
 
@@ -528,31 +496,22 @@ export class PaymentsComponent implements OnInit {
     return typeof p.invoiceId === 'object' && p.invoiceId ? p.invoiceId.invoiceNumber : '—';
   }
 
-  private invoiceIdOf(p: Payment): string {
-    return typeof p.invoiceId === 'object' && p.invoiceId ? p.invoiceId._id : p.invoiceId;
-  }
-
   overdueDays(inv: Invoice): number {
     return daysBetween(inv.dueDate);
-  }
-
-  private derivedRemainingFor(inv: Invoice): number {
-    const paid = this.payments()
-      .filter(p => p.status === 'success' && this.invoiceIdOf(p) === inv._id)
-      .reduce((s, p) => s + (p.amount || 0), 0);
-    return Math.max(0, Math.round(((inv.totals?.total || 0) - paid) * 100) / 100);
   }
 
   /**
    * Outstanding balance for an invoice.
    *
-   * Prefers the server-computed `balanceDue`, which is authoritative and
-   * accounts for voided payments. Falls back to deriving it from the loaded
-   * payment list for invoices created before that field was persisted.
+   * `balanceDue` is persisted by the backend and accounts for voided payments and
+   * credit notes, so it is simply read. There used to be a fallback that summed
+   * the loaded payment list for invoices predating the field — which is no longer
+   * possible (the payment list is a page, not the whole set) and no longer needed:
+   * every read path now runs `recalculateSettlement`, so a document that lacked
+   * the field has been backfilled the first time anyone touched it.
    */
   remainingFor(inv: Invoice): number {
-    if (inv.balanceDue !== undefined && inv.balanceDue !== null) return inv.balanceDue;
-    return this.derivedRemainingFor(inv);
+    return inv.balanceDue ?? Math.max(0, inv.totals?.total || 0);
   }
 
   orgName(): string {
@@ -646,7 +605,7 @@ export class PaymentsComponent implements OnInit {
 
   exportCsv() {
     this.exporting.set(true);
-    this.api.exportPaymentsCsv().subscribe({
+    this.api.exportPaymentsCsv(this.history.params()).subscribe({
       next: blob => { this.exporting.set(false); downloadBlob(blob, 'payments.csv'); },
       error: err => { this.exporting.set(false); this.toast.httpError(err); }
     });

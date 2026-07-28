@@ -4,6 +4,7 @@ const { Reminder, GlobalSetting } = require('../models/Settings');
 const { ReminderLog } = require('../models/ReminderLog');
 const { sendReminderEmail } = require('./emailService');
 const { env } = require('../config/env');
+const { logger } = require('../utils/logger');
 
 /**
  * Automated payment reminders.
@@ -31,7 +32,7 @@ const SEND_SPACING_MS = 150;
 const MAX_SENDS_PER_SWEEP = 200;
 
 function wait(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise(resolve => { setTimeout(resolve, ms); });
 }
 
 function startOfToday() {
@@ -90,10 +91,19 @@ async function runReminderSweep({ orgId = null, dryRun = false } = {}) {
   };
   if (orgId) filter.orgId = orgId;
 
-  const invoices = await Invoice.find(filter)
+  /**
+   * Streamed rather than loaded. This is the sweep that runs across *every*
+   * tenant, so `find().lean()` here meant "every unpaid invoice on the platform,
+   * with its populated client, in one array" — the single largest read in the
+   * codebase, executed hourly. A cursor keeps it to one batch at a time, and the
+   * oldest invoices (sorted by due date) are still processed first, which is what
+   * the send cap depends on.
+   */
+  const cursor = Invoice.find(filter)
     .populate('clientId', 'companyName email')
     .sort({ dueDate: 1 })
-    .lean();
+    .lean()
+    .cursor();
 
   // Organisations are fetched once and reused rather than per invoice.
   const orgCache = new Map();
@@ -105,11 +115,16 @@ async function runReminderSweep({ orgId = null, dryRun = false } = {}) {
     return orgCache.get(key);
   }
 
-  const result = { scanned: invoices.length, sent: 0, skipped: 0, failed: 0, dryRun, details: [] };
+  const result = { scanned: 0, sent: 0, skipped: 0, failed: 0, dryRun, details: [] };
 
-  for (const invoice of invoices) {
+  for await (const invoice of cursor) {
+    result.scanned += 1;
     if (result.sent >= MAX_SENDS_PER_SWEEP) {
       result.note = `Stopped at ${MAX_SENDS_PER_SWEEP} sends; the rest go out on the next sweep.`;
+      // Close the cursor explicitly: breaking out of a `for await` does call
+      // `return()` on the iterator, but being explicit means the server-side
+      // cursor is released immediately rather than at the next GC/timeout.
+      await cursor.close();
       break;
     }
 
@@ -209,10 +224,10 @@ async function sweepOnce() {
   try {
     const result = await runReminderSweep();
     if (result.sent || result.failed) {
-      console.log(`[reminders] scanned=${result.scanned} sent=${result.sent} skipped=${result.skipped} failed=${result.failed}`);
+      logger.info('reminder sweep', { scanned: result.scanned, sent: result.sent, skipped: result.skipped, failed: result.failed });
     }
   } catch (error) {
-    console.error('[reminders] sweep failed:', error.message);
+    logger.error('reminder sweep failed', { err: error });
   } finally {
     running = false;
   }
@@ -225,7 +240,7 @@ function startReminderScheduler() {
   setTimeout(sweepOnce, 60 * 1000).unref();
   timer = setInterval(sweepOnce, SWEEP_INTERVAL_MS);
   timer.unref();
-  console.log('[reminders] scheduler started (hourly)');
+  logger.info('reminder scheduler started', { intervalMs: SWEEP_INTERVAL_MS });
   return timer;
 }
 

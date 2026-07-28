@@ -38,8 +38,8 @@ import { downloadBlob } from '../../core/format';
             [templateId]="org()?.brandingConfig?.invoiceTemplateId || 'modern-minimal'"
             [customTemplate]="org()?.brandingConfig?.customInvoiceTemplate || null"
             [accentColor]="org()?.brandingConfig?.primaryColor || '#4f46e5'"
-            [logoUrl]="org()?.brandingConfig?.logoUrl || ''"
-            [headerImageUrl]="org()?.brandingConfig?.headerImageUrl || ''"
+            [logoUrl]="logoUrl()"
+            [headerImageUrl]="headerImageUrl()"
             [showLogo]="org()?.brandingConfig?.invoiceContent?.showLogo !== false"
             [showSignature]="org()?.brandingConfig?.invoiceContent?.showSignature !== false"
             [showBankDetails]="org()?.brandingConfig?.invoiceContent?.showBankDetails !== false"
@@ -70,6 +70,16 @@ export class InvoicePrintComponent implements OnInit {
   ) {}
 
   org() { return this.auth.organisation(); }
+
+  /**
+   * Branding images as cacheable asset URLs rather than inline base64.
+   *
+   * `invoice-document` takes these as plain `<img src>` inputs, so a URL works
+   * exactly as a data URI did — and the letterhead in particular (up to 700KB)
+   * no longer rides along in every organisation payload.
+   */
+  logoUrl() { return this.api.assetUrl(this.org()?.brandingConfig?.logoAssetUrl); }
+  headerImageUrl() { return this.api.assetUrl(this.org()?.brandingConfig?.headerImageAssetUrl); }
 
   client(): InvoiceDocClient | null {
     const inv = this.invoice();

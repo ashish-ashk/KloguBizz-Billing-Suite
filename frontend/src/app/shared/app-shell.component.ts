@@ -1,5 +1,6 @@
 import { Component, HostListener, Input, computed, effect, signal, viewChild } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
+import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { ThemeService } from '../core/theme.service';
 import { AvatarComponent, PillComponent, ToastsComponent, popScrollLock, pushScrollLock } from './ui';
@@ -21,8 +22,8 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
       <aside class="sidebar no-print" [class.open]="menuOpen()" [class.collapsed]="collapsed()">
         <div class="sidebar-logo">
           <div class="brand">
-            @if (auth.organisation()?.brandingConfig?.logoUrl) {
-              <img [src]="auth.organisation()?.brandingConfig?.logoUrl" alt="Logo" class="brand-logo-img" />
+            @if (orgLogo()) {
+              <img [src]="orgLogo()" alt="Logo" class="brand-logo-img" />
             } @else {
               <img src="klogu-logo.png" alt="Klogu Bizz" class="brand-logo-img" />
             }
@@ -163,6 +164,17 @@ export class AppShellComponent {
   collapsed = signal(localStorage.getItem(COLLAPSE_KEY) === '1');
   quickSearch = viewChild(QuickSearchComponent);
 
+  /**
+   * The organisation's logo, resolved to a cacheable asset URL.
+   *
+   * It used to be read straight off `brandingConfig.logoUrl`, which was a base64
+   * data URI embedded in every `/auth/me` response — so the same 500KB of image
+   * came down the wire on every page load and every route change. The API now
+   * returns a content-addressed URL that the browser caches once and never
+   * re-requests. See services/brandingAssetService.js.
+   */
+  orgLogo = computed(() => this.api.assetUrl(this.auth.organisation()?.brandingConfig?.logoAssetUrl));
+
   /** Organisation status, which now genuinely gates writes server-side. */
   orgStatus = computed(() => this.auth.organisation()?.status);
   /** Suspended and cancelled accounts are read-only, not signed out. */
@@ -195,7 +207,12 @@ export class AppShellComponent {
     return items;
   });
 
-  constructor(public auth: AuthService, public theme: ThemeService, public router: Router) {
+  constructor(
+    public auth: AuthService,
+    public theme: ThemeService,
+    public router: Router,
+    private api: ApiService
+  ) {
     // Locks background scroll while the full-width mobile drawer is open —
     // otherwise the page behind it keeps scrolling under the fixed overlay.
     effect(() => {

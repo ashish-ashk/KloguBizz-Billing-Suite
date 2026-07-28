@@ -10,6 +10,7 @@ const { logAudit } = require('../services/auditService');
 const { CURRENT_TERMS_VERSION } = require('../config/legal');
 const { createToken, hashToken, expiryFromNow, RESET_TTL_MS } = require('../services/tokenService');
 const { sendPasswordResetEmail } = require('../services/emailService');
+const { serialiseOrganisation } = require('../services/brandingAssetService');
 
 function signToken(user) {
   return jwt.sign(
@@ -29,7 +30,12 @@ function authPayload(user, organisation) {
       role: user.role,
       status: user.status
     },
-    organisation
+    // The organisation's logo and letterhead are replaced with cacheable asset
+    // URLs. They are base64 data URIs of up to 500KB and 700KB, and this payload
+    // is returned by login, register, accept-invite *and* /auth/me — which the
+    // app calls on every load and every route change. See
+    // services/brandingAssetService.js.
+    organisation: serialiseOrganisation(organisation)
   };
 }
 
@@ -127,7 +133,7 @@ const login = asyncHandler(async (req, res) => {
 
 const me = asyncHandler(async (req, res) => {
   const organisation = req.user.orgId ? await Organisation.findById(req.user.orgId) : null;
-  res.json({ user: req.user, organisation });
+  res.json({ user: req.user, organisation: serialiseOrganisation(organisation) });
 });
 
 // ── Invitations ──────────────────────────────────

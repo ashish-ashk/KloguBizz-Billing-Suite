@@ -3,20 +3,36 @@ const { Payment } = require('../models/Payment');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
-const { toCsv } = require('../services/csvService');
+const { streamCsv } = require('../services/csvService');
+const { paginate, parseSort } = require('../utils/pagination');
 const { logAudit } = require('../services/auditService');
 const { recalculateSettlement } = require('./invoiceController');
 const { roundMoney } = require('../services/gstService');
 const { assertValidMaster } = require('../services/masterService');
 
-const listPayments = asyncHandler(async (req, res) => {
+const PAYMENT_SORTS = ['date', 'amount', 'createdAt'];
+
+function buildPaymentFilter(req) {
   const filter = tenantFilter(req);
   // Voided payments are kept for the audit trail but excluded by default —
   // they are reversals, not collections, and including them in the tracker
   // would double-count.
   if (req.query.includeVoid !== 'true') filter.status = { $ne: 'void' };
-  const payments = await Payment.find(filter).populate('invoiceId clientId').sort({ date: -1 });
-  res.json(payments);
+  if (req.query.invoiceId) filter.invoiceId = req.query.invoiceId;
+  if (req.query.clientId) filter.clientId = req.query.clientId;
+  if (req.query.method) filter.method = req.query.method;
+  return filter;
+}
+
+const listPayments = asyncHandler(async (req, res) => {
+  const page = await paginate(Payment, buildPaymentFilter(req), req.query, query => query
+    // Narrowed from a bare `populate('invoiceId clientId')`, which pulled two
+    // entire documents — including every line item on the invoice — into each
+    // row of the payments table.
+    .populate('invoiceId', 'invoiceNumber date totals.total status')
+    .populate('clientId', 'companyName gstin')
+    .sort(parseSort(req.query, PAYMENT_SORTS, { date: -1 })));
+  res.json(page);
 });
 
 const createPayment = asyncHandler(async (req, res) => {
@@ -98,26 +114,24 @@ const voidPayment = asyncHandler(async (req, res) => {
   res.json({ payment, invoice });
 });
 
+const PAYMENT_CSV_COLUMNS = [
+  { label: 'Date', value: p => p.date?.toISOString().slice(0, 10) },
+  { label: 'Invoice Number', value: p => p.invoiceId?.invoiceNumber || '' },
+  { label: 'Client', value: p => p.clientId?.companyName || '' },
+  { label: 'Amount', value: p => Number(p.amount || 0).toFixed(2) },
+  { label: 'Method', value: p => p.method },
+  { label: 'Reference', value: p => p.reference || '' },
+  { label: 'Status', value: p => p.status },
+  { label: 'Note', value: p => p.note || '' }
+];
+
 const exportPaymentsCsv = asyncHandler(async (req, res) => {
-  const filter = tenantFilter(req);
-  if (req.query.includeVoid !== 'true') filter.status = { $ne: 'void' };
-  const payments = await Payment.find(filter)
+  const cursor = Payment.find(buildPaymentFilter(req))
     .populate('invoiceId', 'invoiceNumber')
     .populate('clientId', 'companyName')
-    .sort({ date: -1 });
-  const csv = toCsv(payments, [
-    { label: 'Date', value: p => p.date?.toISOString().slice(0, 10) },
-    { label: 'Invoice Number', value: p => p.invoiceId?.invoiceNumber || '' },
-    { label: 'Client', value: p => p.clientId?.companyName || '' },
-    { label: 'Amount', value: p => Number(p.amount || 0).toFixed(2) },
-    { label: 'Method', value: p => p.method },
-    { label: 'Reference', value: p => p.reference || '' },
-    { label: 'Status', value: p => p.status },
-    { label: 'Note', value: p => p.note || '' }
-  ]);
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename="payments.csv"');
-  res.send(csv);
+    .sort({ date: -1 })
+    .cursor();
+  await streamCsv(res, { filename: 'payments.csv', columns: PAYMENT_CSV_COLUMNS, cursor });
 });
 
 module.exports = { listPayments, createPayment, voidPayment, exportPaymentsCsv };

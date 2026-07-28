@@ -504,6 +504,31 @@ function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
+    /**
+     * The page box, derived rather than guessed.
+     *
+     * Pagination used to be driven by bare magic numbers — `if (y > 700)` to break
+     * a page, `y = 50` to restart, `const footY = 760` for the footer — none of
+     * which referred to the actual page geometry. They happened to be about right
+     * for A4 with a 50pt margin and silently wrong for anything else: the
+     * `narrow` receipt templates use an 85pt margin, so their content ran closer
+     * to the edge than intended, and any future page size would have broken every
+     * threshold at once.
+     *
+     * Everything below is computed from `doc.page`, so the layout follows the
+     * page rather than a set of constants that have to be kept in step with it.
+     */
+    const pageTop = doc.page.margins.top;
+    const pageBottom = doc.page.height - doc.page.margins.bottom;
+    // Room reserved at the foot of every page for the footer strip and the page
+    // number that now sits there.
+    const FOOTER_RESERVE = 42;
+    // The lowest y a row may start at and still fit above the footer.
+    const contentBottom = pageBottom - FOOTER_RESERVE;
+    // The totals panel and signature block are tall; starting them too near the
+    // bottom is what the old `y > 640` was groping at.
+    const SUMMARY_BLOCK_HEIGHT = 170;
+
     const brand = org?.brandingConfig?.primaryColor || '#4f46e5';
     const titleLabel = org?.brandingConfig?.invoiceTitleLabel || '';
     const [br, bg, bb] = hexToRgbTriplet(brand);
@@ -607,7 +632,7 @@ function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
       y += 8;
       doc.font(font).fontSize(8.5);
       invoice.items.forEach(item => {
-        if (y > 700) { doc.addPage(); y = 50; }
+        if (y + 30 > contentBottom) { doc.addPage(); y = pageTop; }
         // Same shared pricing as the table layout below.
         const line = calculateLine(item, invoice.discountPercent);
         const parts = [
@@ -656,7 +681,16 @@ function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
 
       doc.font(font).fontSize(fontSize);
       invoice.items.forEach((item, i) => {
-        if (y > 700) { doc.addPage(); y = 50; drawTableHeader(); doc.font(font).fontSize(fontSize); }
+        // A row must fit whole; `rowH` is part of the test so the last row on a
+        // page is never clipped by the footer.
+        if (y + rowH > contentBottom) {
+          doc.addPage();
+          y = pageTop;
+          // The header is redrawn on the continuation page — a table of figures
+          // with no column labels is unreadable.
+          drawTableHeader();
+          doc.font(font).fontSize(fontSize);
+        }
         if (template.tableStyle === 'zebra' && i % 2 === 1) {
           if (template.accentTint) { doc.fillOpacity(0.06).rect(left, y, width, rowH).fill(`rgb(${br}, ${bg}, ${bb})`).fillOpacity(1); }
           else doc.rect(left, y, width, rowH).fill('#fafbff');
@@ -689,7 +723,10 @@ function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
       if (template.tableStyle !== 'minimal') doc.moveTo(left, y).lineTo(right, y).strokeColor('#e0e7ff').lineWidth(1).stroke();
       y += 16;
     }
-    if (y > 640) { doc.addPage(); y = 50; }
+    // Keep the totals panel, amount-in-words strip and signature together: they
+    // read as one block, and splitting them across a page break looks like an
+    // error on a document someone is being asked to pay.
+    if (y + SUMMARY_BLOCK_HEIGHT > contentBottom) { doc.addPage(); y = pageTop; }
 
     // Notes / bank details (left) + totals summary (right)
     const summaryTop = y;
@@ -782,8 +819,17 @@ function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
       doc.fillColor(brand).font(font).fontSize(8).text(`Amount in words: ${numberToWords(t.total)}`, sx + 10, wordsY + 8, { width: sw - 20 });
     }
 
-    // Footer
-    const footY = 760;
+    /**
+     * Footer, positioned from the page box rather than a fixed 760.
+     *
+     * The offset has to clear the *whole* signature block, not just its first
+     * line: the block writes at `footY`, `footY + 4` and `footY + 16`. pdfkit
+     * silently inserts a new page whenever `text()` would cross the bottom margin,
+     * so placing this even ten points lower turns every invoice into a two-page
+     * invoice with a blank second page.
+     */
+    const FOOTER_BLOCK_HEIGHT = 32;
+    const footY = pageBottom - FOOTER_BLOCK_HEIGHT;
     doc.fillColor(FAINT).font(font).fontSize(8).text('This is a computer generated invoice.', left, footY, { width: 250 });
     if (showSignature) {
       doc.moveTo(right - 145, footY).lineTo(right, footY).strokeColor(brand).lineWidth(1).stroke();
@@ -793,6 +839,53 @@ function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
         (template.id === 'corporate-formal' || template.id === 'gst-ledger-register') ? 'Authorised Signatory' : (org?.name || ''),
         right - 145, footY + 16, { width: 145, align: 'center' }
       );
+    }
+
+    /**
+     * "Page N of M" and a continued marker on every page.
+     *
+     * Written last and in a second pass, because the total page count is not known
+     * until the content has been laid out — which is what `bufferPages: true` on
+     * the document is for. A multi-page invoice previously gave the recipient no
+     * way to tell whether they were holding all of it.
+     */
+    const range = doc.bufferedPageRange();
+    if (range.count > 1) {
+      const stampY = pageBottom - 6;
+      for (let i = 0; i < range.count; i += 1) {
+        doc.switchToPage(range.start + i);
+
+        /**
+         * The margin is lifted for these writes.
+         *
+         * `text()` auto-inserts a page whenever the line would cross
+         * `page.maxY()` (= height − bottom margin), and a page stamp belongs *in*
+         * the bottom margin by definition. Left alone, each stamp would append a
+         * blank page — and because the loop is over a range captured before the
+         * writes, the blank pages then go unstamped while the count printed on
+         * every page is already wrong.
+         */
+        const bottomMargin = doc.page.margins.bottom;
+        doc.page.margins.bottom = 0;
+
+        doc.fillColor(FAINT).font(font).fontSize(7.5)
+          .text(`Page ${i + 1} of ${range.count}`, left, stampY, { width, align: 'center', lineBreak: false });
+        // Every page but the last says so, so a missing page is obvious.
+        if (i < range.count - 1) {
+          doc.fillColor(FAINT).font(font).fontSize(7.5)
+            .text('continued overleaf', left, stampY, { width, align: 'right', lineBreak: false });
+        }
+        // The invoice number repeats on continuation pages, so a detached sheet
+        // can still be identified.
+        if (i > 0) {
+          doc.fillColor(FAINT).font(font).fontSize(7.5)
+            .text(invoice.invoiceNumber || '', left, stampY, { width, align: 'left', lineBreak: false });
+        }
+
+        doc.page.margins.bottom = bottomMargin;
+      }
+      // Finish positioned on the last page rather than wherever the loop left off.
+      doc.switchToPage(range.start + range.count - 1);
     }
 
     doc.end();

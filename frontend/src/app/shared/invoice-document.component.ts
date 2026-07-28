@@ -58,7 +58,7 @@ export interface InvoiceDocClient {
         @case ('minimalPlain') {
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap;">
             <div style="display:flex;gap:10px;align-items:center;">
-              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
+              @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
               <div>
                 <div style="font-weight:700;font-size:16px;" [style.color]="dark">{{ orgName() }}</div>
                 <div style="font-size:10px;color:var(--faint);margin-top:2px;">
@@ -78,7 +78,7 @@ export interface InvoiceDocClient {
         @case ('formalFramed') {
           <div [style.border]="'1px solid ' + dark" style="padding:16px 18px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;">
             <div style="display:flex;gap:10px;align-items:flex-start;">
-              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:32px;max-width:100px;object-fit:contain;" /> }
+              @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:32px;max-width:100px;object-fit:contain;" /> }
               <div>
                 <div style="font-weight:800;font-size:15px;letter-spacing:1px;text-transform:uppercase;" [style.color]="dark">{{ orgName() }}</div>
                 <div style="font-size:10px;color:var(--muted);line-height:1.7;margin-top:4px;">
@@ -100,7 +100,7 @@ export interface InvoiceDocClient {
         @case ('diagonalBold') {
           <div class="inv-diag-bold">
             <div class="inv-diag-bold-left">
-              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:34px;max-width:110px;object-fit:contain;margin-bottom:8px;" /> }
+              @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:34px;max-width:110px;object-fit:contain;margin-bottom:8px;" /> }
               <div style="font-weight:800;font-size:19px;letter-spacing:-0.5px;" [style.color]="dark">{{ orgName() }}</div>
               <div class="mono" style="font-size:11px;color:var(--muted);margin-top:6px;">{{ invoice().invoiceNumber }}</div>
             </div>
@@ -113,7 +113,7 @@ export interface InvoiceDocClient {
         @case ('splitCompact') {
           <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;">
             <div style="display:flex;gap:8px;align-items:center;">
-              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:26px;max-width:80px;object-fit:contain;" /> }
+              @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:26px;max-width:80px;object-fit:contain;" /> }
               <div style="font-weight:700;font-size:13.5px;" [style.color]="dark">{{ orgName() }}</div>
             </div>
             <div style="font-size:10.5px;color:var(--muted);">
@@ -128,7 +128,7 @@ export interface InvoiceDocClient {
               <div style="position:absolute;top:0;right:0;border:1px solid var(--faint);border-radius:4px;padding:3px 8px;font-size:8.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Original for Recipient</div>
             }
             <div [style.borderTop]="'2px solid ' + dark" [style.borderBottom]="'2px solid ' + dark" style="padding:14px 2px;text-align:center;">
-              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:32px;max-width:110px;object-fit:contain;margin-bottom:6px;" /> }
+              @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:32px;max-width:110px;object-fit:contain;margin-bottom:6px;" /> }
               <div style="font-weight:800;font-size:16px;letter-spacing:.5px;" [style.color]="dark">{{ orgName() }}</div>
               @if (orgAddress()) { <div style="font-size:10px;color:var(--muted);margin-top:3px;">{{ orgAddress() }}</div> }
               <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-top:8px;" [style.color]="dark">{{ title('Tax Invoice') }}</div>
@@ -138,7 +138,7 @@ export interface InvoiceDocClient {
         }
         @case ('receiptCentered') {
           <div style="text-align:center;">
-            @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:28px;max-width:90px;object-fit:contain;margin-bottom:6px;" /> }
+            @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:28px;max-width:90px;object-fit:contain;margin-bottom:6px;" /> }
             <div style="font-weight:800;font-size:14px;letter-spacing:.5px;text-transform:uppercase;" [style.color]="dark">{{ orgName() }}</div>
             @if (orgAddress()) { <div style="font-size:9.5px;color:var(--muted);margin-top:3px;">{{ orgAddress() }}</div> }
             <div style="font-size:11px;font-weight:700;margin-top:8px;text-transform:uppercase;" [style.color]="accentColor()">{{ title('Tax Invoice') }}</div>
@@ -149,7 +149,7 @@ export interface InvoiceDocClient {
           <div>
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
               <div style="display:flex;gap:10px;align-items:center;">
-                @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:32px;max-width:100px;object-fit:contain;" /> }
+                @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:32px;max-width:100px;object-fit:contain;" /> }
                 <div style="font-weight:700;font-size:16px;" [style.color]="dark">{{ orgName() }}</div>
               </div>
               <span [style.background]="accentColor()" style="color:#fff;font-weight:700;font-size:10px;letter-spacing:.5px;padding:5px 14px;border-radius:0 8px 0 8px;text-transform:uppercase;">{{ title('Invoice') }}</span>
@@ -163,7 +163,7 @@ export interface InvoiceDocClient {
         }
         @case ('framedCentered') {
           <div [style.border]="'1px solid ' + accentColor()" style="border-radius:14px;padding:20px;text-align:center;">
-            @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:34px;max-width:110px;object-fit:contain;margin-bottom:8px;" /> }
+            @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:34px;max-width:110px;object-fit:contain;margin-bottom:8px;" /> }
             <div style="font-weight:700;font-size:17px;letter-spacing:.5px;" [style.color]="dark">{{ orgName() }}</div>
             @if (orgAddress()) { <div style="font-size:10.5px;color:var(--muted);margin-top:4px;">{{ orgAddress() }}</div> }
             <div style="font-style:italic;font-size:16px;margin-top:10px;" [style.color]="accentColor()">{{ title('Invoice') }}</div>
@@ -173,7 +173,7 @@ export interface InvoiceDocClient {
         @case ('sidebarStripe') {
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap;">
             <div style="display:flex;gap:10px;align-items:center;">
-              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:32px;max-width:100px;object-fit:contain;" /> }
+              @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:32px;max-width:100px;object-fit:contain;" /> }
               <div>
                 <div style="font-weight:800;font-size:17px;text-transform:uppercase;letter-spacing:.5px;" [style.color]="dark">{{ orgName() }}</div>
                 <div style="font-size:10px;color:var(--faint);margin-top:3px;">
@@ -193,7 +193,7 @@ export interface InvoiceDocClient {
         @case ('bannerBlock') {
           <div [style.background]="accentColor()" style="border-radius:10px;padding:18px 20px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
             <div style="display:flex;gap:10px;align-items:center;">
-              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
+              @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
               <div style="font-weight:800;font-size:17px;color:#fff;">{{ orgName() }}</div>
             </div>
             <div style="text-align:right;color:#fff;">
@@ -211,7 +211,7 @@ export interface InvoiceDocClient {
         @case ('underlineAccent') {
           <div [style.borderBottom]="'3px solid ' + accentColor()" style="padding-bottom:14px;display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap;">
             <div style="display:flex;gap:10px;align-items:center;">
-              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
+              @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
               <div>
                 <div style="font-weight:700;font-size:16px;" [style.color]="dark">{{ orgName() }}</div>
                 <div style="font-size:10px;color:var(--faint);margin-top:2px;">
@@ -230,7 +230,7 @@ export interface InvoiceDocClient {
         }
         @case ('watermarkGhost') {
           <div style="text-align:center;">
-            @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;margin-bottom:6px;" /> }
+            @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;margin-bottom:6px;" /> }
             <div style="font-weight:800;font-size:16px;" [style.color]="dark">{{ orgName() }}</div>
             @if (orgAddress()) { <div style="font-size:10px;color:var(--muted);margin-top:3px;">{{ orgAddress() }}</div> }
             <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-top:8px;" [style.color]="accentColor()">{{ title('Tax Invoice') }}</div>
@@ -241,7 +241,7 @@ export interface InvoiceDocClient {
           <div style="display:grid;grid-template-columns:1.4fr 1fr;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
             <div style="padding:14px 16px;">
               <div style="display:flex;gap:10px;align-items:center;">
-                @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:28px;max-width:90px;object-fit:contain;" /> }
+                @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:28px;max-width:90px;object-fit:contain;" /> }
                 <div style="font-weight:800;font-size:14px;" [style.color]="dark">{{ orgName() }}</div>
               </div>
               <div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.7;">
@@ -268,7 +268,7 @@ export interface InvoiceDocClient {
         @case ('badgeCentered') {
           <div style="text-align:center;">
             @if (showLogo() && logoUrl()) {
-              <img [src]="logoUrl()" style="height:44px;max-width:44px;object-fit:contain;border-radius:50%;margin-bottom:8px;" />
+              <img alt="" [src]="logoUrl()" style="height:44px;max-width:44px;object-fit:contain;border-radius:50%;margin-bottom:8px;" />
             } @else {
               <div [style.background]="accentColor()" style="width:44px;height:44px;border-radius:50%;margin:0 auto 8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px;">{{ initials() }}</div>
             }
@@ -284,7 +284,7 @@ export interface InvoiceDocClient {
         @case ('twoToneSplit') {
           <div style="display:flex;align-items:stretch;border-radius:8px;overflow:hidden;flex-wrap:wrap;">
             <div style="flex:1 1 55%;padding:16px 18px;display:flex;gap:10px;align-items:flex-start;">
-              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
+              @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
               <div>
                 <div style="font-weight:800;font-size:15px;" [style.color]="dark">{{ orgName() }}</div>
                 <div style="font-size:10px;color:var(--muted);line-height:1.7;margin-top:4px;">
@@ -305,7 +305,7 @@ export interface InvoiceDocClient {
         @case ('stampSeal') {
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
             <div style="display:flex;gap:10px;align-items:center;">
-              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
+              @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
               <div>
                 <div style="font-weight:700;font-size:15px;" [style.color]="dark">{{ orgName() }}</div>
                 <div style="font-size:10px;color:var(--muted);margin-top:3px;line-height:1.6;">
@@ -344,7 +344,7 @@ export interface InvoiceDocClient {
         }
         @case ('wideLogoBar') {
           <div style="text-align:center;">
-            @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:38px;max-width:160px;object-fit:contain;margin-bottom:8px;" /> }
+            @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:38px;max-width:160px;object-fit:contain;margin-bottom:8px;" /> }
             <div style="font-weight:800;font-size:19px;letter-spacing:-0.3px;" [style.color]="dark">{{ orgName() }}</div>
           </div>
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px;padding:10px 0;border-top:1px solid var(--faint);border-bottom:1px solid var(--faint);">
@@ -357,7 +357,7 @@ export interface InvoiceDocClient {
         @case ('columnRule') {
           <div style="display:flex;gap:24px;">
             <div style="flex:1;">
-              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:28px;max-width:100px;object-fit:contain;margin-bottom:6px;" /> }
+              @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:28px;max-width:100px;object-fit:contain;margin-bottom:6px;" /> }
               <div style="font-weight:700;font-size:15px;" [style.color]="dark">{{ orgName() }}</div>
               <div style="font-size:10px;color:var(--muted);margin-top:4px;line-height:1.6;">
                 @if (orgAddress()) { <div>{{ orgAddress() }}</div> }
@@ -378,7 +378,7 @@ export interface InvoiceDocClient {
         @case ('qrCorner') {
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
             <div style="display:flex;gap:10px;align-items:center;">
-              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
+              @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:30px;max-width:100px;object-fit:contain;" /> }
               <div>
                 <div style="font-weight:700;font-size:16px;" [style.color]="dark">{{ orgName() }}</div>
                 <div style="font-size:10px;color:var(--faint);margin-top:2px;">
@@ -418,7 +418,7 @@ export interface InvoiceDocClient {
         @case ('fintechPills') {
           <div>
             <div style="display:flex;gap:10px;align-items:center;">
-              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:28px;max-width:100px;object-fit:contain;" /> }
+              @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:28px;max-width:100px;object-fit:contain;" /> }
               <div style="font-weight:800;font-size:17px;letter-spacing:-0.3px;" [style.color]="dark">{{ orgName() }}</div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
@@ -431,7 +431,7 @@ export interface InvoiceDocClient {
         @default {
           <div style="display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;">
             <div style="display:flex;gap:12px;align-items:flex-start;">
-              @if (showLogo() && logoUrl()) { <img [src]="logoUrl()" style="height:36px;max-width:110px;object-fit:contain;" /> }
+              @if (showLogo() && logoUrl()) { <img alt="" [src]="logoUrl()" style="height:36px;max-width:110px;object-fit:contain;" /> }
               <div>
                 <div style="font-size:20px;font-weight:800;" [style.color]="dark">{{ orgName() || 'Your Business' }}</div>
                 <div style="font-size:12px;color:var(--muted);line-height:1.7;margin-top:6px;">

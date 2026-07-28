@@ -1,18 +1,19 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { AvatarComponent, EmptyStateComponent, SkeletonRowsComponent } from '../../shared/ui';
+import { AvatarComponent, EmptyStateComponent, PagerComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { IconComponent } from '../../shared/icons';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
 import { AuditEntry } from '../../core/models';
-import { fmtDate } from '../../core/format';
+import { ServerList } from '../../core/server-list';
+import { downloadBlob, fmtDate } from '../../core/format';
 
 @Component({
   selector: 'app-super-profile',
   standalone: true,
-  imports: [CommonModule, FormsModule, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, IconComponent],
+  imports: [CommonModule, FormsModule, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, PagerComponent, IconComponent],
   template: `
     <div class="page-head">
       <div>
@@ -94,14 +95,32 @@ import { fmtDate } from '../../core/format';
           <div class="card-head">
             <div>
               <div class="card-title">Audit Log</div>
-              <div class="card-sub">Recent platform activity</div>
+              <div class="card-sub">{{ audit.total() }} recorded event{{ audit.total() === 1 ? '' : 's' }}</div>
             </div>
+            <button class="btn ghost sm" type="button" [disabled]="exporting()" (click)="exportAudit()">
+              @if (exporting()) { <span class="spinner"></span> } Export CSV
+            </button>
           </div>
-          @if (loading()) {
+
+          <!-- The trail was previously unfiltered and capped at 200 rows, which
+               made it unreadable past the first 200 events. -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;padding:12px 20px;border-bottom:1px solid var(--border);">
+            <select class="input" style="max-width:170px"
+              [ngModel]="audit.filters()['entity'] || ''" (ngModelChange)="audit.setFilter('entity', $event)">
+              <option value="">All entities</option>
+              @for (e of entities; track e) { <option [value]="e">{{ e }}</option> }
+            </select>
+            <input class="input" style="max-width:150px" type="date" title="From"
+              [ngModel]="audit.filters()['from'] || ''" (ngModelChange)="audit.setFilter('from', $event)">
+            <input class="input" style="max-width:150px" type="date" title="To"
+              [ngModel]="audit.filters()['to'] || ''" (ngModelChange)="audit.setFilter('to', $event)">
+          </div>
+
+          @if (audit.loading()) {
             <app-skeleton-rows [count]="5" />
-          } @else if (logs().length) {
+          } @else if (audit.rows().length) {
             <div style="max-height:520px;overflow-y:auto;">
-              @for (log of logs(); track log._id) {
+              @for (log of audit.rows(); track log._id) {
                 <div style="display:flex;align-items:center;gap:12px;padding:11px 20px;border-bottom:1px solid var(--border);">
                   <div style="width:28px;height:28px;border-radius:50%;background:var(--brand-pale);color:var(--brand);display:grid;place-items:center;flex-shrink:0;"><app-icon [name]="iconFor(log)" [size]="13" /></div>
                   <div style="flex:1;min-width:0;">
@@ -111,18 +130,23 @@ import { fmtDate } from '../../core/format';
                 </div>
               }
             </div>
+            <app-pager [page]="audit.page()" [pageSize]="audit.pageSize()" [total]="audit.total()"
+              (pageChange)="audit.onPage($event)" (pageSizeChange)="audit.onPageSize($event)" />
           } @else {
-            <app-empty-state icon="⚙" title="No activity yet" message="Platform actions will appear here." />
+            <app-empty-state icon="⚙" title="No matching activity" message="Platform actions will appear here." />
           }
         </section>
       </div>
     </div>
   `
 })
-export class SuperProfileComponent implements OnInit {
+export class SuperProfileComponent implements OnInit, OnDestroy {
   loading = signal(true);
   saving = signal(false);
-  logs = signal<AuditEntry[]>([]);
+  exporting = signal(false);
+  /** Paginated and filterable — see the note in the template. */
+  audit = new ServerList<AuditEntry>(params => this.api.superAuditLogs(params));
+  readonly entities = ['organisation', 'invoice', 'payment', 'client', 'item', 'user', 'creditNote', 'master', 'setting', 'plan'];
   name = '';
   email = '';
   phone = '';
@@ -145,9 +169,18 @@ export class SuperProfileComponent implements OnInit {
   ngOnInit() {
     this.name = this.auth.user()?.name || '';
     this.email = this.auth.user()?.email || '';
-    this.api.superAuditLogs(30).subscribe({
-      next: logs => { this.logs.set(logs); this.loading.set(false); },
-      error: err => { this.loading.set(false); this.toast.httpError(err); }
+    this.loading.set(false);
+    this.audit.pageSize.set(25);
+    this.audit.load();
+  }
+
+  ngOnDestroy() { this.audit.dispose(); }
+
+  exportAudit() {
+    this.exporting.set(true);
+    this.api.exportAuditLogsCsv(this.audit.filters()).subscribe({
+      next: blob => { this.exporting.set(false); downloadBlob(blob, 'audit-log.csv'); },
+      error: err => { this.exporting.set(false); this.toast.httpError(err); }
     });
   }
 

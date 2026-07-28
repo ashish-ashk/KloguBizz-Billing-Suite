@@ -1,4 +1,4 @@
-import { Component, OnInit, input, signal } from '@angular/core';
+import { Component, OnInit, computed, input, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service';
 import { PublicBranding } from '../../core/models';
 import { IconComponent } from '../../shared/icons';
@@ -22,8 +22,8 @@ import { ToastsComponent } from '../../shared/ui';
       <section class="auth-panel page-enter">
         <div style="max-width:380px;width:100%;margin:0 auto;">
           <div class="brand auth-brand" style="margin-bottom:30px;">
-            @if (branding()?.logoUrl) {
-              <img [src]="branding()?.logoUrl" alt="Logo" class="auth-brand-logo" />
+            @if (brandLogo()) {
+              <img [src]="brandLogo()" alt="Logo" class="auth-brand-logo" />
             } @else {
               <img src="klogu-logo.png" alt="Klogu Bizz" class="auth-brand-logo" />
             }
@@ -71,6 +71,16 @@ export class AuthShellComponent implements OnInit {
   );
 
   branding = signal<PublicBranding | null>(null);
+
+
+  /**
+   * The platform logo, as a cacheable asset URL.
+   *
+   * `/public/branding` is unauthenticated and is hit by every visitor to this
+   * page; it used to inline the logo as base64, so the bytes came down on every
+   * single visit with no way for the browser to cache them.
+   */
+  brandLogo = computed(() => this.api.assetUrl(this.branding()?.logoAssetUrl));
 
   constructor(private api: ApiService) {}
 

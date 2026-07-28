@@ -6,6 +6,7 @@ const { buildItemTemplateBuffer, parseItemWorkbook } = require('../services/item
 const { logAudit } = require('../services/auditService');
 const { pickFields } = require('../utils/pickFields');
 const { assertValidMaster } = require('../services/masterService');
+const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
 
 // `orgId` is never accepted from the body — it comes from the token, so an
 // update can't relocate the record into another tenant.
@@ -15,9 +16,29 @@ const ITEM_FIELDS = [
   'stockQty', 'reorderLevel', 'barcode', 'status'
 ];
 
+const ITEM_SORTS = ['name', 'itemCode', 'sellingPrice', 'stockQty', 'createdAt'];
+
 const listItems = asyncHandler(async (req, res) => {
-  const items = await Item.find(tenantFilter(req)).sort({ name: 1 });
-  res.json(items);
+  const filter = tenantFilter(req);
+  if (req.query.status) filter.status = req.query.status;
+  if (req.query.type) filter.type = req.query.type;
+  if (req.query.category) filter.category = req.query.category;
+  if (req.query.q) {
+    // The item picker searches here rather than downloading the whole catalogue
+    // and filtering in the browser, which is what it had to do before.
+    const term = escapeRegex(String(req.query.q).trim());
+    if (term) {
+      filter.$or = [
+        { name: { $regex: term, $options: 'i' } },
+        { itemCode: { $regex: term, $options: 'i' } },
+        { hsn: { $regex: term, $options: 'i' } },
+        { barcode: { $regex: term, $options: 'i' } }
+      ];
+    }
+  }
+  const page = await paginate(Item, filter, req.query, query =>
+    query.sort(parseSort(req.query, ITEM_SORTS, { name: 1 })));
+  res.json(page);
 });
 
 /**

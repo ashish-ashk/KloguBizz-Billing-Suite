@@ -1,10 +1,10 @@
-import { Component, OnInit, computed, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { forkJoin } from 'rxjs';
 import { ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, PagerComponent, OverflowMenuComponent } from '../../shared/ui';
 import { IconComponent } from '../../shared/icons';
 import { ApiService } from '../../core/api.service';
+import { ServerList } from '../../core/server-list';
 import { ToastService } from '../../core/toast.service';
 import { OrgSummary, Plan, SuperOverview } from '../../core/models';
 import { fmtINR, fmtDate, isValidEmail, stateName, STATES } from '../../core/format';
@@ -64,21 +64,21 @@ interface OrgEditForm {
 
     <div class="toolbar">
       <div class="tabs">
-        <button type="button" [class.active]="tab() === 'all'" (click)="onTab('all')">All ({{ orgs().length }})</button>
+        <button type="button" [class.active]="tab() === 'all'" (click)="onTab('all')">All ({{ countOf('all') }})</button>
         <button type="button" [class.active]="tab() === 'active'" (click)="onTab('active')">Active ({{ countOf('active') }})</button>
         <button type="button" [class.active]="tab() === 'trial'" (click)="onTab('trial')">Trial ({{ countOf('trial') }})</button>
         <button type="button" [class.active]="tab() === 'suspended'" (click)="onTab('suspended')">Suspended ({{ countOf('suspended') }})</button>
       </div>
       <div class="search-box">
         <span class="search-icon">⌕</span>
-        <input class="input" placeholder="Search name, email or GSTIN" [ngModel]="search()" (ngModelChange)="onSearch($event)">
+        <input class="input" placeholder="Search name, email or GSTIN" [ngModel]="list.search()" (ngModelChange)="list.onSearch($event)">
       </div>
     </div>
 
     <div class="card flush">
       @if (loading()) {
         <app-skeleton-rows [count]="5" />
-      } @else if (!filtered().length) {
+      } @else if (!list.rows().length) {
         <app-empty-state icon="🏢" title="No organizations found" message="Try a different filter or add a new organization." />
       } @else {
         <div class="table-wrap">
@@ -89,7 +89,7 @@ interface OrgEditForm {
               </tr>
             </thead>
             <tbody>
-              @for (o of paged(); track o._id) {
+              @for (o of list.rows(); track o._id) {
                 <tr>
                   <td data-label="Organization">
                     <div style="display:flex;align-items:center;gap:10px">
@@ -128,8 +128,8 @@ interface OrgEditForm {
             </tbody>
           </table>
         </div>
-        <app-pager [page]="page()" [pageSize]="pageSize()" [total]="filtered().length"
-          (pageChange)="page.set($event)" (pageSizeChange)="onPageSize($event)" />
+        <app-pager [page]="list.page()" [pageSize]="list.pageSize()" [total]="list.total()"
+          (pageChange)="list.onPage($event)" (pageSizeChange)="list.onPageSize($event)" />
       }
     </div>
 
@@ -360,24 +360,35 @@ interface OrgEditForm {
           <app-icon name="alertTriangle" [size]="15" style="flex-shrink:0;margin-top:1px" />
           <span><strong>Permanent deletion</strong> — All data, invoices, and user accounts for this organization will be permanently deleted.</span>
         </div>
-        <p style="margin:0">Are you sure you want to delete <strong>{{ o.name }}</strong>?</p>
+        <p style="margin:0 0 10px">Are you sure you want to delete <strong>{{ o.name }}</strong>?</p>
+        <!-- Typing the name is the guard against deleting the wrong tenant from a
+             list of similarly-named ones. The API enforces the match too. -->
+        <div class="field">
+          <label>Type <strong>{{ o.name }}</strong> to confirm</label>
+          <input [(ngModel)]="deleteConfirmName" [placeholder]="o.name" autocomplete="off">
+        </div>
         <div class="modal-foot">
-          <button class="btn ghost" type="button" (click)="deleteTarget.set(null)">Cancel</button>
-          <button class="btn danger solid" type="button" [disabled]="saving()" (click)="confirmDelete()">Delete Permanently</button>
+          <button class="btn ghost" type="button" (click)="closeDelete()">Cancel</button>
+          <button class="btn danger solid" type="button"
+            [disabled]="saving() || deleteConfirmName.trim() !== o.name"
+            (click)="confirmDelete()">Delete Permanently</button>
         </div>
       }
     </app-modal>
   `
 })
-export class SuperOrganisationsComponent implements OnInit {
-  loading = signal(true);
+export class SuperOrganisationsComponent implements OnInit, OnDestroy {
   saving = signal(false);
   overview = signal<SuperOverview | null>(null);
-  orgs = signal<OrgSummary[]>([]);
+  /**
+   * One page of tenants. The console used to fetch every organisation on the
+   * platform *and* run five collection-wide aggregates over all of them on every
+   * page view — the one screen guaranteed to get slower as the product succeeded.
+   */
+  list = new ServerList<OrgSummary>(params => this.api.superOrganisations(params));
   plans = signal<Plan[]>([]);
 
   tab = signal<'all' | 'active' | 'trial' | 'suspended'>('all');
-  search = signal('');
 
   showAdd = signal(false);
   showEdit = signal(false);
@@ -387,6 +398,8 @@ export class SuperOrganisationsComponent implements OnInit {
   statusTarget = signal<OrgSummary | null>(null);
   statusAction = signal<'suspend' | 'activate'>('suspend');
   deleteTarget = signal<OrgSummary | null>(null);
+  /** Must match the organisation's name before the delete button enables. */
+  deleteConfirmName = '';
   credEmail = signal('');
   credPassword = signal('');
 
@@ -398,27 +411,6 @@ export class SuperOrganisationsComponent implements OnInit {
   fmtINR = fmtINR;
   fmtDate = fmtDate;
   isValidEmail = isValidEmail;
-
-  filtered = computed(() => {
-    const t = this.tab();
-    const q = this.search().trim().toLowerCase();
-    return this.orgs().filter(o => {
-      if (t !== 'all' && o.status !== t) return false;
-      if (!q) return true;
-      return o.name.toLowerCase().includes(q)
-        || (o.adminEmail || '').toLowerCase().includes(q)
-        || (o.owner?.email || '').toLowerCase().includes(q)
-        || (o.gstin || '').toLowerCase().includes(q);
-    });
-  });
-
-  page = signal(1);
-  pageSize = signal(10);
-
-  paged = computed(() => {
-    const start = (this.page() - 1) * this.pageSize();
-    return this.filtered().slice(start, start + this.pageSize());
-  });
 
   planOptions = computed<Array<{ code: string; name: string }>>(() => {
     const loaded = this.plans();
@@ -438,25 +430,35 @@ export class SuperOrganisationsComponent implements OnInit {
     this.api.superPlans().subscribe({ next: p => this.plans.set(p), error: () => {} });
   }
 
+  ngOnDestroy() { this.list.dispose(); }
+
+  /** `loading` is the list's, so the template's skeleton state follows the fetch. */
+  loading = this.list.loading;
+
   load() {
-    this.loading.set(true);
-    forkJoin({ overview: this.api.superOverview(), orgs: this.api.superOrganisations() }).subscribe({
-      next: res => {
-        this.overview.set(res.overview);
-        this.orgs.set(res.orgs);
-        this.loading.set(false);
-      },
-      error: err => { this.loading.set(false); this.toast.httpError(err); }
+    this.list.refresh();
+    this.api.superOverview().subscribe({
+      next: overview => this.overview.set(overview),
+      error: err => this.toast.httpError(err)
     });
   }
 
+  /**
+   * Tab counts come from the platform overview, which counts by status in the
+   * database. They used to be derived by filtering the fully-downloaded org list,
+   * which would have silently become "counts within the current page".
+   */
   countOf(status: string): number {
-    return this.orgs().filter(o => o.status === status).length;
+    const o = this.overview();
+    if (!o) return 0;
+    if (status === 'all') return o.organisations;
+    return (o as unknown as Record<string, number>)[status] ?? 0;
   }
 
-  onSearch(v: string) { this.search.set(v); this.page.set(1); }
-  onTab(t: 'all' | 'active' | 'trial' | 'suspended') { this.tab.set(t); this.page.set(1); }
-  onPageSize(v: number) { this.pageSize.set(v); this.page.set(1); }
+  onTab(t: 'all' | 'active' | 'trial' | 'suspended') {
+    this.tab.set(t);
+    this.list.setFilter('status', t === 'all' ? undefined : t);
+  }
 
   planClass(plan: string): string {
     const map: Record<string, string> = { starter: 'partial', growth: '', business: 'purple', enterprise: 'draft' };
@@ -576,17 +578,23 @@ export class SuperOrganisationsComponent implements OnInit {
   }
 
   askDelete(o: OrgSummary) {
+    this.deleteConfirmName = '';
     this.deleteTarget.set(o);
+  }
+
+  closeDelete() {
+    this.deleteConfirmName = '';
+    this.deleteTarget.set(null);
   }
 
   confirmDelete() {
     const o = this.deleteTarget();
-    if (!o) return;
+    if (!o || this.deleteConfirmName.trim() !== o.name) return;
     this.saving.set(true);
-    this.api.superDeleteOrganisation(o._id).subscribe({
+    this.api.superDeleteOrganisation(o._id, o.name).subscribe({
       next: () => {
         this.saving.set(false);
-        this.deleteTarget.set(null);
+        this.closeDelete();
         this.toast.info('Organization deleted');
         this.load();
       },

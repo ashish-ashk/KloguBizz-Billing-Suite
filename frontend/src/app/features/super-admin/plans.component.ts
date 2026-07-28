@@ -121,11 +121,18 @@ export class SuperPlansComponent implements OnInit {
   ngOnInit() { this.load(); }
 
   load() {
-    forkJoin({ plans: this.api.superPlans(), orgs: this.api.superOrganisations() }).subscribe({
-      next: ({ plans, orgs }) => {
+    // Trials are asked for by status rather than fetched-then-filtered: the org
+    // list is paginated now, so filtering one page would quietly have shown
+    // "trials on page one" instead of all of them.
+    forkJoin({
+      plans: this.api.superPlans(),
+      orgs: this.api.superOrganisations({ limit: 200 }),
+      trials: this.api.superOrganisations({ status: 'trial', limit: 200 })
+    }).subscribe({
+      next: ({ plans, orgs, trials }) => {
         this.plans.set(plans.map(p => ({ ...p, featuresText: (p.features || []).join('\n') })));
-        this.orgs.set(orgs);
-        this.trialOrgs.set(orgs.filter(o => o.status === 'trial'));
+        this.orgs.set(orgs.data);
+        this.trialOrgs.set(trials.data);
         this.loading.set(false);
       },
       error: err => { this.loading.set(false); this.toast.httpError(err); }

@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AppShellComponent } from '../../shared/app-shell.component';
 import { IconComponent } from '../../shared/icons';
-import { InvoiceDocumentComponent, InvoiceDocClient, InvoiceDocData } from '../../shared/invoice-document.component';
+import { InvoiceDocumentComponent } from '../../shared/invoice-document.component';
 import { AuthService } from '../../core/auth.service';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
@@ -311,6 +311,14 @@ export class InvoiceTemplatesComponent implements OnInit {
 
   logoUrl = signal('');
   headerImageUrl = signal('');
+  /**
+   * Whether the user has uploaded or removed the image in this session.
+   *
+   * `logoUrl` holds an asset URL after a load and image data after an upload, so
+   * the save path needs to know which — see `save()`.
+   */
+  logoDirty = signal(false);
+  headerImageDirty = signal(false);
   accentColor = signal('#4f46e5');
   invoiceTitleLabel = signal('');
   mode = signal<PickerMode>('preset');
@@ -363,8 +371,12 @@ export class InvoiceTemplatesComponent implements OnInit {
 
   ngOnInit() {
     const branding = this.auth.organisation()?.brandingConfig || {};
-    const logo = branding.logoUrl || '';
-    const headerImage = branding.headerImageUrl || '';
+    // The API no longer returns the base64 for these — it returns a cacheable
+    // asset URL, which an <img src> renders identically. That is why `logoDirty`
+    // exists below: the value held here is a *URL*, so it must never be written
+    // back to `logoUrl` as if it were image data.
+    const logo = this.api.assetUrl(branding.logoAssetUrl);
+    const headerImage = this.api.assetUrl(branding.headerImageAssetUrl);
     const accent = branding.primaryColor || '#4f46e5';
     const titleLabel = branding.invoiceTitleLabel || '';
     const templateId = branding.invoiceTemplateId || 'modern-minimal';
@@ -402,12 +414,16 @@ export class InvoiceTemplatesComponent implements OnInit {
     if (!file) return;
     if (file.size > 500 * 1024) { this.toast.error('Logo image must be under 500 KB.'); return; }
     const reader = new FileReader();
-    reader.onload = () => this.logoUrl.set(reader.result as string);
+    reader.onload = () => {
+      this.logoUrl.set(reader.result as string);
+      this.logoDirty.set(true);
+    };
     reader.readAsDataURL(file);
   }
 
   removeLogo() {
     this.logoUrl.set('');
+    this.logoDirty.set(true);
   }
 
   onHeaderImageFile(event: Event) {
@@ -415,17 +431,23 @@ export class InvoiceTemplatesComponent implements OnInit {
     if (!file) return;
     if (file.size > 700 * 1024) { this.toast.error('Header image must be under 700 KB.'); return; }
     const reader = new FileReader();
-    reader.onload = () => this.headerImageUrl.set(reader.result as string);
+    reader.onload = () => {
+      this.headerImageUrl.set(reader.result as string);
+      this.headerImageDirty.set(true);
+    };
     reader.readAsDataURL(file);
   }
 
   removeHeaderImage() {
     this.headerImageUrl.set('');
+    this.headerImageDirty.set(true);
   }
 
   discard() {
     this.logoUrl.set(this.savedLogoUrl());
     this.headerImageUrl.set(this.savedHeaderImageUrl());
+    this.logoDirty.set(false);
+    this.headerImageDirty.set(false);
     this.accentColor.set(this.savedAccentColor());
     this.invoiceTitleLabel.set(this.savedInvoiceTitleLabel());
     this.mode.set(this.savedMode());
@@ -435,25 +457,46 @@ export class InvoiceTemplatesComponent implements OnInit {
   }
 
   save() {
-    const current = this.auth.organisation()?.brandingConfig || {};
     this.saving.set(true);
-    this.api.updateOrganisation({
-      brandingConfig: {
-        ...current,
-        logoUrl: this.logoUrl(),
-        headerImageUrl: this.headerImageUrl(),
-        primaryColor: this.accentColor(),
-        invoiceTitleLabel: this.invoiceTitleLabel(),
-        invoiceTemplateId: this.effectiveTemplateId(),
-        customInvoiceTemplate: this.customTemplate(),
-        invoiceContent: this.content()
-      }
-    }).subscribe({
+
+    /**
+     * A partial update. The backend merges `brandingConfig` field by field, so
+     * only what is sent is written.
+     *
+     * The two image keys are included **only when the user actually changed
+     * them**, and this is load-bearing rather than an optimisation: `logoUrl()`
+     * now holds an asset *URL*, not image data. Sending it unconditionally — as
+     * the previous spread of `...current` effectively did — would overwrite the
+     * stored base64 with a URL string, so changing the accent colour would
+     * destroy the logo.
+     */
+    const brandingConfig: Record<string, unknown> = {
+      primaryColor: this.accentColor(),
+      invoiceTitleLabel: this.invoiceTitleLabel(),
+      invoiceTemplateId: this.effectiveTemplateId(),
+      customInvoiceTemplate: this.customTemplate(),
+      invoiceContent: this.content()
+    };
+    // A data URI sets a new image; an empty string clears it. Either way this is
+    // image data, never a URL.
+    if (this.logoDirty()) brandingConfig['logoUrl'] = this.logoUrl();
+    if (this.headerImageDirty()) brandingConfig['headerImageUrl'] = this.headerImageUrl();
+
+    this.api.updateOrganisation({ brandingConfig } as any).subscribe({
       next: org => {
         this.saving.set(false);
         this.auth.setOrganisation(org);
-        this.savedLogoUrl.set(this.logoUrl());
-        this.savedHeaderImageUrl.set(this.headerImageUrl());
+        // Re-read the images from the response, so the previews switch from the
+        // just-uploaded data URI to the cacheable asset URL the server minted.
+        const saved = org.brandingConfig || {};
+        const logo = this.api.assetUrl(saved.logoAssetUrl);
+        const header = this.api.assetUrl(saved.headerImageAssetUrl);
+        this.logoUrl.set(logo);
+        this.headerImageUrl.set(header);
+        this.logoDirty.set(false);
+        this.headerImageDirty.set(false);
+        this.savedLogoUrl.set(logo);
+        this.savedHeaderImageUrl.set(header);
         this.savedAccentColor.set(this.accentColor());
         this.savedInvoiceTitleLabel.set(this.invoiceTitleLabel());
         this.savedMode.set(this.mode());

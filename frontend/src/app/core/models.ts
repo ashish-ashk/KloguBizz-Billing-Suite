@@ -1,3 +1,32 @@
+/**
+ * One page of a list endpoint.
+ *
+ * Every list endpoint returns this envelope rather than a bare array. The
+ * endpoints used to return the *entire* collection — an invoice list was every
+ * invoice the tenant had ever raised, with its line items and populated client,
+ * on every page view. `total` is what makes the window honest: a client can
+ * always tell whether it is looking at everything or at the first slice.
+ */
+export interface Page<T> {
+  data: T[];
+  page: number;
+  limit: number;
+  total: number;
+  pages: number;
+  hasMore: boolean;
+}
+
+/** Query parameters accepted by the paginated list endpoints. */
+export interface ListParams {
+  page?: number;
+  limit?: number;
+  /** Server-side search. Replaces filtering a fully-downloaded list in the browser. */
+  q?: string;
+  /** `field` ascending, `-field` descending. Restricted server-side to indexed columns. */
+  sort?: string;
+  [key: string]: string | number | boolean | undefined;
+}
+
 export interface AuthUser {
   id: string;
   name: string;
@@ -20,8 +49,23 @@ export interface Organisation {
   plan: string;
   status: string;
   brandingConfig?: {
+    /**
+     * Always empty in an API response. The images are base64 data URIs of up to
+     * 500KB/700KB and used to be inlined in every `/auth/me` and
+     * `/organisations/current` payload; they are now served from the cacheable
+     * asset URLs below. Still the field to *write* when uploading or removing an
+     * image — send a data URI to set one, an empty string to clear it, and omit
+     * the key entirely to leave it untouched.
+     */
     logoUrl?: string;
     headerImageUrl?: string;
+    /** Cacheable, content-addressed URL relative to the API root. Empty when
+     *  nothing has been uploaded. Resolve with `ApiService.assetUrl()`. */
+    logoAssetUrl?: string;
+    headerImageAssetUrl?: string;
+    /** Whether an image is on file, without shipping it. */
+    hasLogo?: boolean;
+    hasHeaderImage?: boolean;
     primaryColor?: string;
     invoicePrefix?: string;
     invoiceTitleLabel?: string;
@@ -50,6 +94,12 @@ export interface PublicBranding {
   primaryColor: string;
   secondaryColor: string;
   accentColor: string;
+  /** Cacheable asset URLs relative to the API root — resolve with
+   *  `ApiService.assetUrl()`. The login page is unauthenticated and is hit by
+   *  every visitor, so the images are no longer inlined here. */
+  logoAssetUrl?: string;
+  faviconAssetUrl?: string;
+  /** Always empty; kept so an older client still parses the response. */
   logoUrl: string;
   faviconUrl: string;
 }
@@ -244,7 +294,16 @@ export interface InvoiceStats {
   pendingAmount: number;
   overdueAmount: number;
   outstandingAmount?: number;
-  counts: { total: number; paid: number; pending: number; overdue: number; draft: number };
+  /** Whole-organisation counts — the invoice list's status tabs read them from
+   *  here, since the list itself is now a page rather than the full collection. */
+  counts: {
+    total: number; paid: number; pending: number; overdue: number;
+    draft: number; cancelled?: number; partial?: number;
+  };
+  /** Average days from invoice date to payment date, or null if nothing has been
+   *  collected. Computed by the server — the Payments page used to derive it by
+   *  reducing over every invoice in the browser. */
+  avgCollectionDays?: number | null;
   monthlyRevenue: Array<{ month: string; revenue: number }>;
   topClients: Array<{ name: string; revenue: number }>;
 }
@@ -347,9 +406,24 @@ export interface AuditEntry {
   action: string;
   entity?: string;
   entityId?: string;
+  actorId?: string;
   actorName?: string;
+  orgId?: string;
+  /** The request that produced this entry, for correlating with the server log. */
+  requestId?: string;
   meta?: Record<string, unknown>;
   createdAt: string;
+}
+
+/** Filters accepted by the super-admin audit console. */
+export interface AuditFilters extends ListParams {
+  orgId?: string;
+  actorId?: string;
+  /** Prefix match, so `invoice.` returns every invoice event. */
+  action?: string;
+  entity?: string;
+  from?: string;
+  to?: string;
 }
 
 export interface SuperOverview {

@@ -12,7 +12,8 @@ const {
   updateReminder,
   getSettings,
   saveSetting,
-  listAuditLogs
+  listAuditLogs,
+  exportAuditLogsCsv
 } = require('../controllers/superadminController');
 const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
@@ -31,6 +32,8 @@ router.put('/masters/:type', saveMasters);
 router.put('/reminders/:id', updateReminder);
 router.get('/settings', getSettings);
 router.put('/settings/:key', saveSetting);
+// Declared before the plain list so the literal path isn't shadowed by it.
+router.get('/audit-logs/export.csv', exportAuditLogsCsv);
 router.get('/audit-logs', listAuditLogs);
 
 module.exports = router;

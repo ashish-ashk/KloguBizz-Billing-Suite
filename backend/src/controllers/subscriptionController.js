@@ -53,7 +53,7 @@ const startSubscription = asyncHandler(async (req, res) => {
         'BILLING_UNAVAILABLE'
       );
     }
-    console.warn(`[billing] Razorpay is not configured — activating ${planCode} without payment (development only).`);
+    req.log.warn('Razorpay not configured — activating plan without payment (development only)', { planCode });
   }
 
   const provider = await createSubscription({ planCode, orgId: req.orgId });

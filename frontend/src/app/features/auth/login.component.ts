@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, computed, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
@@ -19,8 +19,8 @@ import { LegalContentComponent } from '../../shared/legal-content.component';
       <section class="auth-panel page-enter">
         <div style="max-width:360px;width:100%;margin:0 auto;">
           <div class="brand auth-brand" style="margin-bottom:30px;">
-            @if (branding()?.logoUrl) {
-              <img [src]="branding()?.logoUrl" alt="Logo" class="auth-brand-logo" />
+            @if (brandLogo()) {
+              <img [src]="brandLogo()" alt="Logo" class="auth-brand-logo" />
             } @else {
               <img src="klogu-logo.png" alt="Klogu Bizz" class="auth-brand-logo" />
             }
@@ -136,6 +136,16 @@ export class LoginComponent implements OnInit {
   showDemo = signal(false);
   justRegistered = signal(false);
   branding = signal<PublicBranding | null>(null);
+
+  /**
+   * The platform logo, as a cacheable asset URL.
+   *
+   * `/public/branding` is unauthenticated and is hit by every visitor to this
+   * page; it used to inline the logo as base64, so the bytes came down on every
+   * single visit with no way for the browser to cache them.
+   */
+  brandLogo = computed(() => this.api.assetUrl(this.branding()?.logoAssetUrl));
+
   legalOpen = signal<'terms' | 'sla' | null>(null);
 
   constructor(private auth: AuthService, private api: ApiService, private router: Router, private route: ActivatedRoute) {}

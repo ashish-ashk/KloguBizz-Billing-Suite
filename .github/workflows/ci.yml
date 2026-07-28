@@ -1,0 +1,135 @@
+name: CI
+
+# There was no CI at all: no build check, no test run, no lint, no dependency
+# scanning. The backend test suite existed and could only be run by remembering to
+# run it, and the one invariant that matters most in a multi-tenant product —
+# isolation between tenants — was verified only when someone thought to.
+#
+# The backend tests need a real MongoDB. They skip themselves when none is
+# reachable, which is right for a developer laptop and wrong for CI, where a
+# silent skip looks identical to a pass. The service container below means they
+# always run here.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  # Weekly, so a newly-disclosed advisory in a dependency surfaces without waiting
+  # for someone to push.
+  schedule:
+    - cron: '0 6 * * 1'
+
+# A new push to the same branch makes the previous run's result irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — lint & test
+    runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        # A replica set would let the transaction paths be exercised too; a
+        # standalone matches what developers run locally and exercises the
+        # documented non-transactional fallback in utils/transaction.js.
+        image: mongo:7
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        # `set -o pipefail` matters here: without it the exit status would come
+        # from `tee`, so a failing suite would report success.
+        #
+        # The grep is the second half of the same problem. The integration suites
+        # skip themselves when MongoDB is unreachable — correct on a laptop, and
+        # indistinguishable from a pass in CI, where it would mean a green build
+        # that tested nothing. If that warning appears, fail.
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.txt
+          if grep -q "skipping integration tests" test-output.txt; then
+            echo "::error::Integration tests skipped — MongoDB was not reachable. Treating as a failure."
+            exit 1
+          fi
+        env:
+          NODE_ENV: test
+          # The suites set their own throwaway database names; this only has to
+          # point at a reachable server.
+          MONGO_URI: mongodb://127.0.0.1:27017/klogubizz_ci
+          JWT_SECRET: ci_only_jwt_secret_not_used_anywhere_real
+          RAZORPAY_WEBHOOK_SECRET: ci_only_webhook_secret
+
+  frontend:
+    name: Frontend — lint & build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build (production)
+        # The production configuration is the one that matters: it enables the
+        # bundle-size budget and the service worker, neither of which a
+        # development build checks.
+        run: npx ng build --configuration production
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    # Advisory rather than blocking: a transitive high-severity advisory with no
+    # available fix would otherwise stop every unrelated change from merging.
+    continue-on-error: true
+
+    strategy:
+      matrix:
+        package: [backend, frontend]
+
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm audit --audit-level=high

@@ -5,15 +5,24 @@ const { Plan } = require('../models/Plan');
 const { Reminder, AuditLog, Master, GlobalSetting } = require('../models/Settings');
 const { User } = require('../models/User');
 const { Client } = require('../models/Client');
+const { Item } = require('../models/Item');
 const { Invoice } = require('../models/Invoice');
 const { Payment } = require('../models/Payment');
+const { CreditNote } = require('../models/CreditNote');
+const { ReminderLog } = require('../models/ReminderLog');
 const { Subscription } = require('../models/Subscription');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { logAudit } = require('../services/auditService');
 const { pickFields } = require('../utils/pickFields');
+const { paginate, parsePageParams, buildEnvelope, escapeRegex, parseSort } = require('../utils/pagination');
+const { streamCsv } = require('../services/csvService');
 const { invalidateMasterCache } = require('../services/masterService');
 const { invalidatePlatformDefaults } = require('../services/platformSettingsService');
+const { assertValidSetting } = require('../validators/settings');
+const { serialiseOrganisation } = require('../services/brandingAssetService');
+const { startSessionIfSupported, withTransaction } = require('../utils/transaction');
+const { logger } = require('../utils/logger');
 
 // The super admin may change a tenant's plan and status (that's the point of
 // the panel), but not `invoiceSequence`/`invoiceSequenceFY` — those belong to
@@ -46,10 +55,43 @@ const overview = asyncHandler(async (req, res) => {
   });
 });
 
+const ORG_SORTS = ['createdAt', 'name', 'plan', 'status'];
+
 // Org list decorated with per-org user/invoice counts and admin user, the
 // way the control panel table wants it.
+//
+// Paginated, and — importantly — the decoration queries are scoped to *this
+// page's* org ids. Previously every organisation on the platform was fetched
+// and then five more collection-wide aggregates were run against all of them on
+// every page view of the console.
 const listOrganisations = asyncHandler(async (req, res) => {
-  const orgs = await Organisation.find().sort({ createdAt: -1 }).lean();
+  const filter = {};
+  if (req.query.status) filter.status = req.query.status;
+  if (req.query.plan) filter.plan = req.query.plan;
+  if (req.query.q) {
+    const term = escapeRegex(String(req.query.q).trim());
+    if (term) {
+      filter.$or = [
+        { name: { $regex: term, $options: 'i' } },
+        { adminEmail: { $regex: term, $options: 'i' } },
+        { gstin: { $regex: term, $options: 'i' } }
+      ];
+    }
+  }
+
+  const { page, limit, skip } = parsePageParams(req.query);
+  const [orgs, total] = await Promise.all([
+    Organisation.find(filter)
+      // The base64 logo and letterhead live in brandingConfig and are hundreds
+      // of kilobytes each; the console's table renders none of it.
+      .select('-brandingConfig.logoUrl -brandingConfig.headerImageUrl')
+      .sort(parseSort(req.query, ORG_SORTS, { createdAt: -1 }))
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Organisation.countDocuments(filter)
+  ]);
+
   const orgIds = orgs.map(o => o._id);
   const ownerIds = orgs.map(o => o.ownerId).filter(Boolean);
   const [userCounts, invoiceCounts, admins, owners, subs] = await Promise.all([
@@ -71,14 +113,17 @@ const listOrganisations = asyncHandler(async (req, res) => {
   const subMap = {};
   subs.forEach(s => { if (!subMap[String(s.orgId)]) subMap[String(s.orgId)] = s; });
 
-  res.json(orgs.map(o => ({
-    ...o,
-    userCount: userMap[String(o._id)] || 0,
-    invoiceCount: invoiceMap[String(o._id)] || 0,
-    admin: adminMap[String(o._id)] || null,
-    owner: o.ownerId ? (ownerMap[String(o.ownerId)] || null) : null,
-    subscription: subMap[String(o._id)] || null
-  })));
+  res.json(buildEnvelope(
+    orgs.map(o => ({
+      ...o,
+      userCount: userMap[String(o._id)] || 0,
+      invoiceCount: invoiceMap[String(o._id)] || 0,
+      admin: adminMap[String(o._id)] || null,
+      owner: o.ownerId ? (ownerMap[String(o.ownerId)] || null) : null,
+      subscription: subMap[String(o._id)] || null
+    })),
+    { page, limit, total }
+  ));
 });
 
 // Creates the tenant plus its admin user in one step and returns a one-time
@@ -105,7 +150,11 @@ const createOrganisation = asyncHandler(async (req, res) => {
   await org.save();
   await Subscription.create({ orgId: org._id, planCode: plan, status: 'active', billingCycle: 'monthly' });
   logAudit({ req, action: 'org.created', entity: 'organisation', entityId: org._id, meta: { name, plan } });
-  res.status(201).json({ organisation: org, admin: { ...admin.toObject(), passwordHash: undefined }, tempPassword });
+  res.status(201).json({
+    organisation: serialiseOrganisation(org),
+    admin: { ...admin.toObject(), passwordHash: undefined },
+    tempPassword
+  });
 });
 
 const updateOrganisation = asyncHandler(async (req, res) => {
@@ -113,22 +162,71 @@ const updateOrganisation = asyncHandler(async (req, res) => {
   const org = await Organisation.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
   if (!org) throw httpError(404, 'Organisation not found');
   logAudit({ req, action: 'org.updated', entity: 'organisation', entityId: org._id, meta: { fields: Object.keys(update) } });
-  res.json(org);
+  res.json(serialiseOrganisation(org));
 });
+
+/**
+ * Every collection that carries an `orgId`.
+ *
+ * The cascade previously covered five of them and missed `Item`, `CreditNote`
+ * and `ReminderLog` — so deleting a tenant left their entire item catalogue and
+ * every credit note they had ever issued behind, pointing at an organisation
+ * that no longer existed, forever. Keeping the list in one place is the point:
+ * a new tenant-scoped collection has exactly one obvious spot to be registered.
+ *
+ * `AuditLog` is deliberately **not** in this list. It is the record of what was
+ * done, including this deletion, and erasing it along with its subject is the
+ * one thing an audit trail must never do. Its retention is handled separately
+ * (see the TTL on the model).
+ */
+const TENANT_COLLECTIONS = [
+  ['users', User],
+  ['clients', Client],
+  ['items', Item],
+  ['invoices', Invoice],
+  ['payments', Payment],
+  ['creditNotes', CreditNote],
+  ['reminderLogs', ReminderLog],
+  ['subscriptions', Subscription]
+];
 
 // Permanently removes a tenant and all of its data.
 const deleteOrganisation = asyncHandler(async (req, res) => {
   const org = await Organisation.findById(req.params.id);
   if (!org) throw httpError(404, 'Organisation not found');
-  await Promise.all([
-    User.deleteMany({ orgId: org._id }),
-    Client.deleteMany({ orgId: org._id }),
-    Invoice.deleteMany({ orgId: org._id }),
-    Payment.deleteMany({ orgId: org._id }),
-    Subscription.deleteMany({ orgId: org._id })
-  ]);
-  await org.deleteOne();
-  logAudit({ req, action: 'org.deleted', entity: 'organisation', entityId: req.params.id, meta: { name: org.name } });
+
+  // Guard against a fat-fingered request wiping the wrong tenant: the caller has
+  // to name the organisation they mean. Irreversible and platform-wide, so the
+  // confirmation is worth the friction.
+  const confirmation = String(req.body?.confirmName ?? '').trim();
+  if (confirmation && confirmation !== org.name) {
+    throw httpError(400, `The name you typed does not match "${org.name}".`, 'CONFIRMATION_MISMATCH');
+  }
+
+  const deleted = {};
+  const { atomic } = await withTransaction(async session => {
+    const options = session ? { session } : {};
+    // Sequential, not Promise.all: inside a transaction the operations share one
+    // session, and concurrent use of a single session is not supported.
+    for (const [name, Model] of TENANT_COLLECTIONS) {
+      const result = await Model.deleteMany({ orgId: org._id }, options);
+      deleted[name] = result.deletedCount ?? 0;
+    }
+    await Organisation.deleteOne({ _id: org._id }, options);
+  });
+
+  logAudit({
+    req,
+    action: 'org.deleted',
+    entity: 'organisation',
+    entityId: req.params.id,
+    // What was actually removed, so the audit entry is evidence rather than a
+    // note that something happened.
+    meta: { name: org.name, plan: org.plan, deleted, atomic }
+  });
+  if (!atomic) {
+    logger.warn('tenant deleted without a transaction', { orgId: String(org._id), deleted });
+  }
   res.status(204).end();
 });
 
@@ -162,24 +260,79 @@ const listMasters = asyncHandler(async (req, res) => {
   res.json({ reminders, masters: grouped });
 });
 
-// Bulk-replace all masters of one type in a single save.
+const MASTER_TYPES = ['gstRate', 'hsn', 'paymentMethod', 'unit'];
+
+/**
+ * Saves the full list of masters for one type.
+ *
+ * This was a `deleteMany({type})` immediately followed by an `insertMany` — two
+ * separate, unordered operations with no transaction between them. A crash, a
+ * failed validation, or a dropped connection in that window left the collection
+ * **empty**: every GST rate and HSN code, platform-wide, gone, with no way back
+ * short of a database restore. It also rotated every `_id` on every save, so
+ * nothing could ever hold a stable reference to a master row.
+ *
+ * Now it is a diff: rows are matched by their natural key (`type` + `code`),
+ * existing rows are updated in place and keep their `_id`, new rows are inserted,
+ * and only rows the admin actually removed are deleted. Nothing is destroyed
+ * before the replacement is known to be valid, so the catastrophic window is
+ * gone whether or not a transaction is available.
+ */
 const saveMasters = asyncHandler(async (req, res) => {
   const { type } = req.params;
-  if (!['gstRate', 'hsn', 'paymentMethod', 'unit'].includes(type)) throw httpError(400, 'Unknown master type');
+  if (!MASTER_TYPES.includes(type)) throw httpError(400, 'Unknown master type');
   const items = Array.isArray(req.body) ? req.body : [];
-  await Master.deleteMany({ type });
-  const docs = await Master.insertMany(items.map((item, i) => ({
-    type,
-    code: item.code,
-    label: item.label,
-    description: item.description,
-    rate: item.rate,
-    active: item.active !== false,
-    sortOrder: i
-  })));
+
+  // `code` is the natural key. A row without one can't be matched across saves,
+  // so it is refused rather than silently duplicated on every save.
+  const normalised = items.map((item, index) => {
+    const code = String(item.code ?? '').trim();
+    if (!code) throw httpError(400, `Row ${index + 1} has no code — every master row needs one.`);
+    return {
+      type,
+      code,
+      label: item.label,
+      description: item.description,
+      rate: item.rate,
+      active: item.active !== false,
+      sortOrder: index
+    };
+  });
+
+  const duplicate = normalised.find((row, index) =>
+    normalised.findIndex(other => other.code.toLowerCase() === row.code.toLowerCase()) !== index);
+  if (duplicate) throw httpError(409, `The code "${duplicate.code}" appears more than once.`);
+
+  const keep = new Set(normalised.map(row => row.code));
+
+  // One round trip, applied atomically per document by the server. Ordered so a
+  // failure stops rather than half-applying in an arbitrary order.
+  const operations = normalised.map(row => ({
+    updateOne: {
+      filter: { type, code: row.code },
+      update: { $set: row },
+      upsert: true
+    }
+  }));
+  // Deletions go last: the new state is written first, so an interruption
+  // leaves stale rows rather than no rows.
+  operations.push({ deleteMany: { filter: { type, code: { $nin: [...keep] } } } });
+
+  const session = await startSessionIfSupported();
+  try {
+    if (session) {
+      await session.withTransaction(() => Master.bulkWrite(operations, { ordered: true, session }));
+    } else {
+      await Master.bulkWrite(operations, { ordered: true });
+    }
+  } finally {
+    if (session) await session.endSession();
+  }
+
   // Masters are cached for a minute on the read path; drop the entry so the
   // very next item/payment write validates against what was just saved.
   invalidateMasterCache(type);
+  const docs = await Master.find({ type }).sort({ sortOrder: 1, createdAt: 1 });
   logAudit({ req, action: 'masters.saved', entity: 'master', entityId: type, meta: { count: docs.length } });
   res.json(docs);
 });
@@ -199,9 +352,13 @@ const getSettings = asyncHandler(async (req, res) => {
 });
 
 const saveSetting = asyncHandler(async (req, res) => {
+  // Validated and sanitised before it is stored. `branding` in particular is
+  // served to every unauthenticated visitor by publicController, so one bad
+  // payload used to break the login page platform-wide with nothing rejected.
+  const value = assertValidSetting(req.params.key, req.body);
   const setting = await GlobalSetting.findOneAndUpdate(
     { key: req.params.key },
-    { value: req.body },
+    { value },
     { new: true, upsert: true }
   );
   // The platform template default is cached on the PDF render path; drop it so
@@ -211,9 +368,69 @@ const saveSetting = asyncHandler(async (req, res) => {
   res.json({ key: setting.key, value: setting.value });
 });
 
+/**
+ * The audit console.
+ *
+ * Was an unfiltered, unpaginated `find()` capped at 200 rows — which meant that
+ * past 200 events the trail was, in practice, unreadable: no way to ask "what
+ * did this org do", "who deleted that", or "what happened on the 14th". An audit
+ * log you cannot query is not an audit log.
+ */
 const listAuditLogs = asyncHandler(async (req, res) => {
-  const limit = Math.min(Number(req.query.limit) || 50, 200);
-  res.json(await AuditLog.find().sort({ createdAt: -1 }).limit(limit));
+  const filter = buildAuditFilter(req.query);
+  const page = await paginate(AuditLog, filter, req.query, query => query
+    .sort({ createdAt: -1 })
+    .lean());
+  res.json(page);
+});
+
+function buildAuditFilter(query) {
+  const filter = {};
+  if (query.orgId && /^[0-9a-fA-F]{24}$/.test(query.orgId)) filter.orgId = query.orgId;
+  if (query.actorId && /^[0-9a-fA-F]{24}$/.test(query.actorId)) filter.actorId = query.actorId;
+  if (query.entity) filter.entity = String(query.entity);
+  if (query.action) {
+    // A prefix match, so `?action=invoice.` returns every invoice event rather
+    // than requiring the exact action name.
+    const term = escapeRegex(String(query.action).trim());
+    if (term) filter.action = { $regex: `^${term}`, $options: 'i' };
+  }
+  if (query.from || query.to) {
+    const range = {};
+    if (query.from) {
+      const from = new Date(query.from);
+      if (Number.isNaN(from.getTime())) throw httpError(400, '`from` must be a valid date (YYYY-MM-DD)');
+      range.$gte = from;
+    }
+    if (query.to) {
+      const to = new Date(query.to);
+      if (Number.isNaN(to.getTime())) throw httpError(400, '`to` must be a valid date (YYYY-MM-DD)');
+      // Inclusive of the whole day the caller named, which is what a date
+      // filter means to anyone using it.
+      to.setHours(23, 59, 59, 999);
+      range.$lte = to;
+    }
+    filter.createdAt = range;
+  }
+  return filter;
+}
+
+const exportAuditLogsCsv = asyncHandler(async (req, res) => {
+  const cursor = AuditLog.find(buildAuditFilter(req.query)).sort({ createdAt: -1 }).lean().cursor();
+  await streamCsv(res, {
+    filename: 'audit-log.csv',
+    cursor,
+    columns: [
+      { label: 'Timestamp', value: r => r.createdAt?.toISOString() },
+      { label: 'Organisation', value: r => (r.orgId ? String(r.orgId) : '') },
+      { label: 'Actor', value: r => r.actorName || '' },
+      { label: 'Actor Id', value: r => (r.actorId ? String(r.actorId) : '') },
+      { label: 'Action', value: r => r.action },
+      { label: 'Entity', value: r => r.entity || '' },
+      { label: 'Entity Id', value: r => r.entityId || '' },
+      { label: 'Details', value: r => (r.meta ? JSON.stringify(r.meta) : '') }
+    ]
+  });
 });
 
 module.exports = {
@@ -229,5 +446,6 @@ module.exports = {
   updateReminder,
   getSettings,
   saveSetting,
-  listAuditLogs
+  listAuditLogs,
+  exportAuditLogsCsv
 };

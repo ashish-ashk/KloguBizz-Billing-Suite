@@ -7,7 +7,13 @@
     "dev": "nodemon server.js",
     "start": "node server.js",
     "seed": "node src/seed/seed.js",
-    "test": "node --test"
+    "test": "node --test",
+    "migrate": "node src/migrations/runner.js",
+    "migrate:status": "node src/migrations/runner.js status",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --check \"src/**/*.js\" \"test/**/*.js\" server.js",
+    "format:write": "prettier --write \"src/**/*.js\" \"test/**/*.js\" server.js"
   },
   "dependencies": {
     "@sendgrid/mail": "^8.1.3",
@@ -26,7 +32,9 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "nodemon": "^3.1.4"
+    "nodemon": "^3.1.4",
+    "eslint": "^9.12.0",
+    "prettier": "^3.3.3"
   },
   "engines": {
     "node": ">=20"

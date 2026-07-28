@@ -14,10 +14,11 @@ const { getPlatformDefaults } = require('../services/platformSettingsService');
 const { sendReminderEmail } = require('../services/emailService');
 const { assertInvoiceQuota } = require('../services/planService');
 const { logAudit } = require('../services/auditService');
-const { toCsv } = require('../services/csvService');
 const { runReminderSweep, daysPastDue } = require('../services/reminderService');
 const { ReminderLog } = require('../models/ReminderLog');
 const { Reminder } = require('../models/Settings');
+const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
+const { streamCsv } = require('../services/csvService');
 const { env } = require('../config/env');
 
 /**
@@ -127,38 +128,94 @@ function normalizeBuyer(body) {
   return out;
 }
 
-// How long a sweep's result is considered fresh. The sweep is a write, and it
-// used to run on *every* list, stats and export call — a full write scan per
-// page view. Overdue is a once-a-day transition, so throttling to once a
-// minute per org is indistinguishable to the user and removes the write from
-// the hot path. (A scheduled job is the proper home for this; this keeps the
-// cost bounded until there is one.)
-const SWEEP_INTERVAL_MS = 60 * 1000;
-const lastSweepByOrg = new Map();
+/**
+ * The statuses that represent money still owed.
+ *
+ * 'overdue' is stored, but it is a denormalisation: an invoice falls due at
+ * midnight, and the value in the database only catches up when the scheduled
+ * sweep next runs (see services/maintenanceService.js). The sweep used to be a
+ * collection-wide `updateMany` executed at the top of every list, stats and
+ * export request — a write on every read.
+ *
+ * Rather than write on read, the read derives it. These helpers translate a
+ * requested status into a filter that is correct against `dueDate` right now,
+ * so removing the write cost nothing in accuracy.
+ */
+const OPEN_STATUSES = ['pending', 'partial', 'overdue'];
 
-// Unpaid and part-paid invoices past their due date become overdue.
-async function sweepOverdue(orgFilter) {
-  const key = String(orgFilter.orgId);
-  const now = Date.now();
-  if (now - (lastSweepByOrg.get(key) || 0) < SWEEP_INTERVAL_MS) return;
-  lastSweepByOrg.set(key, now);
-  await Invoice.updateMany(
-    // 'partial' is included because a part-paid invoice that is also late is
-    // still money owed — it used to be skipped, so it never appeared in the
-    // overdue filter or the collections list.
-    { ...orgFilter, status: { $in: ['pending', 'partial'] }, dueDate: { $lt: new Date() } },
-    { status: 'overdue' }
-  );
+function applyStatusFilter(filter, status) {
+  if (!status) return filter;
+
+  if (status === 'unpaid') {
+    // Everything with money still outstanding, however it is aged. This is what
+    // a collections view wants — the Payments tracker used to assemble it by
+    // downloading every invoice and filtering three statuses in the browser.
+    filter.status = { $in: OPEN_STATUSES };
+    filter.$or = [{ balanceDue: { $gt: 0 } }, { balanceDue: { $exists: false } }];
+    return filter;
+  }
+
+  if (status === 'overdue') {
+    // Anything open and past its due date, whether or not the sweep has
+    // relabelled it yet. Served by the { orgId, status, dueDate } index.
+    filter.status = { $in: OPEN_STATUSES };
+    filter.dueDate = { $lt: new Date() };
+    return filter;
+  }
+
+  if (status === 'pending' || status === 'partial') {
+    // The mirror image: still open, but *not* yet past due — otherwise an
+    // invoice that fell due an hour ago would show up under both filters until
+    // the next sweep.
+    filter.status = status;
+    filter.$or = [{ dueDate: { $gte: new Date() } }, { dueDate: null }, { dueDate: { $exists: false } }];
+    return filter;
+  }
+
+  filter.status = status;
+  return filter;
+}
+
+// Sorting is restricted to indexed columns. An open `?sort=` invites a sort on
+// an unindexed field, which MongoDB performs in memory and refuses outright past
+// 32MB.
+const INVOICE_SORTS = ['date', 'createdAt', 'invoiceNumber', 'dueDate', 'status'];
+
+function buildInvoiceFilter(req) {
+  const filter = tenantFilter(req);
+  applyStatusFilter(filter, req.query.status);
+  if (req.query.clientId) filter.clientId = req.query.clientId;
+  if (req.query.q) {
+    const term = escapeRegex(String(req.query.q).trim());
+    if (term) {
+      // Search matches the invoice number or a walk-in buyer's name. `$or` is
+      // used carefully here: `applyStatusFilter` may already have set `$or` for
+      // the due-date window, so the two are combined under `$and` rather than
+      // one silently overwriting the other.
+      const search = [
+        { invoiceNumber: { $regex: term, $options: 'i' } },
+        { 'billTo.name': { $regex: term, $options: 'i' } }
+      ];
+      if (filter.$or) {
+        filter.$and = [{ $or: filter.$or }, { $or: search }];
+        delete filter.$or;
+      } else {
+        filter.$or = search;
+      }
+    }
+  }
+  return filter;
 }
 
 const listInvoices = asyncHandler(async (req, res) => {
-  const filter = tenantFilter(req);
-  await sweepOverdue(filter);
-  if (req.query.status) filter.status = req.query.status;
-  if (req.query.clientId) filter.clientId = req.query.clientId;
-  if (req.query.q) filter.invoiceNumber = { $regex: req.query.q.trim(), $options: 'i' };
-  const invoices = await Invoice.find(filter).populate('clientId').sort({ date: -1, createdAt: -1 });
-  res.json(invoices);
+  const filter = buildInvoiceFilter(req);
+  const sort = parseSort(req.query, INVOICE_SORTS, { date: -1, createdAt: -1 });
+  const page = await paginate(Invoice, filter, req.query, query => query
+    // Only the buyer fields the list actually renders. Populating the whole
+    // client document pulled its full address and contact block into every row.
+    .populate('clientId', 'companyName gstin email')
+    .sort(sort));
+  res.json(page);
 });
 
 /**
@@ -175,24 +232,56 @@ const listInvoices = asyncHandler(async (req, res) => {
  *
  * Runs as aggregation pipelines rather than loading every invoice in the org
  * into memory and reducing in JavaScript.
+ *
+ * The overdue split is computed inside the pipeline from `dueDate`, not read
+ * from the stored status, so the dashboard is correct the moment an invoice
+ * falls due — it no longer needs a write-on-read sweep to have run first.
  */
 const invoiceStats = asyncHandler(async (req, res) => {
-  const filter = tenantFilter(req);
-  await sweepOverdue(filter);
   const orgId = new mongoose.Types.ObjectId(String(req.orgId));
+  const now = new Date();
 
   const twelveMonthsAgo = new Date();
   twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 11);
   twelveMonthsAgo.setDate(1);
   twelveMonthsAgo.setHours(0, 0, 0, 0);
 
-  const [statusAgg, receivedAgg, monthlyAgg, topClientsAgg] = await Promise.all([
+  const [statusAgg, receivedAgg, monthlyAgg, topClientsAgg, collectionAgg] = await Promise.all([
     // Counts and outstanding balances per status, in one pass.
     Invoice.aggregate([
       { $match: { orgId } },
       {
+        // Derive the reporting status. An open invoice past its due date is
+        // overdue regardless of what the stored field says, which is what lets
+        // the scheduled sweep run hourly without the dashboard going stale.
+        //
+        // The guard is a **type check**, not a null check, and the distinction is
+        // not academic: in an aggregation expression a *missing* field is not
+        // equal to null (`{$ne: ['$dueDate', null]}` is `true` when the field is
+        // absent) while `{$lt: ['$dueDate', <date>]}` is also `true`, because
+        // missing sorts before every date. A null check therefore catches an
+        // explicit `dueDate: null` and silently reports every invoice with no due
+        // date at all as overdue. `$type` covers absent, null and any wrong type
+        // in one condition.
+        $addFields: {
+          reportingStatus: {
+            $cond: [
+              {
+                $and: [
+                  { $in: ['$status', OPEN_STATUSES] },
+                  { $eq: [{ $type: '$dueDate' }, 'date'] },
+                  { $lt: ['$dueDate', now] }
+                ]
+              },
+              'overdue',
+              '$status'
+            ]
+          }
+        }
+      },
+      {
         $group: {
-          _id: '$status',
+          _id: '$reportingStatus',
           count: { $sum: 1 },
           balance: { $sum: { $ifNull: ['$balanceDue', 0] } },
           invoiced: { $sum: { $ifNull: ['$totals.total', 0] } }
@@ -221,12 +310,34 @@ const invoiceStats = asyncHandler(async (req, res) => {
       { $limit: 5 },
       { $lookup: { from: 'clients', localField: '_id', foreignField: '_id', as: 'client' } },
       { $project: { revenue: 1, name: { $ifNull: [{ $first: '$client.companyName' }, 'Unknown'] } } }
+    ]),
+    // How long settled invoices took to collect, and how many payments there
+    // are. The Payments page derived both by reducing over the full invoice and
+    // payment arrays in the browser — which stops being possible once those
+    // endpoints return a page, and was the reason they could not be paginated.
+    Invoice.aggregate([
+      { $match: { orgId, status: 'paid', paidDate: { $ne: null }, date: { $ne: null } } },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          // Milliseconds between raising and collecting, averaged. Negative
+          // values (a payment back-dated before the invoice) are clamped so one
+          // data-entry slip cannot drag the average below zero.
+          totalMs: { $sum: { $max: [0, { $subtract: ['$paidDate', '$date'] }] } }
+        }
+      }
     ])
   ]);
 
   const byStatus = Object.fromEntries(statusAgg.map(row => [row._id, row]));
   const count = status => byStatus[status]?.count || 0;
   const balance = statuses => roundMoney(statuses.reduce((sum, s) => sum + (byStatus[s]?.balance || 0), 0));
+
+  const settled = collectionAgg[0];
+  const avgCollectionDays = settled?.count
+    ? Math.round(settled.totalMs / settled.count / 86400000)
+    : null;
 
   res.json({
     totalRevenue: roundMoney(receivedAgg[0]?.amount || 0),
@@ -235,13 +346,24 @@ const invoiceStats = asyncHandler(async (req, res) => {
     overdueAmount: balance(['overdue']),
     // Everything issued and not yet collected, however it is aged.
     outstandingAmount: balance(['pending', 'partial', 'overdue']),
+    // The invoice list's status tabs read their counts from here. They used to be
+    // derived by filtering the fully-downloaded invoice array in the browser,
+    // which is no longer possible now that the list is a page — and was wrong
+    // anyway once the list exceeded one page.
     counts: {
       total: statusAgg.reduce((sum, row) => sum + row.count, 0),
       paid: count('paid'),
       pending: count('pending') + count('partial'),
       overdue: count('overdue'),
-      draft: count('draft')
+      draft: count('draft'),
+      cancelled: count('cancelled'),
+      // Kept separate as well as folded into `pending`, so a caller can show
+      // part-paid invoices distinctly without another query.
+      partial: count('partial')
     },
+    // Average days from invoice date to payment date across settled invoices,
+    // or null when nothing has been collected yet.
+    avgCollectionDays,
     monthlyRevenue: monthlyAgg.map(row => ({ month: row._id, revenue: roundMoney(row.revenue) })),
     topClients: topClientsAgg.map(row => ({ name: row.name, revenue: roundMoney(row.revenue) }))
   });
@@ -541,33 +663,38 @@ function money(value) {
   return Number(value || 0).toFixed(2);
 }
 
+const INVOICE_CSV_COLUMNS = [
+  { label: 'Invoice Number', value: i => i.invoiceNumber },
+  { label: 'Client', value: i => i.clientId?.companyName || i.billTo?.name || '' },
+  { label: 'GSTIN', value: i => i.clientId?.gstin || i.billTo?.gstin || '' },
+  { label: 'Date', value: i => i.date?.toISOString().slice(0, 10) },
+  { label: 'Due Date', value: i => i.dueDate?.toISOString().slice(0, 10) },
+  { label: 'Status', value: i => i.status },
+  { label: 'Gross Value', value: i => money(i.totals?.grossSubtotal ?? i.totals?.subtotal) },
+  { label: 'Discount', value: i => money(i.totals?.discountTotal) },
+  { label: 'Taxable Value', value: i => money(i.totals?.subtotal) },
+  { label: 'CGST', value: i => money(i.totals?.cgst) },
+  { label: 'SGST/UTGST', value: i => money(i.totals?.sgst) },
+  { label: 'IGST', value: i => money(i.totals?.igst) },
+  { label: 'Cess', value: i => money(i.totals?.cess) },
+  { label: 'Round Off', value: i => money(i.totals?.roundOff) },
+  { label: 'Total', value: i => money(i.totals?.total) },
+  { label: 'Amount Paid', value: i => money(i.amountPaid) },
+  { label: 'Balance Due', value: i => money(i.balanceDue) }
+];
+
+/**
+ * The full filtered set, not one page — an export is expected to be complete.
+ * It is streamed from a cursor rather than loaded, so "complete" no longer means
+ * "the whole collection plus the whole CSV string, in memory, at once".
+ */
 const exportInvoicesCsv = asyncHandler(async (req, res) => {
-  const filter = tenantFilter(req);
-  await sweepOverdue(filter);
-  if (req.query.status) filter.status = req.query.status;
-  const invoices = await Invoice.find(filter).populate('clientId', 'companyName gstin').sort({ date: -1 });
-  const csv = toCsv(invoices, [
-    { label: 'Invoice Number', value: i => i.invoiceNumber },
-    { label: 'Client', value: i => i.clientId?.companyName || i.billTo?.name || '' },
-    { label: 'GSTIN', value: i => i.clientId?.gstin || i.billTo?.gstin || '' },
-    { label: 'Date', value: i => i.date?.toISOString().slice(0, 10) },
-    { label: 'Due Date', value: i => i.dueDate?.toISOString().slice(0, 10) },
-    { label: 'Status', value: i => i.status },
-    { label: 'Gross Value', value: i => money(i.totals?.grossSubtotal ?? i.totals?.subtotal) },
-    { label: 'Discount', value: i => money(i.totals?.discountTotal) },
-    { label: 'Taxable Value', value: i => money(i.totals?.subtotal) },
-    { label: 'CGST', value: i => money(i.totals?.cgst) },
-    { label: 'SGST/UTGST', value: i => money(i.totals?.sgst) },
-    { label: 'IGST', value: i => money(i.totals?.igst) },
-    { label: 'Cess', value: i => money(i.totals?.cess) },
-    { label: 'Round Off', value: i => money(i.totals?.roundOff) },
-    { label: 'Total', value: i => money(i.totals?.total) },
-    { label: 'Amount Paid', value: i => money(i.amountPaid) },
-    { label: 'Balance Due', value: i => money(i.balanceDue) }
-  ]);
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename="invoices.csv"');
-  res.send(csv);
+  const filter = buildInvoiceFilter(req);
+  const cursor = Invoice.find(filter)
+    .populate('clientId', 'companyName gstin')
+    .sort({ date: -1 })
+    .cursor();
+  await streamCsv(res, { filename: 'invoices.csv', columns: INVOICE_CSV_COLUMNS, cursor });
 });
 
 /**
@@ -584,15 +711,23 @@ const exportInvoicesCsv = asyncHandler(async (req, res) => {
  */
 const remindAll = asyncHandler(async (req, res) => {
   const filter = tenantFilter(req);
-  await sweepOverdue(filter);
 
   // Report what is *eligible* so the response is immediately meaningful, then
-  // let the sweep decide what actually needs sending.
-  const pending = await Invoice.find({ ...filter, status: { $in: ['pending', 'partial', 'overdue'] } })
+  // let the sweep decide what actually needs sending. Counted with a cursor
+  // rather than an array: the point of this endpoint is a tenant with a large
+  // overdue book, so materialising all of them just to count the ones with an
+  // email address would reintroduce the problem at the other end.
+  let total = 0;
+  let withEmail = 0;
+  const cursor = Invoice.find({ ...filter, status: { $in: OPEN_STATUSES } })
     .populate('clientId', 'email')
     .select('clientId billTo')
-    .lean();
-  const withEmail = pending.filter(inv => inv.clientId?.email || inv.billTo?.email).length;
+    .lean()
+    .cursor();
+  for await (const invoice of cursor) {
+    total += 1;
+    if (invoice.clientId?.email || invoice.billTo?.email) withEmail += 1;
+  }
 
   const orgId = req.orgId;
   const actor = { orgId, user: req.user };
@@ -609,16 +744,16 @@ const remindAll = asyncHandler(async (req, res) => {
           entity: 'invoice',
           meta: { sent: result.sent, skipped: result.skipped, failed: result.failed, scanned: result.scanned }
         });
-        console.log(`[reminders] manual sweep for org ${orgId}: sent=${result.sent} skipped=${result.skipped} failed=${result.failed}`);
+        req.log.info('manual reminder sweep finished', { orgId: String(orgId), ...result, details: undefined });
       })
-      .catch(error => console.error(`[reminders] manual sweep for org ${orgId} failed:`, error.message));
+      .catch(error => req.log.error('manual reminder sweep failed', { orgId: String(orgId), err: error }));
   });
 
   res.status(202).json({
     queued: true,
     eligible: withEmail,
-    withoutEmail: pending.length - withEmail,
-    total: pending.length,
+    withoutEmail: total - withEmail,
+    total,
     message: `Chasing ${withEmail} invoice${withEmail === 1 ? '' : 's'} in the background. Customers already reminded at this stage will be skipped.`
   });
 });

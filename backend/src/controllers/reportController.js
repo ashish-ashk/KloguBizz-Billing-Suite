@@ -50,15 +50,33 @@ async function buildSummary(req) {
     status: { $nin: ['draft', 'cancelled'] },
     date: { $gte: period.from, $lte: period.to }
   };
-  // Only the fields the summary needs, so a long history doesn't drag whole
-  // documents (notes, bank details, embedded buyers) into memory.
-  const invoices = await Invoice.find(filter, 'date items totals discountPercent').lean();
+  /**
+   * Streamed, not loaded.
+   *
+   * Even scoped to a financial year and projected to four fields, a `find().lean()`
+   * still materialises every matching invoice — with all of its line items — as
+   * one array before the first sum is taken. A cursor holds one batch at a time,
+   * so the memory this uses is set by the batch size rather than by how much the
+   * tenant has invoiced.
+   *
+   * The aggregation stays in JavaScript on purpose: the per-line arithmetic
+   * (line and invoice discounts, tax-inclusive back-calculation, cess, per-line
+   * rounding) lives in `calculateLine`, and it is the *same function the invoice
+   * itself was priced with*. Reimplementing it as a `$expr` pipeline would create
+   * a second copy of the tax rules that could silently disagree with the
+   * customer's own copy of the invoice — which is precisely the discrepancy a GST
+   * audit exists to find. Bounded memory was the real problem; duplicated tax
+   * logic would have been a worse one.
+   */
+  const cursor = Invoice.find(filter, 'date items totals discountPercent').lean().cursor();
 
   const byMonth = {};
   const byRate = {};
   const byHsn = {};
+  let invoiceCount = 0;
 
-  invoices.forEach(inv => {
+  for await (const inv of cursor) {
+    invoiceCount += 1;
     const month = inv.date.toISOString().slice(0, 7);
     if (!byMonth[month]) {
       byMonth[month] = { month, gross: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, cess: 0, total: 0, invoiceCount: 0 };
@@ -81,7 +99,9 @@ async function buildSummary(req) {
       // taxable value always matches the customer's copy. The report previously
       // used a bare `qty * rate`, which ignored discounts and tax-inclusive
       // pricing — precisely the discrepancy a GST audit surfaces.
-      const { taxable, gstRate, cessRate, tax, cess } = calculateLine(item, inv.discountPercent);
+      // `cessRate` is deliberately not read: the rate-wise table groups by GST
+      // slab, and the cess *amount* is what gets summed into it.
+      const { taxable, gstRate, tax, cess } = calculateLine(item, inv.discountPercent);
 
       if (!byRate[gstRate]) byRate[gstRate] = { rate: gstRate, taxable: 0, tax: 0, cess: 0 };
       byRate[gstRate].taxable = roundMoney(byRate[gstRate].taxable + taxable);
@@ -97,7 +117,7 @@ async function buildSummary(req) {
       byHsn[hsn].tax = roundMoney(byHsn[hsn].tax + tax);
       byHsn[hsn].cess = roundMoney(byHsn[hsn].cess + cess);
     });
-  });
+  }
 
   const monthRows = Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month));
   const rateRows = Object.values(byRate).sort((a, b) => a.rate - b.rate);
@@ -123,7 +143,7 @@ async function buildSummary(req) {
       cess: sum(r => r.cess),
       tax: sum(r => r.cgst + r.sgst + r.igst + r.cess),
       total: sum(r => r.total),
-      invoiceCount: invoices.length
+      invoiceCount
     }
   };
 }

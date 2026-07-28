@@ -61,6 +61,45 @@ purchases/ITC and e-invoicing.
 
 ---
 
+## STATUS — Phase 3 shipped (2026-07-28)
+
+**Done: items #36, #39, #40, #42, #43, #45 (delivery half), #46, #47, #48, #49,
+#57, #60, #61, #64, #65, #66, #67.**
+Verified by **101 automated tests** (14 unit + 87 integration against a real
+MongoDB, including a new 23-test `scale.test.js`), a clean `eslint` run on both
+packages, clean production *and* development `ng build`s, and the migration runner
+exercised end-to-end against a live database (apply → resume-after-failure →
+idempotent re-run).
+
+| Area | What changed |
+|---|---|
+| Pagination (#40) | Every list endpoint returned its **entire collection** — invoices, payments, clients, items, credit notes and the super-admin org list. New `utils/pagination.js`; all of them now return `{data,page,limit,total,pages,hasMore}` with a **200-row ceiling** so `?limit=1000000` can't reintroduce the unbounded read. Server-side `?q=` search (regex-escaped — `?q=(` used to be a 500 and `?q=.*` a full scan) and a `?sort=` allowlist restricted to indexed columns. Frontend rewritten to match: new `core/server-list.ts` (debounced search, out-of-order response protection, no stranding on an emptied last page) replaced the `filtered()`/`paged()` computeds that had downloaded everything and sliced it in the browser |
+| Overdue without a write-on-read (#43) | `sweepOverdue` ran a collection-wide `updateMany` at the top of every list, stats and export request — a dashboard refresh was a write. Moved to a **global** hourly job (`services/maintenanceService.js`, one write for all tenants). Accuracy was kept, not traded: the list filter and the stats aggregation now **derive** overdue from `dueDate`, so the figures are right the instant an invoice falls due. Caught by a test: a *missing* field is not `null` in an aggregation (`$ne:['$dueDate',null]` is `true` when absent, and `$lt` is too), so the guard is `$type` — a null check would have reported every invoice with no due date as overdue |
+| Bounded memory (#42, #44) | The GST report, both CSV exports and the platform-wide reminder sweep all materialised their full result set. Now cursor-streamed. Exports write straight to the response with back-pressure, so a large export starts immediately instead of building the whole file in memory and timing out. The report's per-line maths deliberately stays in JS: it shares `calculateLine` with the invoice itself, and a `$expr` reimplementation would be a second copy of the tax rules that could disagree with the customer's copy |
+| Base64 logos (#45) | Up to **1.2MB of base64** rode along in every `/auth/me` and `/organisations/current` response — on every page load and route change — and in `/public/branding` on every unauthenticated login-page hit. Now served from `/assets/...` as content-addressed, `immutable`, ETag'd resources the browser fetches **once**; the JSON drops to a URL. `updateOrganisation` had to become a **merge** (dot paths) for this to be safe: the client no longer holds the bytes, so a whole-object write would have blanked the logo on any unrelated save — there is a test for exactly that |
+| Destructive masters save (#47) | `saveMasters` was `deleteMany` + `insertMany` with nothing between them: a crash in that window wiped **every GST rate and HSN code platform-wide**, unrecoverably. Now a diff-based `bulkWrite` — rows matched on `type`+`code`, updated in place (ids survive; they used to rotate on every save), and deletions ordered **last** so an interruption leaves stale rows rather than none. Transactional where the deployment supports it (`utils/transaction.js` probes for a replica set, so the same code is atomic on Atlas and documented best-effort on a standalone) |
+| Org-delete cascade (#36) | Missed `Item`, `CreditNote` and `ReminderLog` — a deleted tenant left its entire catalogue and every credit note it ever issued orphaned forever. Now one registered list of tenant-scoped collections, in a transaction, with a type-the-name confirmation. `AuditLog` is deliberately **excluded**: it is the record of what was done, including the deletion |
+| Audit console (#39) | Was unfiltered, unpaginated and capped at 200 rows — unreadable past the first 200 events. Now filterable by org, actor, action (prefix), entity and date range, paginated, CSV-exportable, indexed for each of those, **append-only enforced at the model** (so a future generic `PUT` can't quietly make it mutable), with a configurable TTL and a `requestId` tying each entry to the request that produced it |
+| Observability (#57) | `console.log` only: no levels, no timestamps, no correlation. New dependency-free `utils/logger.js` (JSON lines in production, readable locally, credential/base64 redaction, pluggable error reporter) plus request ids echoed in every response and in every error body. `trust proxy` set — without it the per-IP rate limiter saw one address for all traffic. 5xx no longer leak internal messages to the client in production; `CastError`/`ValidationError` return 400 instead of 500 |
+| Tooling (#60, #61, #65, #49) | ESLint + Prettier on both packages (`require-atomic-updates` was tried and **removed** — 10 false positives, 0 real, and a linter people ignore is worse than none), GitHub Actions CI with a real MongoDB service and a guard that **fails when the integration tests skip** (a silent skip is indistinguishable from a pass), grouped Dependabot, a versioned migration runner with a lock and three real migrations replacing the ad-hoc `backfillOwnerId.js`, and `environment.development.ts` via `fileReplacements` so the localhost footgun is gone |
+| Polish (#66, #67, #64, #46, #48) | Invoice-number padding configurable and never truncating; PDF pagination derived from the page box with "Page N of M" and continued markers (the hardcoded `y > 700` was wrong for the 85pt-margin receipt templates, which now take 3 pages instead of 6); global settings validated per key with a zod schema (a bad `branding` payload used to break the login page platform-wide, silently); audit indexes added; frontend `CacheService` with TTL, request dedup, prefix invalidation on every mutation and a hard clear on logout |
+
+**Deliberately not done, and why:**
+- **#45's object-storage half.** S3/R2 plus a resize pipeline needs credentials this
+  deployment doesn't have. The base64 still sits in Mongo; what was fixed is the
+  part costing every request. The asset endpoints are the seam to move behind a CDN.
+- **#37 soft delete / recycle bin, #41's remaining aggregations, #53 memberships.**
+  Untouched — larger schema changes, not scale fixes.
+- **Users list left unpaginated.** Seats are capped by the plan, so it is bounded by
+  construction. Paginating it would be churn for no gain.
+
+**Still open, in the doc's own ordering:** MFA (#7), soft delete (#37),
+email delivery logging (#58's bounce/suppression half), memberships and the
+org-switcher (#53–#54), then Phase 4's super-admin console and Phase 5's GSTR-1
+export, purchases/ITC and e-invoicing.
+
+---
+
 ## PART 1 — BUGS & FIXES
 
 ### 1.1 Security · privilege escalation (P0)
@@ -425,9 +464,10 @@ double-count).
 #12 suspension enforcement, #13 scheduled reminders, #18–#19 (super-admin template
 gallery and Masters are decorative), #33–#34 credit notes and invoice immutability.
 
-**Phase 3 — Make it scale.** #40–#49 (pagination, aggregation, the write-on-every-read
+**Phase 3 — Make it scale.** ~~#40–#49 (pagination, aggregation, the write-on-every-read
 sweep, the email loop, base64 logos, indexes), plus logging, error tracking, tests and CI
-(#55–#61).
+(#55–#61).~~ **Shipped 2026-07-28** — see the Phase 3 status section above. Remaining
+from this band: #37 (soft delete), #45's object-storage half, #58's bounce handling.
 
 **Phase 4 — Super-admin platform console.** The event-capture layer and metrics rollup
 first, then the tenant drill-down, impersonation, user management and audit console —

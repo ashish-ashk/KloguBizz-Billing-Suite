@@ -6,6 +6,8 @@ const rateLimit = require('express-rate-limit');
 const { connectDatabase } = require('./src/config/database');
 const { env, assertSecureConfig } = require('./src/config/env');
 const { errorHandler, notFoundHandler } = require('./src/middleware/errorMiddleware');
+const { requestContext, requestLogger } = require('./src/middleware/requestContext');
+const { logger } = require('./src/utils/logger');
 
 // Refuse to boot a production deployment that is still running on the dev
 // defaults committed to this repo. Done before anything else so the process
@@ -14,7 +16,20 @@ assertSecureConfig();
 
 const app = express();
 
+// `req.ip` is otherwise the proxy's address on Render/Vercel/any load balancer,
+// which quietly breaks both the per-IP rate limiter (every request appears to
+// come from one address, so one abusive client can lock everyone out) and the
+// IP recorded in the logs. Trusting one hop is the correct setting for a single
+// platform proxy — trusting all of them would let a client spoof
+// X-Forwarded-For and evade the limiter entirely.
+app.set('trust proxy', 1);
+
 app.use(helmet());
+
+// First in the chain: everything after this — including the error handler — can
+// rely on `req.id` and `req.log` existing.
+app.use(requestContext);
+app.use(requestLogger);
 
 // Multiple origins are supported (apex + www, custom domains, previews) —
 // see env.FRONTEND_URLS. Requests with no Origin header (server-to-server,
@@ -106,6 +121,9 @@ app.get('/ready', (req, res) => {
 });
 
 app.use('/api/v1/public', require('./src/routes/publicRoutes'));
+// Branding images, served as cacheable resources rather than base64 inside every
+// JSON payload. See services/brandingAssetService.js.
+app.use('/api/v1/assets', require('./src/routes/assetRoutes'));
 app.use('/api/v1/auth', require('./src/routes/authRoutes'));
 app.use('/api/v1/organisations', require('./src/routes/organisationRoutes'));
 app.use('/api/v1/clients', require('./src/routes/clientRoutes'));
@@ -126,7 +144,7 @@ if (require.main === module) {
   connectDatabase()
     .then(() => {
       const server = app.listen(env.PORT, () => {
-        console.log(`KloguBizz API running on port ${env.PORT}`);
+        logger.info('KloguBizz API listening', { port: env.PORT, env: process.env.NODE_ENV || 'development' });
       });
 
       // Automated payment reminders. Previously the reminder schedule was
@@ -134,11 +152,15 @@ if (require.main === module) {
       // scheduled reminder was ever sent.
       require('./src/services/reminderService').startReminderScheduler();
 
+      // Housekeeping that used to run as a write on every single read: ageing
+      // pending invoices into 'overdue'. See services/maintenanceService.js.
+      require('./src/services/maintenanceService').startMaintenanceScheduler();
+
       // Render (and any container platform) sends SIGTERM before replacing an
       // instance. Without this the process is killed mid-request, dropping
       // in-flight work and leaving Mongo sockets to time out.
       const shutdown = signal => async () => {
-        console.log(`${signal} received — shutting down gracefully.`);
+        logger.info('shutting down gracefully', { signal });
         server.close(async () => {
           await mongoose.connection.close().catch(() => {});
           process.exit(0);
@@ -148,9 +170,23 @@ if (require.main === module) {
       };
       process.on('SIGTERM', shutdown('SIGTERM'));
       process.on('SIGINT', shutdown('SIGINT'));
+
+      // A rejected promise or a thrown error outside a request would otherwise
+      // print an unstructured warning (or, for uncaughtException, leave the
+      // process in an undefined state) and never reach an error reporter.
+      process.on('unhandledRejection', reason => {
+        logger.error('unhandled promise rejection', { err: reason instanceof Error ? reason : new Error(String(reason)) });
+      });
+      process.on('uncaughtException', error => {
+        logger.error('uncaught exception — exiting', { err: error });
+        // State is no longer trustworthy after an uncaught throw; let the
+        // platform restart a clean process rather than serving from a
+        // half-broken one.
+        process.exit(1);
+      });
     })
     .catch(error => {
-      console.error('Failed to start KloguBizz API:', error.message);
+      logger.error('failed to start KloguBizz API', { err: error });
       process.exit(1);
     });
 }

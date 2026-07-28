@@ -284,9 +284,13 @@ export class InvoiceEditorComponent implements OnInit {
     this.invoiceId.set(id);
     this.isEdit.set(!!id);
 
-    this.api.clients().subscribe({
-      next: clients => {
-        this.clients.set(clients);
+    // The pickers request a bounded page rather than the whole collection. 200 is
+    // the API's ceiling; a tenant with more clients or items than that filters
+    // with the search box on the Clients / Inventory pages, which query the
+    // server. Previously both of these downloaded every record on every visit.
+    this.api.clients({ limit: 200, sort: 'companyName' }).subscribe({
+      next: page => {
+        this.clients.set(page.data);
         if (id) {
           this.loadInvoice(id);
         } else {
@@ -296,7 +300,10 @@ export class InvoiceEditorComponent implements OnInit {
       error: err => { this.loading.set(false); this.toast.httpError(err, 'Could not load clients.'); }
     });
 
-    this.api.items().subscribe({ next: list => this.catalogItems.set(list), error: () => {} });
+    this.api.items({ limit: 200, status: 'active', sort: 'name' }).subscribe({
+      next: page => this.catalogItems.set(page.data),
+      error: () => {}
+    });
   }
 
   private loadInvoice(id: string) {

@@ -30,6 +30,12 @@ const brandingSchema = new mongoose.Schema({
   primaryColor: { type: String, default: '#4f46e5' },
   invoicePrefix: { type: String, default: 'KLG' },
   creditNotePrefix: { type: String, default: 'CN' },
+  // How many digits the per-financial-year counter is padded to. Was hardcoded
+  // at 3, so the 1000th document of a year broke the visual format mid-series.
+  invoiceNumberPadding: { type: Number, default: 3, min: 1, max: 10 },
+  // Optional trailing text, for tenants whose existing scheme carries a branch
+  // or book marker (e.g. '/A').
+  invoiceNumberSuffix: { type: String, default: '' },
   invoiceTitleLabel: { type: String, default: '' },
   // Round the payable total to a whole rupee (the Indian billing convention).
   // Defaults to true; a tenant billing in exact paise can turn it off.

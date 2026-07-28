@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AppShellComponent } from '../../shared/app-shell.component';
@@ -6,6 +6,7 @@ import { AvatarComponent, EmptyStateComponent, ModalComponent, PagerComponent, S
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
 import { Client } from '../../core/models';
+import { ServerList } from '../../core/server-list';
 import { STATES, isValidEmail, isValidGSTIN, stateName } from '../../core/format';
 
 interface ClientForm {
@@ -22,23 +23,26 @@ interface ClientForm {
   standalone: true,
   imports: [CommonModule, FormsModule, AppShellComponent, ModalComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, PagerComponent],
   template: `
-    <app-shell title="Clients" [subtitle]="clients().length + ' clients on file'">
+    <app-shell title="Clients" [subtitle]="subtitle()">
       <button actions class="btn primary" type="button" (click)="openAdd()">+ Add Client</button>
 
       <div class="toolbar">
         <div class="search-box">
           <span class="search-icon">⌕</span>
-          <input class="input" type="text" placeholder="Search name, GSTIN or email"
-            [ngModel]="search()" (ngModelChange)="onSearch($event)">
+          <input class="input" type="text" placeholder="Search name, GSTIN, email or phone"
+            [ngModel]="list.search()" (ngModelChange)="list.onSearch($event)">
         </div>
       </div>
 
       <div class="card flush">
-        @if (loading()) {
+        @if (list.loading()) {
           <app-skeleton-rows [count]="5" />
-        } @else if (clients().length === 0) {
+        } @else if (list.failed()) {
+          <app-empty-state icon="⚠" title="Could not load clients"
+            message="Something went wrong fetching this page." />
+        } @else if (list.total() === 0 && !list.search()) {
           <app-empty-state icon="◫" title="No clients yet" message="Add your first client to start invoicing." />
-        } @else if (filtered().length === 0) {
+        } @else if (list.rows().length === 0) {
           <app-empty-state icon="⌕" title="No matching clients" message="Try a different search term." />
         } @else {
           <div class="table-wrap">
@@ -53,7 +57,7 @@ interface ClientForm {
                 </tr>
               </thead>
               <tbody>
-                @for (c of paged(); track c._id) {
+                @for (c of list.rows(); track c._id) {
                   <tr>
                     <td data-label="Client">
                       <div style="display:flex;align-items:center;gap:10px">
@@ -81,8 +85,8 @@ interface ClientForm {
               </tbody>
             </table>
           </div>
-          <app-pager [page]="page()" [pageSize]="pageSize()" [total]="filtered().length"
-            (pageChange)="page.set($event)" (pageSizeChange)="onPageSize($event)" />
+          <app-pager [page]="list.page()" [pageSize]="list.pageSize()" [total]="list.total()"
+            (pageChange)="list.onPage($event)" (pageSizeChange)="list.onPageSize($event)" />
         }
       </div>
 
@@ -152,10 +156,14 @@ interface ClientForm {
     </app-shell>
   `
 })
-export class ClientsComponent implements OnInit {
-  loading = signal(true);
-  clients = signal<Client[]>([]);
-  search = signal('');
+export class ClientsComponent implements OnInit, OnDestroy {
+  /**
+   * Paging, searching and sorting happen in the database. This page used to load
+   * every client the tenant had, filter them in `computed()` and slice out a
+   * page — so the "page size" only ever controlled how many of the
+   * already-downloaded rows were painted.
+   */
+  list = new ServerList<Client>(params => this.api.clients(params));
 
   modalOpen = signal(false);
   editing = signal<Client | null>(null);
@@ -170,38 +178,18 @@ export class ClientsComponent implements OnInit {
   states = STATES;
   stateName = stateName;
 
-  page = signal(1);
-  pageSize = signal(10);
-
-  filtered = computed(() => {
-    const q = this.search().trim().toLowerCase();
-    if (!q) return this.clients();
-    return this.clients().filter(c =>
-      (c.companyName || '').toLowerCase().includes(q) ||
-      (c.gstin || '').toLowerCase().includes(q) ||
-      (c.email || '').toLowerCase().includes(q)
-    );
-  });
-
-  paged = computed(() => {
-    const start = (this.page() - 1) * this.pageSize();
-    return this.filtered().slice(start, start + this.pageSize());
-  });
-
   constructor(private api: ApiService, private toast: ToastService) {}
 
-  onSearch(v: string) { this.search.set(v); this.page.set(1); }
-  onPageSize(v: number) { this.pageSize.set(v); this.page.set(1); }
-
-  ngOnInit() { this.load(); }
-
-  load() {
-    this.loading.set(true);
-    this.api.clients().subscribe({
-      next: list => { this.clients.set(list); this.loading.set(false); },
-      error: err => { this.loading.set(false); this.toast.httpError(err); }
-    });
+  subtitle() {
+    const total = this.list.total();
+    if (this.list.search()) return `${total} matching ${total === 1 ? 'client' : 'clients'}`;
+    return `${total} ${total === 1 ? 'client' : 'clients'} on file`;
   }
+
+  ngOnInit() { this.list.load(); }
+  ngOnDestroy() { this.list.dispose(); }
+
+  load() { this.list.refresh(); }
 
   private blankForm(): ClientForm {
     return { companyName: '', email: '', phone: '', gstin: '', address: '', stateCode: '27' };

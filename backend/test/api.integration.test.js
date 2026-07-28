@@ -41,7 +41,7 @@ test.before(async () => {
     { code: 'business', name: 'Business', monthlyPrice: 999, yearlyPrice: 9990, userLimit: 10, invoiceLimit: 500, sortOrder: 1 }
   ]);
   server = app.listen(0);
-  await new Promise(resolve => server.once('listening', resolve));
+  await new Promise(resolve => { server.once('listening', resolve); });
   baseUrl = `http://127.0.0.1:${server.address().port}/api/v1`;
 });
 
@@ -49,7 +49,7 @@ test.after(async () => {
   if (!dbAvailable) return;
   await mongoose.connection.dropDatabase();
   await mongoose.disconnect();
-  await new Promise(resolve => server.close(resolve));
+  await new Promise(resolve => { server.close(resolve); });
 });
 
 // ── helpers ──────────────────────────────────────
@@ -194,8 +194,12 @@ test('one tenant cannot read or modify another tenant\'s invoice', maybe(async (
   assert.equal((await call('PUT', `/invoices/${invoice._id}`, { token: b.token, body: { notes: 'hacked' } })).status, 404);
   assert.equal((await call('DELETE', `/invoices/${invoice._id}`, { token: b.token })).status, 404);
   assert.equal((await call('GET', `/invoices/${invoice._id}/pdf`, { token: b.token })).status, 404);
-  // And B's own list is unaffected by A's data.
-  assert.equal((await call('GET', '/invoices', { token: b.token })).body.length, 0);
+  // And B's own list is unaffected by A's data. `total` is asserted as well as
+  // the page contents: a paginated endpoint that leaked another tenant's rows
+  // onto a later page would still show an empty first page.
+  const bList = (await call('GET', '/invoices', { token: b.token })).body;
+  assert.equal(bList.data.length, 0);
+  assert.equal(bList.total, 0);
 }));
 
 test('an account locks after repeated failed sign-ins', maybe(async () => {
@@ -403,8 +407,12 @@ test('voiding a payment reopens the invoice and removes it from collections', ma
   assert.equal(stats.body.totalRevenue, 0);
 
   // Excluded from the tracker by default, still retrievable for the audit trail.
-  assert.equal((await call('GET', '/payments', { token: a.token })).body.length, 0);
-  assert.equal((await call('GET', '/payments?includeVoid=true', { token: a.token })).body.length, 1);
+  const active = (await call('GET', '/payments', { token: a.token })).body;
+  assert.equal(active.data.length, 0);
+  assert.equal(active.total, 0);
+  const withVoid = (await call('GET', '/payments?includeVoid=true', { token: a.token })).body;
+  assert.equal(withVoid.data.length, 1);
+  assert.equal(withVoid.total, 1);
 }));
 
 // ── compliance guards ────────────────────────────

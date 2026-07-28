@@ -135,10 +135,16 @@ export class DashboardComponent implements OnInit {
   constructor(private api: ApiService, private toast: ToastService) {}
 
   ngOnInit() {
-    forkJoin({ stats: this.api.invoiceStats(), invoices: this.api.invoices() }).subscribe({
+    // Six rows are asked for, and six rows arrive. This used to fetch the org's
+    // *entire* invoice history — every document, every line item, every populated
+    // client — and then `.slice(0, 6)` it in the browser.
+    forkJoin({
+      stats: this.api.invoiceStats(),
+      invoices: this.api.invoices({ limit: 6, sort: '-createdAt' })
+    }).subscribe({
       next: ({ stats, invoices }) => {
         this.stats.set(stats);
-        this.recent.set(invoices.slice(0, 6));
+        this.recent.set(invoices.data);
         this.loading.set(false);
       },
       error: err => {

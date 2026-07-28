@@ -1,0 +1,43 @@
+version: 2
+
+# Weekly, grouped, and limited to a handful of open PRs at a time. Ungrouped
+# Dependabot on a two-package repo produces a dozen PRs a week, which is how teams
+# end up ignoring it — and an ignored security update is worse than none, because
+# it looks like the problem is covered.
+updates:
+  - package-ecosystem: npm
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # Patch and minor bumps are the ones that are almost always safe to take as a
+      # batch; majors come through individually so each can be read on its own.
+      backend-minor-and-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
+    labels: [dependencies, backend]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      angular:
+        # The Angular packages must move together — a partial upgrade of
+        # @angular/core against an older @angular/compiler-cli does not build.
+        patterns: ['@angular/*', '@angular-devkit/*', 'angular-eslint']
+      frontend-minor-and-patch:
+        patterns: ['*']
+        exclude-patterns: ['@angular/*', '@angular-devkit/*']
+        update-types: [minor, patch]
+    labels: [dependencies, frontend]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    labels: [dependencies, ci]

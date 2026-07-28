@@ -81,8 +81,34 @@ async function nextDocumentNumber(orgId, seriesName = 'invoice') {
   );
   if (!org) throw new Error('Organisation not found');
 
+  return formatDocumentNumber(org, series, fy, org[sequenceField]);
+}
+
+/**
+ * How many digits the counter is padded to.
+ *
+ * Was hardcoded to 3, so a tenant issuing their 1000th invoice of a financial
+ * year jumped from `KLG-2026-999` to `KLG-2026-1000` — the format visibly
+ * changes mid-series, which looks like a different numbering scheme to a customer
+ * and to an auditor. It is now configurable, and the padding never *shrinks* a
+ * number: once past the configured width the digits simply continue, because
+ * truncating an invoice number would be far worse than an inconsistent width.
+ */
+const DEFAULT_PADDING = 3;
+const MIN_PADDING = 1;
+const MAX_PADDING = 10;
+
+function resolvePadding(org) {
+  const configured = Number(org.brandingConfig?.invoiceNumberPadding);
+  if (!Number.isInteger(configured)) return DEFAULT_PADDING;
+  return Math.min(Math.max(configured, MIN_PADDING), MAX_PADDING);
+}
+
+function formatDocumentNumber(org, series, fy, sequence) {
   const prefix = series.prefixFrom(org) || series.defaultPrefix;
-  return `${prefix}-${fy}-${String(org[sequenceField]).padStart(3, '0')}`;
+  const suffix = org.brandingConfig?.invoiceNumberSuffix || '';
+  const number = String(sequence).padStart(resolvePadding(org), '0');
+  return `${prefix}-${fy}-${number}${suffix}`;
 }
 
 /** Kept as the invoice-specific entry point used throughout the codebase. */
@@ -94,4 +120,12 @@ async function nextCreditNoteNumber(orgId) {
   return nextDocumentNumber(orgId, 'creditNote');
 }
 
-module.exports = { nextInvoiceNumber, nextCreditNoteNumber, nextDocumentNumber, currentFYLabel, SERIES };
+module.exports = {
+  nextInvoiceNumber,
+  nextCreditNoteNumber,
+  nextDocumentNumber,
+  currentFYLabel,
+  formatDocumentNumber,
+  resolvePadding,
+  SERIES
+};

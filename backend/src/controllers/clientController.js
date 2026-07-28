@@ -5,15 +5,34 @@ const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { logAudit } = require('../services/auditService');
 const { pickFields } = require('../utils/pickFields');
+const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
 
 // `orgId` is never taken from the body — it comes from the authenticated
 // token. Accepting it would let an update move the record into another
 // tenant even though the *filter* is correctly org-scoped.
 const CLIENT_FIELDS = ['companyName', 'email', 'phone', 'gstin', 'address', 'state', 'stateCode', 'status'];
 
+const CLIENT_SORTS = ['companyName', 'createdAt'];
+
 const listClients = asyncHandler(async (req, res) => {
-  const clients = await Client.find(tenantFilter(req)).sort({ companyName: 1 });
-  res.json(clients);
+  const filter = tenantFilter(req);
+  if (req.query.status) filter.status = req.query.status;
+  if (req.query.q) {
+    // Server-side search, so a tenant with a long customer list is not obliged
+    // to download all of it just so the browser can filter it.
+    const term = escapeRegex(String(req.query.q).trim());
+    if (term) {
+      filter.$or = [
+        { companyName: { $regex: term, $options: 'i' } },
+        { gstin: { $regex: term, $options: 'i' } },
+        { email: { $regex: term, $options: 'i' } },
+        { phone: { $regex: term, $options: 'i' } }
+      ];
+    }
+  }
+  const page = await paginate(Client, filter, req.query, query =>
+    query.sort(parseSort(req.query, CLIENT_SORTS, { companyName: 1 })));
+  res.json(page);
 });
 
 const createClient = asyncHandler(async (req, res) => {

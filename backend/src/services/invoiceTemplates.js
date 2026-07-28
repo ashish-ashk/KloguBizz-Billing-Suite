@@ -275,4 +275,9 @@ function resolveTemplate(brandingConfig, platformDefault) {
   return getTemplate(brandingConfig?.invoiceTemplateId || platformDefault);
 }
 
-module.exports = { INVOICE_TEMPLATES, getTemplate, resolveTemplate, BOLD_VARIANTS, ITALIC_VARIANTS };
+// The ids the renderer actually knows, so callers that accept a template id from
+// a request (the platform-default setting, a tenant's branding config) can check
+// it against the registry instead of storing an id nothing can render.
+const TEMPLATE_IDS = INVOICE_TEMPLATES.map(template => template.id);
+
+module.exports = { INVOICE_TEMPLATES, TEMPLATE_IDS, getTemplate, resolveTemplate, BOLD_VARIANTS, ITALIC_VARIANTS };

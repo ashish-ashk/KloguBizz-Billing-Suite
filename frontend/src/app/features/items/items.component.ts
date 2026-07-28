@@ -1,9 +1,10 @@
-import { Component, OnInit, computed, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AppShellComponent } from '../../shared/app-shell.component';
 import { EmptyStateComponent, ModalComponent, PagerComponent, PillComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { ApiService } from '../../core/api.service';
+import { ServerList } from '../../core/server-list';
 import { ToastService } from '../../core/toast.service';
 import { Item, ItemBulkUploadResult } from '../../core/models';
 import { UNITS, fmtINR, downloadBlob } from '../../core/format';
@@ -33,7 +34,7 @@ interface ItemForm {
   standalone: true,
   imports: [CommonModule, FormsModule, AppShellComponent, ModalComponent, EmptyStateComponent, SkeletonRowsComponent, PillComponent, PagerComponent],
   template: `
-    <app-shell title="Inventory" [subtitle]="items().length + ' items in your catalog'">
+    <app-shell title="Inventory" [subtitle]="subtitle()">
       <button actions class="btn secondary" type="button" (click)="openBulkUpload()">⇪ Bulk Upload</button>
       <button actions class="btn primary" type="button" (click)="openAdd()">+ Add Item</button>
 
@@ -41,16 +42,19 @@ interface ItemForm {
         <div class="search-box">
           <span class="search-icon">⌕</span>
           <input class="input" type="text" placeholder="Search name, code, HSN/SAC or category"
-            [ngModel]="search()" (ngModelChange)="onSearch($event)">
+            [ngModel]="list.search()" (ngModelChange)="list.onSearch($event)">
         </div>
       </div>
 
       <div class="card flush">
-        @if (loading()) {
+        @if (list.loading()) {
           <app-skeleton-rows [count]="5" />
-        } @else if (items().length === 0) {
+        } @else if (list.failed()) {
+          <app-empty-state icon="⚠" title="Could not load items"
+            message="Something went wrong fetching this page." />
+        } @else if (list.total() === 0 && !list.search()) {
           <app-empty-state icon="◫" title="No items yet" message="Add your first item so it can be searched onto invoices." />
-        } @else if (filtered().length === 0) {
+        } @else if (list.rows().length === 0) {
           <app-empty-state icon="⌕" title="No matching items" message="Try a different search term." />
         } @else {
           <div class="table-wrap">
@@ -69,7 +73,7 @@ interface ItemForm {
                 </tr>
               </thead>
               <tbody>
-                @for (it of paged(); track it._id) {
+                @for (it of list.rows(); track it._id) {
                   <tr>
                     <td data-label="Item">
                       <div class="strong">{{ it.name }}</div>
@@ -96,8 +100,8 @@ interface ItemForm {
               </tbody>
             </table>
           </div>
-          <app-pager [page]="page()" [pageSize]="pageSize()" [total]="filtered().length"
-            (pageChange)="page.set($event)" (pageSizeChange)="onPageSize($event)" />
+          <app-pager [page]="list.page()" [pageSize]="list.pageSize()" [total]="list.total()"
+            (pageChange)="list.onPage($event)" (pageSizeChange)="list.onPageSize($event)" />
         }
       </div>
 
@@ -301,10 +305,10 @@ interface ItemForm {
     </app-shell>
   `
 })
-export class ItemsComponent implements OnInit {
-  loading = signal(true);
-  items = signal<Item[]>([]);
-  search = signal('');
+export class ItemsComponent implements OnInit, OnDestroy {
+  /** Server-paginated and server-searched — the catalogue is no longer downloaded
+   *  in full just so the browser can filter it. */
+  list = new ServerList<Item>(params => this.api.items(params));
 
   modalOpen = signal(false);
   editing = signal<Item | null>(null);
@@ -327,39 +331,18 @@ export class ItemsComponent implements OnInit {
   gstRates = [0, 5, 12, 18, 28];
   fmtINR = fmtINR;
 
-  page = signal(1);
-  pageSize = signal(10);
-
-  filtered = computed(() => {
-    const q = this.search().trim().toLowerCase();
-    if (!q) return this.items();
-    return this.items().filter(it =>
-      (it.name || '').toLowerCase().includes(q) ||
-      (it.itemCode || '').toLowerCase().includes(q) ||
-      (it.hsn || '').toLowerCase().includes(q) ||
-      (it.category || '').toLowerCase().includes(q)
-    );
-  });
-
-  paged = computed(() => {
-    const start = (this.page() - 1) * this.pageSize();
-    return this.filtered().slice(start, start + this.pageSize());
-  });
-
   constructor(private api: ApiService, private toast: ToastService) {}
 
-  ngOnInit() { this.load(); }
-
-  onSearch(v: string) { this.search.set(v); this.page.set(1); }
-  onPageSize(v: number) { this.pageSize.set(v); this.page.set(1); }
-
-  load() {
-    this.loading.set(true);
-    this.api.items().subscribe({
-      next: list => { this.items.set(list); this.loading.set(false); },
-      error: err => { this.loading.set(false); this.toast.httpError(err); }
-    });
+  subtitle() {
+    const total = this.list.total();
+    if (this.list.search()) return `${total} matching ${total === 1 ? 'item' : 'items'}`;
+    return `${total} ${total === 1 ? 'item' : 'items'} in your catalog`;
   }
+
+  ngOnInit() { this.list.load(); }
+  ngOnDestroy() { this.list.dispose(); }
+
+  load() { this.list.refresh(); }
 
   private blankForm(): ItemForm {
     return {

@@ -41,7 +41,7 @@ test.before(async () => {
     { code: 'starter', name: 'Starter', monthlyPrice: 0, yearlyPrice: 0, userLimit: 5, invoiceLimit: 50, sortOrder: 0 }
   ]);
   server = app.listen(0);
-  await new Promise(resolve => server.once('listening', resolve));
+  await new Promise(resolve => { server.once('listening', resolve); });
   baseUrl = `http://127.0.0.1:${server.address().port}/api/v1`;
 });
 
@@ -49,7 +49,7 @@ test.after(async () => {
   if (!dbAvailable) return;
   await mongoose.connection.dropDatabase();
   await mongoose.disconnect();
-  await new Promise(resolve => server.close(resolve));
+  await new Promise(resolve => { server.close(resolve); });
 });
 
 async function call(method, path, { token, body } = {}) {

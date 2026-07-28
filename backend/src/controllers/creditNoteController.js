@@ -8,7 +8,8 @@ const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { calculateInvoiceTotals, roundMoney } = require('../services/gstService');
 const { nextCreditNoteNumber } = require('../services/invoiceNumberService');
 const { logAudit } = require('../services/auditService');
-const { toCsv } = require('../services/csvService');
+const { streamCsv } = require('../services/csvService');
+const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
 const { recalculateSettlement } = require('./invoiceController');
 
 /**
@@ -25,13 +26,30 @@ async function creditedAmount(invoiceId) {
   return roundMoney(agg?.total || 0);
 }
 
-const listCreditNotes = asyncHandler(async (req, res) => {
+const CREDIT_NOTE_SORTS = ['date', 'createdAt', 'creditNoteNumber'];
+
+function buildCreditNoteFilter(req) {
   const filter = tenantFilter(req);
   if (req.query.invoiceId) filter.invoiceId = req.query.invoiceId;
-  const notes = await CreditNote.find(filter)
+  if (req.query.status) filter.status = req.query.status;
+  if (req.query.reason) filter.reason = req.query.reason;
+  if (req.query.q) {
+    const term = escapeRegex(String(req.query.q).trim());
+    if (term) {
+      filter.$or = [
+        { creditNoteNumber: { $regex: term, $options: 'i' } },
+        { invoiceNumber: { $regex: term, $options: 'i' } }
+      ];
+    }
+  }
+  return filter;
+}
+
+const listCreditNotes = asyncHandler(async (req, res) => {
+  const page = await paginate(CreditNote, buildCreditNoteFilter(req), req.query, query => query
     .populate('clientId', 'companyName gstin')
-    .sort({ date: -1, createdAt: -1 });
-  res.json(notes);
+    .sort(parseSort(req.query, CREDIT_NOTE_SORTS, { date: -1, createdAt: -1 })));
+  res.json(page);
 });
 
 const getCreditNote = asyncHandler(async (req, res) => {
@@ -171,28 +189,30 @@ const creditSummary = asyncHandler(async (req, res) => {
 });
 
 const exportCreditNotesCsv = asyncHandler(async (req, res) => {
-  const notes = await CreditNote.find(tenantFilter(req))
+  const cursor = CreditNote.find(buildCreditNoteFilter(req))
     .populate('clientId', 'companyName gstin')
-    .sort({ date: -1 });
+    .sort({ date: -1 })
+    .cursor();
   const money = value => Number(value || 0).toFixed(2);
-  const csv = toCsv(notes, [
-    { label: 'Credit Note Number', value: n => n.creditNoteNumber },
-    { label: 'Date', value: n => n.date?.toISOString().slice(0, 10) },
-    { label: 'Original Invoice', value: n => n.invoiceNumber },
-    { label: 'Original Invoice Date', value: n => n.invoiceDate?.toISOString().slice(0, 10) || '' },
-    { label: 'Client', value: n => n.clientId?.companyName || n.billTo?.name || '' },
-    { label: 'GSTIN', value: n => n.clientId?.gstin || n.billTo?.gstin || '' },
-    { label: 'Reason', value: n => n.reason },
-    { label: 'Taxable Value', value: n => money(n.totals?.subtotal) },
-    { label: 'CGST', value: n => money(n.totals?.cgst) },
-    { label: 'SGST/UTGST', value: n => money(n.totals?.sgst) },
-    { label: 'IGST', value: n => money(n.totals?.igst) },
-    { label: 'Cess', value: n => money(n.totals?.cess) },
-    { label: 'Total Credited', value: n => money(n.totals?.total) }
-  ]);
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename="credit-notes.csv"');
-  res.send(csv);
+  await streamCsv(res, {
+    filename: 'credit-notes.csv',
+    cursor,
+    columns: [
+      { label: 'Credit Note Number', value: n => n.creditNoteNumber },
+      { label: 'Date', value: n => n.date?.toISOString().slice(0, 10) },
+      { label: 'Original Invoice', value: n => n.invoiceNumber },
+      { label: 'Original Invoice Date', value: n => n.invoiceDate?.toISOString().slice(0, 10) || '' },
+      { label: 'Client', value: n => n.clientId?.companyName || n.billTo?.name || '' },
+      { label: 'GSTIN', value: n => n.clientId?.gstin || n.billTo?.gstin || '' },
+      { label: 'Reason', value: n => n.reason },
+      { label: 'Taxable Value', value: n => money(n.totals?.subtotal) },
+      { label: 'CGST', value: n => money(n.totals?.cgst) },
+      { label: 'SGST/UTGST', value: n => money(n.totals?.sgst) },
+      { label: 'IGST', value: n => money(n.totals?.igst) },
+      { label: 'Cess', value: n => money(n.totals?.cess) },
+      { label: 'Total Credited', value: n => money(n.totals?.total) }
+    ]
+  });
 });
 
 module.exports = {

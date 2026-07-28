@@ -1,5 +1,6 @@
 const sgMail = require('@sendgrid/mail');
 const { env } = require('../config/env');
+const { logger } = require('../utils/logger');
 
 if (env.SENDGRID_API_KEY) {
   sgMail.setApiKey(env.SENDGRID_API_KEY);
@@ -60,7 +61,7 @@ function layout({ title, body, ctaLabel, ctaUrl, footer }) {
 async function sendEmail({ to, subject, text, html }) {
   if (!to) return { skipped: true, reason: 'no recipient address' };
   if (!env.SENDGRID_API_KEY) {
-    console.log(`Email skipped in local mode: to=${to} subject="${subject}"`);
+    logger.info('email skipped — no provider configured', { to, subject });
     return { skipped: true, reason: 'SENDGRID_API_KEY is not configured' };
   }
   try {
@@ -70,7 +71,7 @@ async function sendEmail({ to, subject, text, html }) {
     // SendGrid nests the useful part; surface it so a log entry is actually
     // diagnosable rather than just "failed".
     const detail = error.response?.body?.errors?.[0]?.message || error.message;
-    console.error(`Email failed: to=${to} subject="${subject}" — ${detail}`);
+    logger.error('email delivery failed', { to, subject, detail });
     return { failed: true, reason: detail };
   }
 }

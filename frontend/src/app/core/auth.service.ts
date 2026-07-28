@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { tap } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { AuthUser, Organisation } from './models';
+import { CacheService } from './cache.service';
 import { ToastService } from './toast.service';
 
 interface AuthResponse {
@@ -35,7 +36,12 @@ export class AuthService {
    *  still signed in until the user next clicked something. */
   private expiryTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private http: HttpClient, private router: Router, private toast: ToastService) {
+  constructor(
+    private http: HttpClient,
+    private router: Router,
+    private toast: ToastService,
+    private cache: CacheService
+  ) {
     this.scheduleExpiry();
   }
 
@@ -123,6 +129,11 @@ export class AuthService {
     localStorage.removeItem(this.orgKey);
     this.user.set(null);
     this.organisation.set(null);
+    // Responses are cached in memory for a short TTL to stop every navigation
+    // refetching everything. On sign-out that cache must go: on a shared machine
+    // the next person to sign in would otherwise be served the previous
+    // tenant's invoices from it.
+    this.cache.clear();
   }
 
   private store(res: AuthResponse) {

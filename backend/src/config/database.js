@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { env } = require('./env');
+const { logger } = require('../utils/logger');
 
 // A cold Atlas cluster or a container starting alongside its database often
 // isn't reachable on the very first attempt. Retrying with backoff turns that
@@ -7,7 +8,7 @@ const { env } = require('./env');
 const MAX_ATTEMPTS = 5;
 
 function wait(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise(resolve => { setTimeout(resolve, ms); });
 }
 
 async function connectDatabase() {
@@ -16,22 +17,22 @@ async function connectDatabase() {
   // Later disconnects (failover, network blip) are reported rather than
   // silently swallowed — /ready reflects readyState so traffic is withheld
   // while this is the case.
-  mongoose.connection.on('disconnected', () => console.warn('MongoDB disconnected'));
-  mongoose.connection.on('reconnected', () => console.log('MongoDB reconnected'));
-  mongoose.connection.on('error', error => console.error('MongoDB error:', error.message));
+  mongoose.connection.on('disconnected', () => logger.warn('MongoDB disconnected'));
+  mongoose.connection.on('reconnected', () => logger.info('MongoDB reconnected'));
+  mongoose.connection.on('error', error => logger.error('MongoDB error', { err: error }));
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
       await mongoose.connect(env.MONGO_URI, { serverSelectionTimeoutMS: 10000 });
-      console.log('Connected to MongoDB');
+      logger.info('connected to MongoDB');
       return mongoose.connection;
     } catch (error) {
       if (attempt === MAX_ATTEMPTS) {
-        console.error(`MongoDB connection failed after ${MAX_ATTEMPTS} attempts: ${error.message}`);
+        logger.error('MongoDB connection failed', { attempts: MAX_ATTEMPTS, err: error });
         throw error;
       }
       const delay = Math.min(1000 * 2 ** (attempt - 1), 8000);
-      console.warn(`MongoDB connection attempt ${attempt} failed (${error.message}) — retrying in ${delay}ms`);
+      logger.warn('MongoDB connection attempt failed — retrying', { attempt, delay, reason: error.message });
       await wait(delay);
     }
   }

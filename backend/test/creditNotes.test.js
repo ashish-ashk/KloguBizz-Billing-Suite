@@ -36,7 +36,7 @@ test.before(async () => {
   await mongoose.connection.dropDatabase();
   await Plan.create({ code: 'starter', name: 'Starter', monthlyPrice: 0, yearlyPrice: 0, userLimit: 5, invoiceLimit: 200, sortOrder: 0 });
   server = app.listen(0);
-  await new Promise(resolve => server.once('listening', resolve));
+  await new Promise(resolve => { server.once('listening', resolve); });
   baseUrl = `http://127.0.0.1:${server.address().port}/api/v1`;
 });
 
@@ -44,7 +44,7 @@ test.after(async () => {
   if (!dbAvailable) return;
   await mongoose.connection.dropDatabase();
   await mongoose.disconnect();
-  await new Promise(resolve => server.close(resolve));
+  await new Promise(resolve => { server.close(resolve); });
 });
 
 async function call(method, path, { token, body } = {}) {
@@ -241,7 +241,9 @@ test('credit notes are tenant-isolated', maybe(async () => {
   const created = await call('POST', '/credit-notes', { token: a.token, body: { invoiceId: invoice._id } });
 
   assert.equal((await call('GET', `/credit-notes/${created.body.creditNote._id}`, { token: b.token })).status, 404);
-  assert.equal((await call('GET', '/credit-notes', { token: b.token })).body.length, 0);
+  const bNotes = (await call('GET', '/credit-notes', { token: b.token })).body;
+  assert.equal(bNotes.data.length, 0);
+  assert.equal(bNotes.total, 0);
   // B cannot credit A's invoice either.
   assert.equal((await call('POST', '/credit-notes', { token: b.token, body: { invoiceId: invoice._id } })).status, 404);
 }));
