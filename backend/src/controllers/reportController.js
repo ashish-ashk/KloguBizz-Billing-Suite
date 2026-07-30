@@ -4,6 +4,7 @@ const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { toCsv } = require('../services/csvService');
 const { roundMoney, calculateLine } = require('../services/gstService');
+const { recordEvent, EVENT } = require('../services/usageEventService');
 
 /**
  * Resolves the reporting period from the query string.
@@ -149,6 +150,7 @@ async function buildSummary(req) {
 }
 
 const gstSummary = asyncHandler(async (req, res) => {
+  recordEvent({ req, type: EVENT.reportViewed, meta: { report: 'gst-summary', fy: req.query.fy ?? null } });
   res.json(await buildSummary(req));
 });
 
@@ -198,6 +200,7 @@ const exportGstSummaryCsv = asyncHandler(async (req, res) => {
     hsnCsv
   ].join('\r\n');
 
+  recordEvent({ req, type: EVENT.exportCsv, meta: { of: 'gst-summary' } });
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename="gst-summary-${period.label}.csv"`);
   res.send(csv);

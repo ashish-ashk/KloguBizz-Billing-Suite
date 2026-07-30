@@ -19,6 +19,9 @@ const { paginate, parsePageParams, buildEnvelope, escapeRegex, parseSort } = req
 const { streamCsv } = require('../services/csvService');
 const { invalidateMasterCache } = require('../services/masterService');
 const { invalidatePlatformDefaults } = require('../services/platformSettingsService');
+const { invalidateFeatureFlagCache } = require('../services/featureFlagService');
+const { invalidatePlatformNotice } = require('../services/noticeService');
+const { computeRecurringRevenue } = require('../services/metricsService');
 const { assertValidSetting } = require('../validators/settings');
 const { serialiseOrganisation } = require('../services/brandingAssetService');
 const { startSessionIfSupported, withTransaction } = require('../utils/transaction');
@@ -34,15 +37,17 @@ const SUPERADMIN_ORG_FIELDS = [
 ];
 
 const overview = asyncHandler(async (req, res) => {
-  const [organisations, users, invoices, payments, orgsByStatus, revenueAgg] = await Promise.all([
+  const [organisations, users, invoices, payments, orgsByStatus, gmvAgg, recurring] = await Promise.all([
     Organisation.countDocuments(),
     User.countDocuments(),
     Invoice.countDocuments(),
     Payment.countDocuments(),
     Organisation.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
-    Payment.aggregate([{ $match: { status: 'success' } }, { $group: { _id: null, total: { $sum: '$amount' } } }])
+    Payment.aggregate([{ $match: { status: 'success' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
+    computeRecurringRevenue()
   ]);
   const statusCounts = Object.fromEntries(orgsByStatus.map(s => [s._id, s.count]));
+  const gmv = Math.round(gmvAgg[0]?.total || 0);
   res.json({
     organisations,
     users,
@@ -51,7 +56,20 @@ const overview = asyncHandler(async (req, res) => {
     active: statusCounts.active || 0,
     trial: statusCounts.trial || 0,
     suspended: statusCounts.suspended || 0,
-    totalRevenue: revenueAgg[0]?.total || 0
+    cancelled: statusCounts.cancelled || 0,
+    /**
+     * The sum of every successful tenant payment — money our customers collected
+     * from *their* customers. This field was called `totalRevenue` and rendered as
+     * "Platform Revenue", which it never was: it is GMV, and on a healthy platform
+     * it is two or three orders of magnitude larger than what we earn. Kept under
+     * the old name too so an older client still renders, but named correctly here
+     * and superseded by `mrr`/`arr` below.
+     */
+    gmv,
+    totalRevenue: gmv,
+    mrr: recurring.mrr,
+    arr: recurring.arr,
+    payingOrgs: recurring.payingOrgs
   });
 });
 
@@ -149,7 +167,10 @@ const createOrganisation = asyncHandler(async (req, res) => {
   org.ownerId = admin._id;
   await org.save();
   await Subscription.create({ orgId: org._id, planCode: plan, status: 'active', billingCycle: 'monthly' });
-  logAudit({ req, action: 'org.created', entity: 'organisation', entityId: org._id, meta: { name, plan } });
+  // `orgId` names the tenant this concerns. A superadmin has no organisation of
+  // their own, so without it these entries were filed against nothing and the audit
+  // console's per-org filter could never find them.
+  logAudit({ req, action: 'org.created', entity: 'organisation', entityId: org._id, orgId: org._id, meta: { name, plan } });
   res.status(201).json({
     organisation: serialiseOrganisation(org),
     admin: { ...admin.toObject(), passwordHash: undefined },
@@ -159,9 +180,19 @@ const createOrganisation = asyncHandler(async (req, res) => {
 
 const updateOrganisation = asyncHandler(async (req, res) => {
   const update = pickFields(req.body, SUPERADMIN_ORG_FIELDS);
+  // A status change through the generic editor still records who and when, so the
+  // provenance the tenant detail page shows is never blank just because the change
+  // came from the profile form rather than the Suspend action. The *reason* is only
+  // required by that action (platformController.setTenantStatus), which is what the
+  // console uses for suspend and cancel.
+  if (update.status !== undefined) {
+    update.statusChangedAt = new Date();
+    update.statusChangedBy = req.user?.name || req.user?.email || '';
+    if (update.status === 'active' || update.status === 'trial') update.statusReason = '';
+  }
   const org = await Organisation.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
   if (!org) throw httpError(404, 'Organisation not found');
-  logAudit({ req, action: 'org.updated', entity: 'organisation', entityId: org._id, meta: { fields: Object.keys(update) } });
+  logAudit({ req, action: 'org.updated', entity: 'organisation', entityId: org._id, orgId: org._id, meta: { fields: Object.keys(update) } });
   res.json(serialiseOrganisation(org));
 });
 
@@ -220,6 +251,9 @@ const deleteOrganisation = asyncHandler(async (req, res) => {
     action: 'org.deleted',
     entity: 'organisation',
     entityId: req.params.id,
+    // Retained deliberately: AuditLog is excluded from the delete cascade, so this
+    // entry outlives its subject and is the record that the tenant existed.
+    orgId: org._id,
     // What was actually removed, so the audit entry is evidence rather than a
     // note that something happened.
     meta: { name: org.name, plan: org.plan, deleted, atomic }
@@ -361,9 +395,13 @@ const saveSetting = asyncHandler(async (req, res) => {
     { value },
     { new: true, upsert: true }
   );
-  // The platform template default is cached on the PDF render path; drop it so
-  // the change takes effect on the very next invoice.
+  // Three of these keys are cached on hot read paths. Dropping the matching entry
+  // is what makes a console change take effect on the next request rather than up
+  // to a minute later — long enough for an operator to conclude the save failed
+  // and do it again.
   if (req.params.key === 'defaultInvoiceTemplate') invalidatePlatformDefaults();
+  if (req.params.key === 'featureFlags') invalidateFeatureFlagCache();
+  if (req.params.key === 'platformNotice') invalidatePlatformNotice();
   logAudit({ req, action: 'settings.saved', entity: 'setting', entityId: req.params.key });
   res.json({ key: setting.key, value: setting.value });
 });

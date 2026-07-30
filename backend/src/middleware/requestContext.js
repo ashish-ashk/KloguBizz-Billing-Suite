@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { logger } = require('../utils/logger');
+const requestMetrics = require('../utils/requestMetrics');
 
 /**
  * Request correlation.
@@ -50,6 +51,14 @@ function requestLogger(req, res, next) {
 
   res.on('finish', () => {
     const durationMs = Number(process.hrtime.bigint() - req.startedAt) / 1e6;
+    // Feeds the platform console's live panel. In-process and bounded — see
+    // utils/requestMetrics.js — so this is an array write, not a second log sink.
+    requestMetrics.record({
+      method: req.method,
+      path: req.originalUrl.split('?')[0],
+      status: res.statusCode,
+      durationMs
+    });
     const context = {
       method: req.method,
       // `originalUrl` minus the query string: query values can carry search

@@ -8,6 +8,7 @@ const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { calculateInvoiceTotals, roundMoney } = require('../services/gstService');
 const { nextCreditNoteNumber } = require('../services/invoiceNumberService');
 const { logAudit } = require('../services/auditService');
+const { recordEvent, EVENT } = require('../services/usageEventService');
 const { streamCsv } = require('../services/csvService');
 const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
 const { recalculateSettlement } = require('./invoiceController');
@@ -165,6 +166,7 @@ const createCreditNote = asyncHandler(async (req, res) => {
     entityId: note._id,
     meta: { creditNoteNumber: note.creditNoteNumber, invoiceNumber: invoice.invoiceNumber, total: totals.total, reason: note.reason }
   });
+  recordEvent({ req, type: EVENT.creditNote, value: totals.total, meta: { creditNoteNumber: note.creditNoteNumber } });
 
   res.status(201).json({ creditNote: note, invoice });
 });

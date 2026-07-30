@@ -21,8 +21,19 @@ export class ThemeService {
     });
   }
 
-  /** Business/Enterprise plans unlock the personal light/dark quick-toggle. */
+  /**
+   * Whether the personal light/dark quick-toggle is available.
+   *
+   * Historically plan-gated to Business/Enterprise. The `darkMode` feature flag now
+   * overrides that per organisation, which is what makes the platform console's
+   * toggle real rather than decorative: an operator can grant it to a starter tenant
+   * who asked, or withdraw it, without moving them between plans. The flag defaults
+   * to on, so any tenant whose flags have loaded gets it — the plan check remains as
+   * the fallback for the moment before `/auth/me` returns.
+   */
   canToggleDarkMode(): boolean {
+    const flags = this.auth.flags();
+    if (Object.prototype.hasOwnProperty.call(flags, 'darkMode')) return flags['darkMode'] === true;
     return DARK_TOGGLE_PLANS.includes(this.auth.organisation()?.plan || '');
   }
 

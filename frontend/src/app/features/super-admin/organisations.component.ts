@@ -1,6 +1,7 @@
 import { Component, OnDestroy, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, PagerComponent, OverflowMenuComponent } from '../../shared/ui';
 import { IconComponent } from '../../shared/icons';
 import { ApiService } from '../../core/api.service';
@@ -22,7 +23,7 @@ interface OrgEditForm {
 @Component({
   selector: 'app-super-organisations',
   standalone: true,
-  imports: [CommonModule, FormsModule, ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, IconComponent, PagerComponent, OverflowMenuComponent],
+  imports: [CommonModule, FormsModule, RouterLink, ModalComponent, PillComponent, AvatarComponent, EmptyStateComponent, SkeletonRowsComponent, IconComponent, PagerComponent, OverflowMenuComponent],
   template: `
     <div class="page-head">
       <div>
@@ -57,8 +58,11 @@ interface OrgEditForm {
       </div>
       <div class="card metric purple">
         <div class="accent"></div>
-        <div class="metric-row"><span class="label">Platform Revenue</span><span class="m-icon"><app-icon name="rupee" [size]="15" /></span></div>
-        <div class="value">{{ fmtINR(overview()?.totalRevenue || 0, true) }}</div>
+        <div class="metric-row"><span class="label">MRR</span><span class="m-icon"><app-icon name="rupee" [size]="15" /></span></div>
+        <div class="value">{{ fmtINR(overview()?.mrr || 0, true) }}</div>
+        <!-- This tile used to read "Platform Revenue" and show the sum of every
+             tenant payment — our customers' revenue, not ours. -->
+        <div class="sub">GMV {{ fmtINR(overview()?.gmv || overview()?.totalRevenue || 0, true) }}</div>
       </div>
     </section>
 
@@ -85,7 +89,7 @@ interface OrgEditForm {
           <table class="table stack-mobile">
             <thead>
               <tr>
-                <th>Organization</th><th>Owner</th><th>Plan</th><th>Users</th><th>Invoices</th><th>Created</th><th>Status</th><th style="text-align:right">Actions</th>
+                <th>Organization</th><th>Owner</th><th>Plan</th><th>Users</th><th>Invoices</th><th>Last active</th><th>Status</th><th style="text-align:right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -107,11 +111,15 @@ interface OrgEditForm {
                   <td data-label="Plan" data-priority="high"><span [class]="'pill ' + planClass(o.plan)">{{ planLabel(o.plan) }}</span></td>
                   <td class="num" data-label="Users">{{ o.userCount }}</td>
                   <td class="num" data-label="Invoices">{{ o.invoiceCount }}</td>
-                  <td class="muted" data-label="Created">{{ fmtDate(o.createdAt) }}</td>
+                  <!-- Whether a tenant is actually using the product, which the
+                       list could not show before Phase 4 captured it. -->
+                  <td class="muted" data-label="Last active">{{ o.lastActiveAt ? fmtDate(o.lastActiveAt) : 'Never' }}</td>
                   <td data-label="Status" data-priority="high"><app-pill [status]="o.status" /></td>
                   <td data-label="">
                     <div class="actions">
-                      <button class="btn ghost sm" type="button" (click)="openView(o)">View</button>
+                      <!-- The drill-down replaces the old modal, which repeated eight
+                           fields already visible in this row. -->
+                      <a class="btn ghost sm" [routerLink]="['/super-admin/organisations', o._id]">Open</a>
                       <button class="btn secondary sm" type="button" (click)="openEdit(o)">Edit</button>
                       <app-overflow-menu>
                         @if (o.status !== 'suspended') {

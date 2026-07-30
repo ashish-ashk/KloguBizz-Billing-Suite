@@ -40,8 +40,15 @@ export const routes: Routes = [
     canActivate: [superAdminGuard],
     loadComponent: () => import('./features/super-admin/super-admin-layout.component').then(m => m.SuperAdminLayoutComponent),
     children: [
-      { path: '', pathMatch: 'full', redirectTo: 'organisations' },
+      // The console now opens on the platform dashboard rather than the org list.
+      // The list is a directory; the dashboard is the screen that says whether the
+      // business is healthy, which is what an operator signs in for.
+      { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
+      { path: 'dashboard', loadComponent: () => import('./features/super-admin/dashboard.component').then(m => m.SuperDashboardComponent) },
       { path: 'organisations', loadComponent: () => import('./features/super-admin/organisations.component').then(m => m.SuperOrganisationsComponent) },
+      // Declared after the literal path so it cannot swallow it.
+      { path: 'organisations/:id', loadComponent: () => import('./features/super-admin/tenant-detail.component').then(m => m.SuperTenantDetailComponent) },
+      { path: 'audit', loadComponent: () => import('./features/super-admin/audit.component').then(m => m.SuperAuditComponent) },
       { path: 'masters', loadComponent: () => import('./features/super-admin/masters.component').then(m => m.SuperMastersComponent) },
       { path: 'templates', loadComponent: () => import('./features/super-admin/templates.component').then(m => m.SuperTemplatesComponent) },
       { path: 'reminders', loadComponent: () => import('./features/super-admin/reminders.component').then(m => m.SuperRemindersComponent) },

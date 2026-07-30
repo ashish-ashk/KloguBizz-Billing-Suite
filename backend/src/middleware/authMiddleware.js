@@ -4,6 +4,9 @@ const { User } = require('../models/User');
 const { Organisation } = require('../models/Organisation');
 const { httpError } = require('../utils/httpError');
 const { asyncHandler } = require('../utils/asyncHandler');
+const { recordActivity } = require('../services/usageEventService');
+const { logAudit } = require('../services/auditService');
+const { isForbiddenWhileImpersonating } = require('../services/impersonationService');
 
 // Routes a suspended tenant may still write to. Suspension is a commercial
 // measure, not a punishment: the tenant keeps access to the pages that let them
@@ -39,6 +42,61 @@ const protect = asyncHandler(async (req, res, next) => {
   req.orgId = user.orgId ? String(user.orgId) : null;
 
   /**
+   * Impersonation ("view as tenant").
+   *
+   * The claim is inside the signed token, so it cannot be removed to launder an
+   * impersonation session into an ordinary one. Everything downstream — the audit
+   * writer, the response payloads, the banner the operator sees — keys off
+   * `req.impersonation`, so there is exactly one place that decides whether a
+   * request is being made by someone wearing another identity.
+   */
+  if (payload.imp) {
+    // A superadmin account is never a valid impersonation target: it would be a
+    // lateral move to full platform control that the audit trail would attribute
+    // to the *target*. The issuing endpoint refuses it too; this is the check that
+    // still holds if a token outlives a role change.
+    if (user.role === 'superadmin') {
+      throw httpError(403, 'A platform account cannot be impersonated.', 'IMPERSONATION_FORBIDDEN');
+    }
+
+    req.impersonation = {
+      by: payload.imp.by,
+      byName: payload.imp.byName,
+      readOnly: Boolean(payload.imp.ro),
+      expiresAt: payload.exp ? new Date(payload.exp * 1000) : null
+    };
+
+    if (isForbiddenWhileImpersonating(req.originalUrl)) {
+      throw httpError(
+        403,
+        'That action cannot be performed while viewing as a tenant. It changes the account’s credentials or ownership.',
+        'IMPERSONATION_FORBIDDEN'
+      );
+    }
+
+    if (req.impersonation.readOnly && !isReadOnlyRequest(req.method)) {
+      throw httpError(
+        403,
+        'This is a read-only support session. Start a read-write session to make changes.',
+        'IMPERSONATION_READ_ONLY'
+      );
+    }
+
+    // Every write made while impersonating is recorded, not just the ones a
+    // controller happens to audit. This is the data-access half of the guarantee:
+    // a tenant can be told exactly what support did inside their account.
+    if (!isReadOnlyRequest(req.method)) {
+      logAudit({
+        req,
+        action: 'impersonation.write',
+        entity: 'organisation',
+        entityId: req.orgId,
+        meta: { method: req.method, path: req.originalUrl.split('?')[0] }
+      });
+    }
+  }
+
+  /**
    * Enforce organisation suspension.
    *
    * `Organisation.status` accepted 'suspended' and the super-admin panel set
@@ -47,10 +105,13 @@ const protect = asyncHandler(async (req, res, next) => {
    * button did nothing at all.
    *
    * The super admin is exempt: they operate above tenants and need to be able
-   * to work on a suspended one.
+   * to work on a suspended one. An *impersonated* session is not exempt — the
+   * point of impersonation is to see what the customer sees, and a support
+   * session that could write to a suspended account would be a way around the
+   * suspension.
    */
   if (req.orgId && user.role !== 'superadmin') {
-    const org = await Organisation.findById(req.orgId).select('status').lean();
+    const org = await Organisation.findById(req.orgId).select('status statusReason').lean();
     if (!org) throw httpError(401, 'Your organisation no longer exists.');
 
     if (org.status === 'suspended' || org.status === 'cancelled') {
@@ -59,11 +120,15 @@ const protect = asyncHandler(async (req, res, next) => {
       // records — it is their business data, and withholding it would be worse
       // than unhelpful. Writes are refused.
       if (!allowed && !isReadOnlyRequest(req.method)) {
+        // The reason, when one was given, is included: "suspended" with no
+        // explanation is a support ticket, and the tenant is the person who most
+        // needs to know why.
+        const because = org.statusReason ? ` Reason: ${org.statusReason}` : '';
         throw httpError(
           403,
-          org.status === 'suspended'
+          (org.status === 'suspended'
             ? 'This account is suspended, so changes cannot be saved. Your existing records are still available to view and export. Please contact support to restore access.'
-            : 'This account has been cancelled, so changes cannot be saved. Your existing records are still available to view and export.',
+            : 'This account has been cancelled, so changes cannot be saved. Your existing records are still available to view and export.') + because,
           org.status === 'suspended' ? 'ORG_SUSPENDED' : 'ORG_CANCELLED'
         );
       }
@@ -72,6 +137,20 @@ const protect = asyncHandler(async (req, res, next) => {
     // re-querying the organisation.
     req.orgStatus = org.status;
   }
+
+  /**
+   * Usage capture.
+   *
+   * One row per user per day, deduplicated in memory — see
+   * services/usageEventService.js. Placed here rather than in a controller
+   * because "was this tenant active" is a property of *any* authenticated
+   * request, and because there is then no instrumentation point to forget.
+   *
+   * An impersonated request is deliberately excluded: support reading a tenant's
+   * invoices is not the tenant using the product, and counting it would make the
+   * at-risk list quietly wrong for exactly the accounts support is looking at.
+   */
+  if (!req.impersonation) recordActivity(req);
 
   next();
 });

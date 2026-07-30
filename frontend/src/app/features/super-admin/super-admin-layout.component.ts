@@ -8,7 +8,9 @@ import { CommandItem, QuickSearchComponent } from '../../shared/quick-search.com
 const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
 
 const SUPER_ADMIN_COMMANDS: CommandItem[] = [
+  { label: 'Platform Overview', route: '/super-admin/dashboard', icon: 'dashboard' },
   { label: 'Organizations', route: '/super-admin/organisations', icon: 'package' },
+  { label: 'Audit & Security', route: '/super-admin/audit', icon: 'shield' },
   { label: 'Masters', route: '/super-admin/masters', icon: 'template' },
   { label: 'Invoice Templates', route: '/super-admin/templates', icon: 'invoice' },
   { label: 'Reminders & Receipts', route: '/super-admin/reminders', icon: 'creditCard' },
@@ -40,7 +42,9 @@ const SUPER_ADMIN_COMMANDS: CommandItem[] = [
         <div class="sidebar-scroll">
           <nav class="nav" (click)="menuOpen.set(false)">
             <div class="nav-section">Core Management</div>
+            <a routerLink="/super-admin/dashboard" routerLinkActive="active" title="Platform Overview"><span class="nav-icon"><app-icon name="dashboard" /></span><span class="nav-label">Platform Overview</span></a>
             <a routerLink="/super-admin/organisations" routerLinkActive="active" title="Organizations"><span class="nav-icon"><app-icon name="package" /></span><span class="nav-label">Organizations</span></a>
+            <a routerLink="/super-admin/audit" routerLinkActive="active" title="Audit &amp; Security"><span class="nav-icon"><app-icon name="shield" /></span><span class="nav-label">Audit &amp; Security</span></a>
             <a routerLink="/super-admin/masters" routerLinkActive="active" title="Masters"><span class="nav-icon"><app-icon name="template" /></span><span class="nav-label">Masters</span></a>
             <div class="nav-section">Global Settings</div>
             <a routerLink="/super-admin/templates" routerLinkActive="active" title="Invoice Templates"><span class="nav-icon"><app-icon name="invoice" /></span><span class="nav-label">Invoice Templates</span></a>

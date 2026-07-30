@@ -859,6 +859,56 @@ app-quick-search { display: contents; }
 .info-box.ok { background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
 .info-box.danger { background: var(--red-bg); border-color: var(--red-border); color: var(--red); }
 
+/* ── Impersonation bar ──────────────────────────────────────────────────────
+   Shown while a platform operator is viewing a tenant's account ("view as
+   tenant"). Fixed, full-width and above everything including the sidebar and
+   the floating hamburger, because the one failure mode this feature must not
+   have is someone forgetting whose account they are in.
+
+   Read-write sessions are red on purpose. A read-only session cannot change
+   anything, so amber is proportionate; a read-write one is editing a
+   customer's real books.
+
+   The layout offset is applied via a class on <body> (set by AppShellComponent)
+   rather than by wrapping the app in a container: the sidebar, topbar and
+   hamburger are all `position: fixed`, so nothing short of moving each of them
+   individually makes room.                                                   */
+.impersonation-bar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 70;
+  height: var(--imp-bar-h);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 clamp(10px, 2vw, 20px);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--red);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12);
+}
+.impersonation-bar.readonly { background: var(--amber); }
+.impersonation-bar .imp-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.impersonation-bar .imp-timer { opacity: 0.85; font-weight: 500; }
+.impersonation-bar .btn {
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #fff;
+}
+.impersonation-bar .btn:hover { background: rgba(255, 255, 255, 0.3); }
+
+:root { --imp-bar-h: 34px; }
+
+/* Every fixed element shifts down by the bar's height, and the scrollable
+   content gains matching headroom. */
+body.has-impersonation-bar .sidebar { top: var(--imp-bar-h); }
+body.has-impersonation-bar .topbar { top: var(--imp-bar-h); }
+body.has-impersonation-bar .menu-toggle { top: calc(13px + var(--imp-bar-h)); }
+body.has-impersonation-bar .main { padding-top: var(--imp-bar-h); }
+body.has-impersonation-bar .drawer-backdrop { top: var(--imp-bar-h); }
+
 .bulk-upload { display: grid; gap: 14px; }
 .bulk-steps { margin: 0; padding-left: 20px; display: grid; gap: 14px; font-size: 13px; color: var(--text-mid); }
 .bulk-steps li { padding-left: 2px; }

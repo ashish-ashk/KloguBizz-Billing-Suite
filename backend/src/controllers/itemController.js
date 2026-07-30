@@ -4,6 +4,7 @@ const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { buildItemTemplateBuffer, parseItemWorkbook } = require('../services/itemImportService');
 const { logAudit } = require('../services/auditService');
+const { recordEvent, EVENT } = require('../services/usageEventService');
 const { pickFields } = require('../utils/pickFields');
 const { assertValidMaster } = require('../services/masterService');
 const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
@@ -56,6 +57,7 @@ const createItem = asyncHandler(async (req, res) => {
   await assertMasters(fields);
   const item = await Item.create({ ...fields, orgId: req.orgId });
   logAudit({ req, action: 'item.created', entity: 'item', entityId: item._id, meta: { name: item.name } });
+  recordEvent({ req, type: EVENT.itemCreated });
   res.status(201).json(item);
 });
 
@@ -121,6 +123,7 @@ const bulkUploadItems = asyncHandler(async (req, res) => {
 
   failedResults.sort((a, b) => a.row - b.row);
   logAudit({ req, action: 'item.bulk_import', entity: 'item', meta: { totalRows, created, failed: failedResults.length } });
+  recordEvent({ req, type: EVENT.itemBulkUpload, meta: { totalRows, created } });
   res.json({ totalRows, created, failed: failedResults });
 });
 

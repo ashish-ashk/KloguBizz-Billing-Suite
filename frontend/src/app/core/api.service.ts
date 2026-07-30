@@ -5,9 +5,12 @@ import { tap } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 import { CacheService } from './cache.service';
 import {
-  AuditEntry, AuditFilters, Client, CreditNote, CreditNoteReason, CreditSummary, GstSummary, Invoice, InvoiceItem,
-  InvoiceStats, Item, ItemBulkUploadResult, ListParams, Master, MastersResponse,
-  Organisation, OrgSummary, OrgUser, Page, Payment, Plan, PlanUsage, PublicBranding, Reminder, Subscription, SuperOverview
+  AttentionLists, AuditEntry, AuditFilters, Client, CreditNote, CreditNoteReason, CreditSummary,
+  FeatureAdoption, FeatureFlags, GstSummary, ImpersonationSession, Invoice, InvoiceItem,
+  InvoiceStats, Item, ItemBulkUploadResult, ListParams, LoginHistoryFilters, Master, MastersResponse,
+  MetricsSeries, Organisation, OrgSummary, OrgSupportContext, OrgUser, Page, Payment, Plan, PlanUsage,
+  PlatformMe, PlatformSummary, PlatformUser, PublicBranding, Reminder, SecurityAlerts, Subscription,
+  SuperOverview, SystemHealth, TenantDetail, TenantNotice
 } from './models';
 
 /**
@@ -376,5 +379,164 @@ export class ApiService {
       params: this.params(filters),
       responseType: 'blob'
     });
+  }
+
+  // ── Platform console (Phase 4) ───────────────
+  //
+  // Reads are cached with the usual 30s TTL; every action invalidates the
+  // `superadmin` namespace, because all of them change something the console is
+  // showing somewhere else on the page.
+
+  /** What this operator's platform role permits. Read once per console load. */
+  platformMe() {
+    return this.cache.through(`${NS.superadmin}:me`, () => this.http.get<PlatformMe>(`${this.api}/superadmin/me`));
+  }
+
+  platformSummary() {
+    return this.cache.through(`${NS.superadmin}:metrics`, () => this.http.get<PlatformSummary>(`${this.api}/superadmin/metrics/summary`));
+  }
+  platformSeries(days = 30) {
+    return this.cache.through(
+      this.key(`${NS.superadmin}:series`, { days }),
+      () => this.http.get<MetricsSeries>(`${this.api}/superadmin/metrics/series`, { params: this.params({ days }) })
+    );
+  }
+  /** The two actionable lists — at-risk tenants and expiring trials — together,
+   *  because the dashboard shows them side by side. */
+  platformAttention(params: ListParams = {}) {
+    return this.cache.through(
+      this.key(`${NS.superadmin}:attention`, params),
+      () => this.http.get<AttentionLists>(`${this.api}/superadmin/metrics/attention`, { params: this.params(params) })
+    );
+  }
+  platformAdoption(days = 30) {
+    return this.cache.through(
+      this.key(`${NS.superadmin}:adoption`, { days }),
+      () => this.http.get<FeatureAdoption>(`${this.api}/superadmin/metrics/adoption`, { params: this.params({ days }) })
+    );
+  }
+  rebuildMetrics(days = 30) {
+    return this.afterWrite(
+      this.http.post<{ ok: boolean; days: number; from: string; to: string }>(`${this.api}/superadmin/metrics/rebuild`, { days }),
+      NS.superadmin
+    );
+  }
+  systemHealth() {
+    // Deliberately uncached: the point of a health panel is that it is current.
+    return this.http.get<SystemHealth>(`${this.api}/superadmin/system/health`);
+  }
+
+  // Tenant drill-down
+  tenantDetail(id: string) {
+    return this.cache.through(`${NS.superadmin}:org:${id}`, () => this.http.get<TenantDetail>(`${this.api}/superadmin/organisations/${id}`));
+  }
+  tenantInvoices(id: string, params: ListParams = {}) {
+    return this.list<Invoice>(`${NS.superadmin}:org:${id}:invoices`, `/superadmin/organisations/${id}/invoices`, params);
+  }
+  tenantTimeline(id: string, params: ListParams = {}) {
+    return this.list<AuditEntry>(`${NS.superadmin}:org:${id}:timeline`, `/superadmin/organisations/${id}/timeline`, params);
+  }
+
+  // Tenant lifecycle actions
+  /** Suspend, cancel or reactivate. A reason is mandatory for the first two — the
+   *  tenant is shown it. */
+  setTenantStatus(id: string, status: string, reason?: string) {
+    return this.afterWrite(
+      this.http.post<Organisation>(`${this.api}/superadmin/organisations/${id}/status`, { status, reason }),
+      NS.superadmin
+    );
+  }
+  setTenantLimits(id: string, payload: { userLimit: number | null; invoiceLimit: number | null; note?: string }) {
+    return this.afterWrite(
+      this.http.put<{ limitOverrides: Organisation['limitOverrides']; usage: PlanUsage }>(`${this.api}/superadmin/organisations/${id}/limits`, payload),
+      NS.superadmin
+    );
+  }
+  setTenantFlags(id: string, flags: Record<string, boolean>) {
+    return this.afterWrite(
+      this.http.put<{ overrides: Record<string, boolean>; effective: FeatureFlags }>(`${this.api}/superadmin/organisations/${id}/flags`, { flags }),
+      NS.superadmin
+    );
+  }
+  setTenantTrial(id: string, payload: { days?: number; endsAt?: string; end?: boolean }) {
+    return this.afterWrite(
+      this.http.post<Organisation>(`${this.api}/superadmin/organisations/${id}/trial`, payload),
+      NS.superadmin
+    );
+  }
+  setTenantNotice(id: string, payload: { message: string; level?: string; expiresAt?: string | null }) {
+    return this.afterWrite(
+      this.http.put<{ notice: TenantNotice | null }>(`${this.api}/superadmin/organisations/${id}/notice`, payload),
+      NS.superadmin
+    );
+  }
+  setTenantSupport(id: string, payload: OrgSupportContext) {
+    return this.afterWrite(
+      this.http.put<{ support: OrgSupportContext }>(`${this.api}/superadmin/organisations/${id}/support`, payload),
+      NS.superadmin
+    );
+  }
+  forceLogoutOrg(id: string) {
+    return this.afterWrite(
+      this.http.post<{ ok: boolean; users: number }>(`${this.api}/superadmin/organisations/${id}/force-logout`, {}),
+      NS.superadmin
+    );
+  }
+  /** Starts a "view as tenant" session. The returned token replaces the operator's
+   *  own until they exit — see AuthService.startImpersonation. */
+  impersonate(id: string, payload: { userId?: string; readOnly: boolean; reason: string }) {
+    return this.http.post<ImpersonationSession>(`${this.api}/superadmin/organisations/${id}/impersonate`, payload);
+  }
+
+  // Tenant user actions
+  setTenantUser(id: string, payload: { role?: string; status?: string }) {
+    return this.afterWrite(this.http.put<OrgUser>(`${this.api}/superadmin/users/${id}`, payload), NS.superadmin);
+  }
+  /** `link` emails the normal reset link and the operator never sees a password;
+   *  `temporary` returns one once, for when the address no longer receives mail.
+   *  Both revoke every session. */
+  resetTenantUserPassword(id: string, mode: 'link' | 'temporary' = 'link') {
+    return this.afterWrite(
+      this.http.post<{ ok: boolean; mode: string; tempPassword?: string; resetUrl?: string; delivered?: boolean; message: string }>(
+        `${this.api}/superadmin/users/${id}/reset-password`, { mode }
+      ),
+      NS.superadmin
+    );
+  }
+  unlockTenantUser(id: string) {
+    return this.afterWrite(
+      this.http.post<{ ok: boolean; wasLocked: boolean }>(`${this.api}/superadmin/users/${id}/unlock`, {}),
+      NS.superadmin
+    );
+  }
+  forceLogoutTenantUser(id: string) {
+    return this.afterWrite(this.http.post<{ ok: boolean }>(`${this.api}/superadmin/users/${id}/force-logout`, {}), NS.superadmin);
+  }
+
+  // Platform accounts
+  platformUsers() {
+    return this.cache.through(`${NS.superadmin}:platform-users`, () => this.http.get<PlatformUser[]>(`${this.api}/superadmin/platform-users`));
+  }
+  setPlatformRole(id: string, platformRole: string) {
+    return this.afterWrite(
+      this.http.put<PlatformUser>(`${this.api}/superadmin/platform-users/${id}/role`, { platformRole }),
+      NS.superadmin
+    );
+  }
+
+  /** A banner for every tenant. An empty message clears it. */
+  setBroadcast(payload: { message: string; level?: string; expiresAt?: string | null }) {
+    return this.afterWrite(this.http.put<TenantNotice>(`${this.api}/superadmin/broadcast`, payload), NS.superadmin);
+  }
+
+  // Security console
+  loginHistory(filters: LoginHistoryFilters = {}) {
+    return this.list<AuditEntry>(`${NS.superadmin}:logins`, '/superadmin/security/logins', filters);
+  }
+  securityAlerts(hours = 24) {
+    return this.cache.through(
+      this.key(`${NS.superadmin}:alerts`, { hours }),
+      () => this.http.get<SecurityAlerts>(`${this.api}/superadmin/security/alerts`, { params: this.params({ hours }) })
+    );
   }
 }

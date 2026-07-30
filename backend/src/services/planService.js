@@ -11,6 +11,21 @@ async function getPlanForOrg(orgId) {
   return { org, plan };
 }
 
+/**
+ * The limit actually in force for one resource.
+ *
+ * A per-organisation override wins over the plan. The alternative, before this
+ * existed, was to invent a bespoke plan for every tenant who needed one extra seat
+ * — which then appears in the public pricing table and in MRR-by-plan — or to
+ * upgrade them to a tier they didn't ask for. A `null` override means "no override",
+ * not "unlimited"; unlimited is expressed by the plan itself having no limit.
+ */
+function effectiveLimit(planLimit, override) {
+  const value = Number(override);
+  if (Number.isFinite(value) && value > 0) return value;
+  return planLimit ?? null;
+}
+
 // Usage counters shown on the subscription page and used for quota checks.
 async function getUsage(orgId) {
   const { org, plan } = await getPlanForOrg(orgId);
@@ -21,13 +36,22 @@ async function getUsage(orgId) {
     User.countDocuments({ orgId, status: { $ne: 'disabled' } }),
     Invoice.countDocuments({ orgId, createdAt: { $gte: monthStart } })
   ]);
+  const overrides = org.limitOverrides || {};
+  const userLimit = effectiveLimit(plan?.userLimit, overrides.userLimit);
+  const invoiceLimit = effectiveLimit(plan?.invoiceLimit, overrides.invoiceLimit);
   return {
     plan: org.plan,
     planName: plan?.name || org.plan,
     users,
-    userLimit: plan?.userLimit ?? null,
+    userLimit,
     invoicesThisMonth,
-    invoiceLimit: plan?.invoiceLimit ?? null
+    invoiceLimit,
+    /** Surfaced so the tenant's subscription page can explain why their ceiling
+     *  differs from the published plan, rather than looking like a bug. */
+    limitOverrides: {
+      userLimit: overrides.userLimit ?? null,
+      invoiceLimit: overrides.invoiceLimit ?? null
+    }
   };
 }
 
@@ -45,4 +69,4 @@ async function assertUserQuota(orgId) {
   }
 }
 
-module.exports = { getUsage, assertInvoiceQuota, assertUserQuota };
+module.exports = { getUsage, assertInvoiceQuota, assertUserQuota, effectiveLimit };

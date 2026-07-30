@@ -100,6 +100,65 @@ export, purchases/ITC and e-invoicing.
 
 ---
 
+## STATUS — Phase 4 shipped (2026-07-30)
+
+**Done: the whole of Part 3.1 (platform observability), most of Part 3.2 (tenant
+lifecycle control) and the bulk of Part 3.4 (security & compliance console), plus
+#64's feature-flag half and the operational parts of 3.5 that the data supports.**
+Verified by **138 automated tests** (14 unit + 124 integration against a real
+MongoDB, including a new 37-test `platformConsole.test.js`), a clean `eslint` run on
+both packages, clean production *and* development `ng build`s, and migration 004
+exercised end-to-end against a live database (apply → idempotent re-run, with
+assertions on each backfill's semantics).
+
+Part 3 opened by noting that **no event data was captured anywhere** and that
+`User.lastLoginAt` was the only usage signal in the product. That was the real
+blocker: none of these screens could be built, only mocked. So the phase starts
+there.
+
+| Area | What changed |
+|---|---|
+| Event capture (the prerequisite) | New `UsageEvent` (raw, TTL'd, fire-and-forget) → `MetricsDaily` (one permanent global row per day, idempotent upsert). Instrumented at 13 points across auth, invoices, bills, payments, credit notes, clients, items, bulk upload, reports and exports. DAU/WAU/MAU come from a **per-user daily heartbeat deduplicated in memory**, not an event per request — the same information for a fraction of the writes. `Organisation.lastActiveAt` is maintained alongside it so the org list, the at-risk list and the drill-down never have to aggregate events to answer "when were they last seen" |
+| Observability dashboard (3.1) | New `/super-admin/dashboard`, now the console's landing page. MRR/ARR/ARPA/paying accounts, revenue by plan, GMV, signups (24h/7d/30d), activation rate and time-to-first-invoice, trial funnel, DAU/WAU/MAU + stickiness, document volume, a switchable daily trend chart, a feature-adoption matrix, and system health. **The "Platform Revenue" tile was a lie**: it summed every tenant payment — our customers' revenue, not ours — and is now correctly split into `mrr` and `gmv` |
+| Honest metrics | Two traps closed by construction. A yearly plan contributes **a twelfth** of its price to MRR, not its price (a twelvefold overstatement per annual customer). And MRR and the status mix are **rates that can only be observed** — nothing records when a status changed — so a backfilled day stores `null` rather than stamping today's figures on last month, and the charts skip nulls instead of plotting them as zero. There is deliberately **no trial-conversion rate**: without a `convertedAt` it could only be guessed, and a guessed number that looks authoritative is worse than an absent one |
+| Tenant drill-down (3.2) | New `/super-admin/organisations/:id`. There was no per-tenant view at all — a table row and a modal repeating eight fields from it — so debugging a customer meant a Mongo shell. Now: profile, owner, users, subscription history, usage against every limit, document counts, invoiced/collected/outstanding, first-invoice lag, a transparent 0–100 health score, their invoices (paginated, read-only), an audit timeline and a usage stream. Opening it writes `superadmin.tenant_viewed` — the **data-access log**, so a tenant can be told who looked |
+| Impersonation (3.2) | "The single most valuable support capability", and the only way to do it before was to ask the customer for their password. 30-minute signed token, **read-only by default**, mandatory reason, loud fixed banner with a live countdown, one-click exit that restores the operator's own session. What makes it safe: the customer's own sessions are never revoked; a platform account can never be a target; `/auth/change-password` and ownership transfer are refused even read-write; suspension still applies; every audit entry carries **both identities**; every write is additionally logged as `impersonation.write`; and an impersonated request deliberately does **not** count as tenant activity, so the at-risk list isn't skewed by support looking at the accounts it worries about |
+| Tenant lifecycle actions (3.2) | Suspend/cancel now **require a reason and show it to the tenant** — Phase 2 made suspension enforceable but anonymous, which converts every suspension into a support ticket. Plus: per-org seat/invoice **limit overrides** honoured by the real quota check (no more inventing a plan tier for one customer), grant/extend/end trial (extending adds to the current end date, not to today), per-tenant in-app notices and a platform-wide broadcast (expiry enforced server-side, so a lapsed banner disappears even in an open tab), internal support CRM fields the tenant never receives, force-logout per user or per org, password reset in both `link` and `temporary` modes (both revoke every session — a reset that doesn't isn't one), and unlock for a brute-force lockout |
+| Feature flags (#64's other half) | Per-org overrides resolved over platform defaults. Deliberately **not** another wall of decorative switches: every flag carries `enforcedBy` naming where it bites, the two that gate nothing yet (`einvoicing`, `apiAccess`) are rendered as "not built yet" rather than as toggles, and the three live ones are enforced server-side (`requireFlag` on bulk upload and credit notes; `darkMode` finally frees a personal preference from its plan gate, which is Part 4 #22). A non-boolean or unknown key is dropped rather than stored as truthy dead state |
+| Granular platform roles (3.4) | `requireRole('superadmin')` was one bit: every platform account could delete any tenant, reprice every plan and sign in as any customer. Split into **owner / billing / support / auditor**, enforced per route by capability. The auditor role's whole point is that it has *no* write capability, which a test asserts route by route. An account with no `platformRole` stored resolves to `owner`, so introducing the model locks nobody out, and self-demotion and demoting the last owner are both refused |
+| Audit & security console (3.4) | Phase 3 rebuilt the audit *backend* and nothing in the frontend ever called it, so the trail still didn't exist from the console's side. New `/super-admin/audit`: filters, pagination, CSV, plus **login history** and **derived suspicious-activity alerts** (brute force per IP, bulk deletion per actor, heavy export per tenant, off-hours platform actions in IST, and every support session) — returned *with the thresholds that produced them*, because an alert whose rule you can't see is one you learn to ignore. Made possible by the trail now recording `ip`, `userAgent` and `impersonatorId`: it knew who and what, never from where |
+| Audit attribution bug found in testing | A platform action was filed under the *actor's* org — and a superadmin has none — so **every console action against a tenant was recorded with no organisation**, and therefore appeared in neither that tenant's timeline nor the per-org audit filter. The record of what support did to a customer was unreachable from the customer. `logAudit` now takes the subject org explicitly |
+| Session context | The app cached the organisation at login and **never called `/auth/me` at all**, so a suspension, a flag change or a message addressed to a tenant stayed invisible for the rest of the session (the interceptor's 403 handler papered over suspension only, and only after a write had already failed). The shell now reconciles on load, throttled to once a minute so it doesn't become a request per navigation |
+| Operational visibility (3.5, partial) | `GET /superadmin/system/health`: database state, size, replica-set/transaction support, collection counts, and per-instance request rate, 5xx rate and p50/p95/p99 by route from a new bounded in-process recorder. The scope is **stated in the response** ("this instance only, since boot") because that is the honest limit without an APM. Also surfaces whether email and Razorpay are configured at all — the first question when "reminders aren't arriving" |
+| Decorative UI removed | The super-admin Profile page had a 2FA switch bound to a local boolean with no backend: it turned green and protected nothing. Replaced with what is true (MFA is #7, still open), and the page now manages platform accounts instead of duplicating the audit log |
+
+**Deliberately not done, and why:**
+- **MFA for superadmin and the `/super-admin` IP allowlist (#7).** Needs a TOTP
+  dependency and an enrolment flow; it is its own piece of work, and shipping a
+  half-enrolment is worse than the honest "not available yet" now on the page.
+- **Two-person approval and break-glass elevation.** These need an approval-request
+  workflow (a second collection, notifications, an expiry job) rather than a guard.
+  The capability split plus a full trail is the useful 80% of the same goal.
+- **Active-session list per user.** There is no session collection — `sessionVersion`
+  is a counter, not a registry — so a device list would need #50/#51's refresh-token
+  work first. Force-logout, which is the actionable half, is here.
+- **Most of Part 3.3 (plan versioning, coupons, dunning, the platform's own GST
+  invoices, Razorpay reconciliation).** Billing depth, not console work; plan
+  versioning in particular is a schema change that needs per-subscription pinning.
+- **The job/queue console and the email deliverability dashboard (3.5).** Both need
+  infrastructure that does not exist: there is no queue, and bounce data needs
+  SendGrid event-webhook ingestion (#58's other half).
+- **Cohort retention, MRR waterfall, NRR/GRR.** Each needs a history of *transitions*
+  that starts accumulating from today. The capture layer is what was missing; these
+  become computable once there is a few months of it, and inventing them from
+  current-state data now would produce confident nonsense.
+
+**Still open, in the doc's own ordering:** MFA (#7), soft delete (#37), email
+delivery logging (#58), memberships and the org-switcher (#53–#54), Part 3.3's
+billing depth, then Phase 5's GSTR-1 export, purchases/ITC and e-invoicing.
+
+---
+
 ## PART 1 — BUGS & FIXES
 
 ### 1.1 Security · privilege escalation (P0)
@@ -469,9 +528,13 @@ sweep, the email loop, base64 logos, indexes), plus logging, error tracking, tes
 (#55–#61).~~ **Shipped 2026-07-28** — see the Phase 3 status section above. Remaining
 from this band: #37 (soft delete), #45's object-storage half, #58's bounce handling.
 
-**Phase 4 — Super-admin platform console.** The event-capture layer and metrics rollup
+**Phase 4 — Super-admin platform console.** ~~The event-capture layer and metrics rollup
 first, then the tenant drill-down, impersonation, user management and audit console —
-Part 3.1, 3.2 and 3.4 give the most support leverage per unit of work.
+Part 3.1, 3.2 and 3.4 give the most support leverage per unit of work.~~
+**Shipped 2026-07-30** — see the Phase 4 status section above. Remaining from this
+band: MFA + the `/super-admin` IP allowlist (#7), two-person approval and break-glass,
+the active-session registry (needs #50/#51), Part 3.3's billing depth, and the
+queue/deliverability consoles in 3.5.
 
 **Phase 5 — Compliance depth.** GSTR-1 export, purchases + ITC, e-invoicing, e-way bill.
 This is what moves the product from "invoice maker" to "GST software".

@@ -20,6 +20,7 @@ const { Reminder } = require('../models/Settings');
 const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
 const { streamCsv } = require('../services/csvService');
 const { env } = require('../config/env');
+const { recordEvent, EVENT } = require('../services/usageEventService');
 
 /**
  * The configured reminder stage an invoice at `overdueDays` has reached, so a
@@ -396,6 +397,16 @@ const createInvoice = asyncHandler(async (req, res) => {
     balanceDue: totals.total
   });
   logAudit({ req, action: 'invoice.created', entity: 'invoice', entityId: invoice._id, meta: { invoiceNumber: invoice.invoiceNumber, total: totals.total } });
+  // A clientless invoice came from the Bill Generator, so the two are reported as
+  // separate features in the console's adoption matrix — they are different
+  // workflows with different audiences, and one number for both hides which one
+  // tenants actually reach for.
+  recordEvent({
+    req,
+    type: invoice.clientId ? EVENT.invoiceCreated : EVENT.billCreated,
+    value: totals.total,
+    meta: { invoiceNumber: invoice.invoiceNumber }
+  });
   res.status(201).json(invoice);
 });
 
@@ -580,6 +591,7 @@ const sendReminder = asyncHandler(async (req, res) => {
   });
 
   logAudit({ req, action: 'invoice.reminder_sent', entity: 'invoice', entityId: invoice._id, meta: { to: email, delivered: !!result.sent } });
+  recordEvent({ req, type: EVENT.invoiceEmailed, meta: { invoiceNumber: invoice.invoiceNumber, delivered: !!result.sent } });
   res.json({ ok: true, ...result });
 });
 
@@ -694,6 +706,7 @@ const exportInvoicesCsv = asyncHandler(async (req, res) => {
     .populate('clientId', 'companyName gstin')
     .sort({ date: -1 })
     .cursor();
+  recordEvent({ req, type: EVENT.exportCsv, meta: { of: 'invoices' } });
   await streamCsv(res, { filename: 'invoices.csv', columns: INVOICE_CSV_COLUMNS, cursor });
 });
 
@@ -773,6 +786,7 @@ const invoicePdf = asyncHandler(async (req, res) => {
   // reach the renderer at all.
   const platformDefaults = await getPlatformDefaults();
   const buffer = await renderInvoicePdf({ invoice, client, org, platformDefaults });
+  recordEvent({ req, type: EVENT.invoicePdf, meta: { invoiceNumber: invoice.invoiceNumber } });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${invoice.invoiceNumber}.pdf"`);
   res.send(buffer);

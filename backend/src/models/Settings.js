@@ -18,7 +18,26 @@ const auditLogSchema = new mongoose.Schema({
   meta: mongoose.Schema.Types.Mixed,
   // The id of the request that produced this entry, so an audited action can be
   // traced back through the access log.
-  requestId: String
+  requestId: String,
+  /**
+   * Where the action came from.
+   *
+   * Login history, per-IP failure patterns and "impossible travel" are all
+   * questions about the *origin* of an action, and none of them could be asked:
+   * the log recorded who and what but never from where. The user agent is stored
+   * truncated — it is a fingerprint for "same device", not a field anyone reads in
+   * full.
+   */
+  ip: String,
+  userAgent: String,
+  /**
+   * Set when the actor was a superadmin acting *as* a tenant user. Without it an
+   * impersonated action is indistinguishable in the trail from one the customer
+   * performed themselves — which is the one thing an impersonation feature must
+   * never allow.
+   */
+  impersonatorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  impersonatorName: String
 }, { timestamps: true });
 
 // The console filters by org, actor, action, entity and date range. Without
@@ -29,6 +48,10 @@ auditLogSchema.index({ orgId: 1, createdAt: -1 });
 auditLogSchema.index({ actorId: 1, createdAt: -1 });
 auditLogSchema.index({ action: 1, createdAt: -1 });
 auditLogSchema.index({ entity: 1, entityId: 1, createdAt: -1 });
+// The security console asks "what came from this address" (brute force, shared
+// credentials) and "what did this superadmin do while impersonating".
+auditLogSchema.index({ ip: 1, createdAt: -1 });
+auditLogSchema.index({ impersonatorId: 1, createdAt: -1 }, { sparse: true });
 
 /**
  * Retention.

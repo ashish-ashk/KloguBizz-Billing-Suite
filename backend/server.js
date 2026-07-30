@@ -156,6 +156,12 @@ if (require.main === module) {
       // pending invoices into 'overdue'. See services/maintenanceService.js.
       require('./src/services/maintenanceService').startMaintenanceScheduler();
 
+      // Rolls raw usage events up into one permanent row per day, which is what
+      // the platform console's trend charts read. Without it every chart would
+      // aggregate the highest-volume collection in the database on each page
+      // view. See services/metricsService.js.
+      require('./src/services/metricsService').startMetricsScheduler();
+
       // Render (and any container platform) sends SIGTERM before replacing an
       // instance. Without this the process is killed mid-request, dropping
       // in-flight work and leaving Mongo sockets to time out.

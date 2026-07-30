@@ -6,6 +6,7 @@ const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { streamCsv } = require('../services/csvService');
 const { paginate, parseSort } = require('../utils/pagination');
 const { logAudit } = require('../services/auditService');
+const { recordEvent, EVENT } = require('../services/usageEventService');
 const { recalculateSettlement } = require('./invoiceController');
 const { roundMoney } = require('../services/gstService');
 const { assertValidMaster } = require('../services/masterService');
@@ -86,6 +87,7 @@ const createPayment = asyncHandler(async (req, res) => {
 
   await recalculateSettlement(invoice);
   logAudit({ req, action: 'payment.recorded', entity: 'payment', entityId: payment._id, meta: { invoiceNumber: invoice.invoiceNumber, amount: payment.amount } });
+  recordEvent({ req, type: EVENT.paymentRecorded, value: payment.amount, meta: { method: payment.method } });
   res.status(201).json(payment);
 });
 

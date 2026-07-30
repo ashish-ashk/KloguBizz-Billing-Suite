@@ -11,6 +11,23 @@ const userSchema = new mongoose.Schema({
     default: 'viewer'
   },
   status: { type: String, enum: ['active', 'invited', 'disabled'], default: 'active' },
+  /**
+   * Which part of the platform console a superadmin may use.
+   *
+   * `requireRole('superadmin')` was all-or-nothing: every platform account could
+   * delete any tenant, reprice every plan and impersonate any user. That is the
+   * wrong shape once more than one person does support, and it is the wrong shape
+   * for an auditor who needs to read the log and nothing else.
+   *
+   * Ignored entirely for tenant users. `undefined` on an account that predates
+   * this field resolves to 'owner' (see middleware/platformRoleMiddleware.js), so
+   * an existing superadmin does not lose access the moment this ships.
+   */
+  platformRole: {
+    type: String,
+    enum: ['owner', 'billing', 'support', 'auditor'],
+    default: 'owner'
+  },
   // Only the SHA-256 hash of the invite/reset token is stored — the plaintext
   // lives solely in the emailed URL. See services/tokenService.js. The old
   // plaintext `inviteToken` field is gone; any invite issued before this change

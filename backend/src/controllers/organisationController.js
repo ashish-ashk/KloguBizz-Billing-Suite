@@ -6,6 +6,8 @@ const { httpError } = require('../utils/httpError');
 const { logAudit } = require('../services/auditService');
 const { pickFields } = require('../utils/pickFields');
 const { serialiseOrganisation } = require('../services/brandingAssetService');
+const { resolveFlags } = require('../services/featureFlagService');
+const { noticesFor } = require('../services/noticeService');
 
 // What a tenant admin may change about their own organisation: business
 // profile, branding and theming. Everything else is platform-controlled and
@@ -23,10 +25,20 @@ const TENANT_EDITABLE_FIELDS = [
   'brandingConfig', 'themeConfig'
 ];
 
+/**
+ * `support` is internal. It holds the account manager, risk level and whatever an
+ * operator wrote in the notes field, none of which the customer should read — and
+ * an "internal note" that ships to the subject of the note is not an internal note.
+ * Selected out here rather than deleted afterwards, so a future field added to that
+ * sub-document is excluded by default rather than leaked by omission.
+ */
+const TENANT_HIDDEN_FIELDS = '-support';
+
 const getOrganisation = asyncHandler(async (req, res) => {
-  const org = await Organisation.findById(req.orgId);
+  const org = await Organisation.findById(req.orgId).select(TENANT_HIDDEN_FIELDS);
   if (!org) throw httpError(404, 'Organisation not found');
-  res.json(serialiseOrganisation(org));
+  const [flags, notices] = await Promise.all([resolveFlags(org), noticesFor(org)]);
+  res.json({ ...serialiseOrganisation(org), flags, notices });
 });
 
 /**
@@ -73,7 +85,7 @@ const updateOrganisation = asyncHandler(async (req, res) => {
     req.orgId,
     { $set: flattenForMerge(update) },
     { new: true, runValidators: true }
-  );
+  ).select(TENANT_HIDDEN_FIELDS);
   if (!org) throw httpError(404, 'Organisation not found');
   logAudit({ req, action: 'org.updated', entity: 'organisation', entityId: org._id, meta: { fields: Object.keys(update) } });
   res.json(serialiseOrganisation(org));

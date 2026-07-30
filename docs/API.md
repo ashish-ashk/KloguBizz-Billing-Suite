@@ -183,21 +183,113 @@ built-in template has (font, header style, title alignment, table style, divider
 
 ## Super Admin API
 
-- `GET /superadmin/overview` — platform-wide counts + revenue
-- `GET /superadmin/organisations` — decorated with per-org user/invoice counts and admin contact
+Every route below requires `role: 'superadmin'` **and** a capability, resolved from
+the account's `platformRole` (`owner` / `billing` / `support` / `auditor`). See
+`backend/src/middleware/platformRoleMiddleware.js` for the mapping; an account with
+no `platformRole` stored resolves to `owner`, so nothing changed for a platform
+account that predates the field. A refusal is `403 { code: 'PLATFORM_CAPABILITY_REQUIRED' }`.
+
+- `GET /superadmin/me` — this operator's `platformRole` and capability list, so the console can render only what it can use
+
+### Tenants
+
+- `GET /superadmin/overview` — platform counts, `mrr`/`arr`/`payingOrgs`, and `gmv`
+  (`totalRevenue` is retained as an alias of `gmv` for older clients — it is *tenant*
+  collections, not platform revenue)
+- `GET /superadmin/organisations` — paginated, decorated with per-org user/invoice counts, owner and subscription
 - `POST /superadmin/organisations` — creates a tenant + admin user, returns a one-time temp password
+- `GET /superadmin/organisations/:id` — the full drill-down: users, subscription history, usage vs limits,
+  document counts, money, activity and health score, resolved feature flags, and a recent timeline.
+  **Audited** (`superadmin.tenant_viewed`) — reading a customer's records leaves a record
+- `GET /superadmin/organisations/:id/users`
+- `GET /superadmin/organisations/:id/invoices` — paginated, read-only, for support
+- `GET /superadmin/organisations/:id/timeline` — paginated audit entries for this tenant
 - `PUT /superadmin/organisations/:id`
-- `DELETE /superadmin/organisations/:id` — cascades: deletes all users/clients/invoices/payments/subscriptions for that org
-- `GET /superadmin/plans`
-- `POST /superadmin/plans`
-- `PUT /superadmin/plans/:code`
-- `GET /superadmin/masters` — GST rates, HSN codes, payment methods, units, plus reminders/templates
-- `PUT /superadmin/masters/:type` — bulk-replaces all masters of one type (`gstRate`, `hsn`, `paymentMethod`, `unit`)
+- `DELETE /superadmin/organisations/:id` — cascade delete; `owner` only
+- `POST /superadmin/organisations/:id/status` — `{ status, reason }`. A reason is **required** for
+  `suspended`/`cancelled` and is shown to the tenant; sessions are revoked
+- `PUT /superadmin/organisations/:id/limits` — `{ userLimit, invoiceLimit, note }`; `null` means "use the plan"
+- `PUT /superadmin/organisations/:id/flags` — `{ flags: { … } }`; unknown keys and non-booleans are dropped
+- `POST /superadmin/organisations/:id/trial` — `{ days }` (extends from the current end date), `{ endsAt }`, or `{ end: true }`
+- `PUT /superadmin/organisations/:id/notice` — in-app banner for this tenant; empty message clears it
+- `PUT /superadmin/organisations/:id/support` — internal account context; never returned to the tenant
+- `POST /superadmin/organisations/:id/force-logout` — revokes every session in the org
+- `POST /superadmin/organisations/:id/impersonate` — `{ userId?, readOnly = true, reason }`. Returns a
+  30-minute token. A reason of 5+ characters is required. See below
+
+### Tenant users (support actions)
+
+- `PUT /superadmin/users/:id` — `{ role?, status? }`; refuses the org owner and any platform account
+- `POST /superadmin/users/:id/reset-password` — `{ mode: 'link' | 'temporary' }`. Both revoke every session;
+  `temporary` returns the password once, `link` never reveals one
+- `POST /superadmin/users/:id/unlock` — clears a brute-force lockout
+- `POST /superadmin/users/:id/force-logout`
+
+### Metrics & operations
+
+- `GET /superadmin/metrics/summary` — revenue (MRR/ARR/ARPA/GMV, by plan), growth, engagement, volume
+- `GET /superadmin/metrics/series?days=30` — the daily rollup, with today computed live
+- `GET /superadmin/metrics/attention` — at-risk tenants and trials expiring, as actionable lists
+- `GET /superadmin/metrics/adoption?days=30` — per-feature tenant adoption, including features nobody used
+- `POST /superadmin/metrics/rebuild` — `{ days }`; recomputes the rollup (idempotent)
+- `GET /superadmin/system/health` — database state and size, collection counts, per-instance request
+  latency/error rate, and whether email and billing are configured
+- `PUT /superadmin/broadcast` — a banner for every tenant; empty message clears it
+
+### Platform accounts
+
+- `GET /superadmin/platform-users`
+- `PUT /superadmin/platform-users/:id/role` — `owner` only. Refuses self-demotion and the last owner
+
+### Configuration
+
+- `GET /superadmin/plans` · `POST /superadmin/plans` · `PUT /superadmin/plans/:code`
+- `GET /superadmin/masters` — GST rates, HSN codes, payment methods, units, plus reminders
+- `PUT /superadmin/masters/:type` — diff-based save for one type (`gstRate`, `hsn`, `paymentMethod`, `unit`)
 - `PUT /superadmin/reminders/:id`
-- `PUT /superadmin/templates/:id`
-- `GET /superadmin/settings` — global key/value settings (branding, email, template config, receipts)
-- `PUT /superadmin/settings/:key`
-- `GET /superadmin/audit-logs?limit=50`
+- `GET /superadmin/settings` · `PUT /superadmin/settings/:key` — validated per key
+  (`branding`, `email`, `receipt`, `templateConfig`, `defaultInvoiceTemplate`, `featureFlags`, `platformNotice`)
+
+### Audit & security
+
+- `GET /superadmin/audit-logs` — filter by `orgId`, `actorId`, `action` (prefix), `entity`, `from`, `to`; paginated
+- `GET /superadmin/audit-logs/export.csv` — the whole filtered set, streamed
+- `GET /superadmin/security/logins?outcome=success|failure&ip=` — login history, with origin IP and device
+- `GET /superadmin/security/alerts?hours=24` — derived brute-force, bulk-deletion, heavy-export,
+  off-hours-platform-action and support-session findings, returned **with the thresholds that produced them**
+
+## Impersonation ("view as tenant")
+
+`POST /superadmin/organisations/:id/impersonate` returns a token that looks like an
+ordinary tenant token but carries a signed `imp` claim. What that claim buys:
+
+- **30 minutes**, in the token's own `exp`.
+- **The customer's sessions are untouched.** `sessionVersion` is read, never bumped —
+  bumping it would sign the customer out the moment support looked at their account.
+- **Read-only unless opted out.** A write in a read-only session is
+  `403 { code: 'IMPERSONATION_READ_ONLY' }`.
+- **Credential and ownership changes are always refused**, even read-write:
+  `/auth/change-password` and `/organisations/current/transfer-ownership` return
+  `403 { code: 'IMPERSONATION_FORBIDDEN' }`.
+- **A platform account can never be the target.**
+- **Suspension still applies.** A support session cannot write to a suspended tenant.
+- **Attribution.** Every audit entry made during the session carries `impersonatorId`
+  and `impersonatorName` alongside the acting user, and every mutating request is
+  additionally recorded as `impersonation.write`.
+- **Not counted as tenant activity**, so the at-risk list is not skewed by support
+  looking at exactly the accounts it is worried about.
+
+`GET /auth/me` reports `impersonation: { by, byName, readOnly, expiresAt }` — the token
+deliberately looks ordinary, so the server is the only trustworthy source for
+"am I in a support session".
+
+## Session context
+
+`GET /auth/me` returns, besides `user` and `organisation`:
+
+- `flags` — effective feature flags for this tenant (per-org override → platform default → built-in)
+- `notices` — live operator-authored banners (`scope: 'platform' | 'organisation'`), expiry filtered server-side
+- `impersonation` — as above, or `null`
 
 ## Webhooks
 

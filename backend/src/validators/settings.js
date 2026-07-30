@@ -1,6 +1,7 @@
 const { z } = require('zod');
 const { httpError } = require('../utils/httpError');
 const { TEMPLATE_IDS } = require('../services/invoiceTemplates');
+const { FLAG_KEYS } = require('../services/featureFlagService');
 
 /**
  * Schemas for the platform's global key/value settings.
@@ -97,12 +98,37 @@ const defaultInvoiceTemplateSchema = z.object({
   accentColor: hexColor.optional()
 });
 
+/**
+ * Platform defaults for the feature flags. Only the known keys are accepted, and
+ * only as booleans — a flag stored as the string `"false"` is truthy everywhere it
+ * is read, which is the sort of bug that turns a kill-switch into a no-op.
+ */
+const featureFlagsSchema = z.object(
+  Object.fromEntries(FLAG_KEYS.map(key => [key, z.boolean().optional()]))
+);
+
+/**
+ * A message shown to every tenant. Deliberately expiring: an announcement banner
+ * with no end date becomes part of the furniture and stops being read, so the
+ * console always sets one.
+ */
+const platformNoticeSchema = z.object({
+  message: longText.optional(),
+  level: z.enum(['info', 'warning', 'danger']).optional(),
+  // Accepts an ISO string from the console and stores a date. `''`/null clears it.
+  expiresAt: z.union([z.literal(''), z.null(), z.coerce.date()]).optional(),
+  updatedAt: z.union([z.literal(''), z.null(), z.coerce.date()]).optional(),
+  updatedBy: shortText.optional()
+});
+
 const SETTING_SCHEMAS = {
   branding: brandingSchema,
   email: emailSchema,
   receipt: receiptSchema,
   templateConfig: templateConfigSchema,
-  defaultInvoiceTemplate: defaultInvoiceTemplateSchema
+  defaultInvoiceTemplate: defaultInvoiceTemplateSchema,
+  featureFlags: featureFlagsSchema,
+  platformNotice: platformNoticeSchema
 };
 
 const SETTING_KEYS = Object.keys(SETTING_SCHEMAS);

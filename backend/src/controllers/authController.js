@@ -11,6 +11,33 @@ const { CURRENT_TERMS_VERSION } = require('../config/legal');
 const { createToken, hashToken, expiryFromNow, RESET_TTL_MS } = require('../services/tokenService');
 const { sendPasswordResetEmail } = require('../services/emailService');
 const { serialiseOrganisation } = require('../services/brandingAssetService');
+const { recordEvent, EVENT } = require('../services/usageEventService');
+const { resolveFlags } = require('../services/featureFlagService');
+const { noticesFor } = require('../services/noticeService');
+
+/** How long a self-serve trial runs for. */
+const TRIAL_DAYS = 14;
+
+/**
+ * An audit context for an action taken by a user who is not `req.user`.
+ *
+ * Every route in this file is unauthenticated, so `protect` never ran and
+ * `req.user` is empty — yet the entry has to name the account it concerns. These
+ * call sites used to pass a bare `{ user }` object, which worked for the actor but
+ * silently dropped the request id, the IP and the user agent. That is precisely
+ * the metadata the security console's login history and brute-force detection
+ * read, so a failed login was recorded with no indication of where it came from.
+ */
+function auditContext(req, user) {
+  return {
+    id: req?.id,
+    ip: req?.ip,
+    headers: req?.headers,
+    log: req?.log,
+    user,
+    orgId: user?.orgId
+  };
+}
 
 function signToken(user) {
   return jwt.sign(
@@ -54,7 +81,11 @@ const register = asyncHandler(async (req, res) => {
     name: orgName,
     adminEmail: email,
     stateCode,
-    status: 'trial'
+    status: 'trial',
+    // An explicit end date, so the console's "trials expiring this week" list is a
+    // fact rather than an inference from `createdAt` plus a hardcoded assumption.
+    // Nothing auto-suspends on it — see models/Organisation.js.
+    trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 86400000)
   });
   const user = await User.create({
     orgId: organisation._id,
@@ -72,7 +103,10 @@ const register = asyncHandler(async (req, res) => {
   await organisation.save();
   await Subscription.create({ orgId: organisation._id, planCode: 'starter', status: 'trial' });
 
-  logAudit({ req: { orgId: organisation._id, user }, action: 'user.terms_accepted', entity: 'user', entityId: user._id, meta: { termsVersion: CURRENT_TERMS_VERSION } });
+  logAudit({ req: auditContext(req, user), action: 'user.terms_accepted', entity: 'user', entityId: user._id, meta: { termsVersion: CURRENT_TERMS_VERSION } });
+  // The signup event, without which "signups per day" can only be reconstructed
+  // from `createdAt` — which works until an organisation is deleted.
+  recordEvent({ orgId: organisation._id, userId: user._id, type: EVENT.signup, meta: { stateCode } });
 
   res.status(201).json(authPayload(user, organisation));
 });
@@ -114,7 +148,7 @@ const login = asyncHandler(async (req, res) => {
       user.failedLoginAttempts = 0;
     }
     await user.save();
-    logAudit({ req: { user }, action: 'auth.login_failed', entity: 'user', entityId: user._id, meta: { email: user.email, locked: Boolean(user.lockedUntil && user.lockedUntil > new Date()) } });
+    logAudit({ req: auditContext(req, user), action: 'auth.login_failed', entity: 'user', entityId: user._id, meta: { email: user.email, locked: Boolean(user.lockedUntil && user.lockedUntil > new Date()) } });
     throw httpError(401, 'Invalid email or password');
   }
 
@@ -126,14 +160,43 @@ const login = asyncHandler(async (req, res) => {
   // session per user; signing in elsewhere logs out other devices.
   user.sessionVersion = (user.sessionVersion || 0) + 1;
   await user.save();
-  const organisation = user.orgId ? await Organisation.findById(user.orgId) : null;
-  logAudit({ req: { orgId: user.orgId, user }, action: 'auth.login', entity: 'user', entityId: user._id });
+  const organisation = user.orgId ? await Organisation.findById(user.orgId).select('-support') : null;
+  // `req` is passed so the audit entry carries the IP and user agent — the two
+  // fields the security console's login history and brute-force detection are
+  // built on, and which the trail did not record before Phase 4.
+  logAudit({ req: auditContext(req, user), action: 'auth.login', entity: 'user', entityId: user._id });
+  recordEvent({ req, orgId: user.orgId, userId: user._id, type: EVENT.login });
   res.json(authPayload(user, organisation));
 });
 
+/**
+ * The session's full context, refreshed on every page load and route change.
+ *
+ * Beyond the user and organisation this now carries three things the client cannot
+ * work out for itself: the resolved feature flags, any banner an operator has
+ * addressed to this tenant, and — if this is a support session — the fact that it
+ * is one. The impersonation block in particular has to come from the server: the
+ * whole point is that the token looks like an ordinary tenant token, so a client
+ * inspecting its own JWT is not a trustworthy source for "am I being impersonated".
+ */
 const me = asyncHandler(async (req, res) => {
-  const organisation = req.user.orgId ? await Organisation.findById(req.user.orgId) : null;
-  res.json({ user: req.user, organisation: serialiseOrganisation(organisation) });
+  // `-support` excludes the internal account-management fields an operator writes
+  // about this tenant (account manager, risk level, notes). They belong to the
+  // console, not to the customer they describe.
+  const organisation = req.user.orgId
+    ? await Organisation.findById(req.user.orgId).select('-support')
+    : null;
+  const [flags, notices] = await Promise.all([
+    resolveFlags(organisation),
+    noticesFor(organisation)
+  ]);
+  res.json({
+    user: req.user,
+    organisation: serialiseOrganisation(organisation),
+    flags,
+    notices,
+    impersonation: req.impersonation || null
+  });
 });
 
 // ── Invitations ──────────────────────────────────
@@ -198,8 +261,8 @@ const acceptInvite = asyncHandler(async (req, res) => {
   user.sessionVersion = (user.sessionVersion || 0) + 1;
   await user.save();
 
-  const organisation = user.orgId ? await Organisation.findById(user.orgId) : null;
-  logAudit({ req: { orgId: user.orgId, user }, action: 'user.invite_accepted', entity: 'user', entityId: user._id, meta: { email: user.email, role: user.role } });
+  const organisation = user.orgId ? await Organisation.findById(user.orgId).select('-support') : null;
+  logAudit({ req: auditContext(req, user), action: 'user.invite_accepted', entity: 'user', entityId: user._id, meta: { email: user.email, role: user.role } });
   res.json(authPayload(user, organisation));
 });
 
@@ -234,7 +297,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
   const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${encodeURIComponent(token)}`;
   const result = await sendPasswordResetEmail({ to: user.email, name: user.name, resetUrl });
 
-  logAudit({ req: { orgId: user.orgId, user }, action: 'user.password_reset_requested', entity: 'user', entityId: user._id, meta: { delivered: !!result.sent } });
+  logAudit({ req: auditContext(req, user), action: 'user.password_reset_requested', entity: 'user', entityId: user._id, meta: { delivered: !!result.sent } });
   // In local mode there is no email, so hand the link back to make the flow
   // testable. Never in production, where that would leak a live credential to
   // anyone who can guess an address.
@@ -265,7 +328,7 @@ const resetPassword = asyncHandler(async (req, res) => {
   user.sessionVersion = (user.sessionVersion || 0) + 1;
   await user.save();
 
-  logAudit({ req: { orgId: user.orgId, user }, action: 'user.password_reset', entity: 'user', entityId: user._id });
+  logAudit({ req: auditContext(req, user), action: 'user.password_reset', entity: 'user', entityId: user._id });
   res.json({ ok: true, message: 'Your password has been reset. Please sign in with your new password.' });
 });
 

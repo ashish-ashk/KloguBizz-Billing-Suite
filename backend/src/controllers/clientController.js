@@ -4,6 +4,7 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { logAudit } = require('../services/auditService');
+const { recordEvent, EVENT } = require('../services/usageEventService');
 const { pickFields } = require('../utils/pickFields');
 const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
 
@@ -38,6 +39,7 @@ const listClients = asyncHandler(async (req, res) => {
 const createClient = asyncHandler(async (req, res) => {
   const client = await Client.create({ ...pickFields(req.body, CLIENT_FIELDS), orgId: req.orgId });
   logAudit({ req, action: 'client.created', entity: 'client', entityId: client._id, meta: { companyName: client.companyName } });
+  recordEvent({ req, type: EVENT.clientCreated });
   res.status(201).json(client);
 });
 

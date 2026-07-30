@@ -7,6 +7,7 @@ const { requireTenant } = require('../middleware/tenantMiddleware');
 const { httpError } = require('../utils/httpError');
 const { validate } = require('../middleware/validate');
 const { itemCreateSchema, itemUpdateSchema } = require('../validators/schemas');
+const { requireFlag } = require('../services/featureFlagService');
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const upload = multer({
@@ -31,8 +32,11 @@ function excelUpload(req, res, next) {
 
 router.use(protect, requireTenant);
 router.get('/', listItems);
-router.get('/bulk-upload/template', requireRole('admin', 'accountant'), downloadItemTemplate);
-router.post('/bulk-upload', requireRole('admin', 'accountant'), excelUpload, bulkUploadItems);
+// Bulk import is behind a per-tenant feature flag, so the platform console can
+// enable it for a pilot or withdraw it from a tenant abusing it without inventing
+// a plan tier. See services/featureFlagService.js.
+router.get('/bulk-upload/template', requireRole('admin', 'accountant'), requireFlag('bulkUpload'), downloadItemTemplate);
+router.post('/bulk-upload', requireRole('admin', 'accountant'), requireFlag('bulkUpload'), excelUpload, bulkUploadItems);
 router.post('/', requireRole('admin', 'accountant'), validate(itemCreateSchema), createItem);
 router.put('/:id', requireRole('admin', 'accountant'), validate(itemUpdateSchema), updateItem);
 router.delete('/:id', requireRole('admin'), deleteItem);

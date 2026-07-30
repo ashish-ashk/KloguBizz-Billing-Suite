@@ -71,6 +71,47 @@ const themeConfigSchema = new mongoose.Schema({
   viewer: { type: roleThemeSchema, default: () => ({}) }
 }, { _id: false });
 
+/**
+ * Per-organisation plan overrides.
+ *
+ * A tenant who needs three extra seats used to force one of two bad options:
+ * invent a new plan for them (which then shows up in the public pricing table and
+ * in everyone's MRR-by-plan), or move them to the next tier up and charge them for
+ * capacity they didn't ask for. Null means "use the plan's limit" — see
+ * services/planService.js, which is the only place these are read.
+ */
+const limitOverrideSchema = new mongoose.Schema({
+  userLimit: { type: Number, default: null, min: 1 },
+  invoiceLimit: { type: Number, default: null, min: 1 },
+  /** Free-text note so an override is never a mystery six months later. */
+  note: { type: String, default: '' }
+}, { _id: false });
+
+/**
+ * An operator-authored message shown to one tenant.
+ *
+ * The alternative to this field is emailing them and hoping, which is what
+ * support had to do: there was no way to put a sentence in front of a specific
+ * organisation. `expiresAt` matters more than it looks — a banner with no end date
+ * becomes furniture nobody reads.
+ */
+const noticeSchema = new mongoose.Schema({
+  message: { type: String, default: '' },
+  level: { type: String, enum: ['info', 'warning', 'danger'], default: 'info' },
+  expiresAt: { type: Date, default: null },
+  createdAt: { type: Date, default: Date.now },
+  createdBy: { type: String, default: '' }
+}, { _id: false });
+
+/** Internal, support-only account context. Never returned to the tenant. */
+const supportSchema = new mongoose.Schema({
+  accountManager: { type: String, default: '' },
+  tags: { type: [String], default: [] },
+  riskLevel: { type: String, enum: ['none', 'watch', 'high'], default: 'none' },
+  notes: { type: String, default: '' },
+  updatedAt: Date
+}, { _id: false });
+
 const organisationSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
   adminEmail: { type: String, required: true, lowercase: true, trim: true },
@@ -85,6 +126,38 @@ const organisationSchema = new mongoose.Schema({
   stateCode: { type: String, default: '27' },
   plan: { type: String, default: 'starter' },
   status: { type: String, enum: ['trial', 'active', 'suspended', 'cancelled'], default: 'trial' },
+  /**
+   * Why the status is what it is, and who set it.
+   *
+   * Suspension was enforceable from Phase 2 but anonymous and unexplained: the
+   * tenant saw "this account is suspended" with no reason, and the next operator
+   * to look had no idea who had done it or what for. The reason is shown to the
+   * tenant — it is about them, and withholding it only generates a support ticket.
+   */
+  statusReason: { type: String, default: '' },
+  statusChangedAt: Date,
+  statusChangedBy: { type: String, default: '' },
+  /**
+   * When the trial runs out. Set at registration; backfilled from `createdAt` for
+   * organisations that predate it (migration 004). Nothing auto-suspends on this
+   * date — it drives the console's "expiring in the next 7 days" list, which is
+   * the actionable form of the same information.
+   */
+  trialEndsAt: Date,
+  limitOverrides: { type: limitOverrideSchema, default: () => ({}) },
+  /**
+   * Per-organisation feature toggles, resolved over the platform defaults by
+   * services/featureFlagService.js. A plain object rather than a `Map` on purpose:
+   * `toObject()` leaves a Map as a Map, which `JSON.stringify` renders as `{}` —
+   * the flags would silently vanish from every API response.
+   */
+  featureFlags: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
+  notice: { type: noticeSchema, default: null },
+  support: { type: supportSchema, default: () => ({}) },
+  /** Last time any user of this organisation made an authenticated request.
+   *  Maintained by services/usageEventService.js at most once per day per
+   *  process, so it costs nothing on the request path. */
+  lastActiveAt: Date,
   brandingConfig: { type: brandingSchema, default: () => ({}) },
   themeConfig: { type: themeConfigSchema, default: () => ({}) },
   invoiceSequence: { type: Number, default: 0 },
@@ -103,5 +176,10 @@ const organisationSchema = new mongoose.Schema({
 
 organisationSchema.index({ adminEmail: 1 });
 organisationSchema.index({ status: 1, plan: 1 });
+// The console's two actionable lists: trials about to lapse, and paying tenants
+// that have gone quiet. Both are sorted scans over the whole collection without
+// an index on the field they sort by.
+organisationSchema.index({ status: 1, trialEndsAt: 1 });
+organisationSchema.index({ lastActiveAt: 1 });
 
 module.exports = { Organisation: mongoose.model('Organisation', organisationSchema) };

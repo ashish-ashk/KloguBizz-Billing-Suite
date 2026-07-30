@@ -14,6 +14,27 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
   standalone: true,
   imports: [RouterLink, RouterLinkActive, ToastsComponent, AvatarComponent, PillComponent, IconComponent, QuickSearchComponent],
   template: `
+    @if (auth.impersonation(); as imp) {
+      <!--
+        The impersonation bar.
+
+        Deliberately loud, fixed, full-width and unmissable, and it carries the
+        three facts that stop this being dangerous: whose account this is, whether
+        the session can write, and when it lapses. A support tool that lets someone
+        forget they are inside a customer's account is how a customer's books get
+        edited by accident.
+      -->
+      <div class="impersonation-bar no-print" [class.readonly]="imp.readOnly">
+        <app-icon name="eye" [size]="15" />
+        <span class="imp-text">
+          Viewing as <strong>{{ auth.user()?.name }}</strong>
+          @if (imp.orgName || auth.organisation()?.name) { <span>at <strong>{{ imp.orgName || auth.organisation()?.name }}</strong></span> }
+          · {{ imp.readOnly ? 'read-only' : 'READ-WRITE — changes are real' }}
+          @if (impersonationMinutesLeft() !== null) { <span class="imp-timer">· {{ impersonationMinutesLeft() }} min left</span> }
+        </span>
+        <button class="btn sm" type="button" (click)="auth.endImpersonation()">Exit support session</button>
+      </div>
+    }
     <button class="menu-toggle no-print" type="button" [class.drawer-open]="menuOpen()" (click)="menuOpen.set(!menuOpen())" aria-label="Toggle menu">
       <app-icon name="menu" [size]="17" />
     </button>
@@ -131,6 +152,12 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
               <app-icon name="alertTriangle" [size]="16" style="flex-shrink:0;margin-top:1px" />
               <div style="line-height:1.6;">
                 <strong>{{ orgStatus() === 'suspended' ? 'This account is suspended.' : 'This account has been cancelled.' }}</strong><br />
+                @if (statusReason()) {
+                  <!-- The reason an operator gave. "Suspended" with no explanation
+                       is a support ticket, and the tenant is the person who most
+                       needs to know why. -->
+                  <span><strong>Reason:</strong> {{ statusReason() }}</span><br />
+                }
                 You can still view, print and export everything you have already recorded, but new
                 changes cannot be saved.
                 @if (orgStatus() === 'suspended') {
@@ -138,6 +165,16 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
                   or contact support to restore access.
                 }
               </div>
+            </div>
+          }
+          @for (notice of auth.notices(); track notice.message) {
+            <!-- Operator-authored banners: a platform-wide announcement and/or a
+                 message addressed to this tenant. Expiry is enforced server-side,
+                 so a lapsed banner disappears even in a tab that stayed open. -->
+            <div class="info-box no-print" [class.danger]="notice.level === 'danger'" [class.warn]="notice.level === 'warning'"
+              style="margin-bottom:18px;display:flex;gap:10px;align-items:flex-start;">
+              <app-icon [name]="notice.level === 'info' ? 'inbox' : 'alertTriangle'" [size]="16" style="flex-shrink:0;margin-top:1px" />
+              <div style="line-height:1.6;">{{ notice.message }}</div>
             </div>
           }
           <div class="page-head">
@@ -177,6 +214,21 @@ export class AppShellComponent {
 
   /** Organisation status, which now genuinely gates writes server-side. */
   orgStatus = computed(() => this.auth.organisation()?.status);
+  /** The reason an operator gave when suspending or cancelling, if any. */
+  statusReason = computed(() => this.auth.organisation()?.statusReason || '');
+
+  /**
+   * Minutes until the support session lapses. Recomputed on a ticking signal rather
+   * than once, so the number counts down instead of freezing at whatever it was
+   * when the page loaded — a stale "30 min left" is worse than no timer.
+   */
+  private clock = signal(Date.now());
+  impersonationMinutesLeft = computed<number | null>(() => {
+    const expiresAt = this.auth.impersonation()?.expiresAt;
+    if (!expiresAt) return null;
+    const remaining = new Date(expiresAt).getTime() - this.clock();
+    return remaining > 0 ? Math.ceil(remaining / 60000) : 0;
+  });
   /** Suspended and cancelled accounts are read-only, not signed out. */
   accountBlocked = computed(() => {
     const status = this.orgStatus();
@@ -217,6 +269,31 @@ export class AppShellComponent {
     // otherwise the page behind it keeps scrolling under the fixed overlay.
     effect(() => {
       if (this.menuOpen()) pushScrollLock(); else popScrollLock();
+    });
+
+    /**
+     * Reconciles the session with the server on load.
+     *
+     * The app cached the organisation at login and never asked again, so a
+     * suspension, a feature flag or a message addressed to this tenant stayed
+     * invisible for the rest of the session. This is one request per app load, and
+     * it is what makes every banner above actually appear.
+     */
+    this.auth.refreshSession().subscribe({ error: () => {} });
+
+    // The impersonation bar is fixed-position, so the layout below it has to make
+    // room. A class on <body> is the only place a fixed overlay's offset can be
+    // applied to everything at once, including the fixed sidebar and topbar.
+    effect(() => {
+      document.body.classList.toggle('has-impersonation-bar', this.auth.isImpersonating());
+    });
+
+    // Ticks the countdown in the bar. One-minute resolution is what is displayed,
+    // and the interval is only created when a session is actually running.
+    effect(onCleanup => {
+      if (!this.auth.isImpersonating()) return;
+      const timer = setInterval(() => this.clock.set(Date.now()), 30_000);
+      onCleanup(() => clearInterval(timer));
     });
   }
 
