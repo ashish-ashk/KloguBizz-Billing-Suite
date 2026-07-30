@@ -40,7 +40,15 @@ const totalsSchema = new mongoose.Schema({
   roundOff: { type: Number, default: 0 },
   total: { type: Number, default: 0 },
   isIGST: { type: Boolean, default: false },
-  isUT: { type: Boolean, default: false }
+  isUT: { type: Boolean, default: false },
+  // Mirrors Invoice's totals: the classification travels with the document so the
+  // CDNR/CDNUR tables can be built without re-deriving it.
+  taxTreatment: { type: String, default: 'taxable' },
+  supplyType: { type: String, default: 'regular' },
+  reverseCharge: { type: Boolean, default: false },
+  zeroRated: { type: Boolean, default: false },
+  taxCharged: { type: Boolean, default: true },
+  taxNote: { type: String, default: '' }
 }, { _id: false });
 
 // Reasons recognised by GSTR-1's CDNR table. Kept as an enum because the return
@@ -78,6 +86,18 @@ const creditNoteSchema = new mongoose.Schema({
     gstin: String
   },
   date: { type: Date, required: true, default: Date.now },
+  /**
+   * Copied from the invoice being credited.
+   *
+   * A credit note must be taxed on the same footing as the supply it reverses — an
+   * IGST invoice credited as CGST+SGST would move tax between two governments — so
+   * these are snapshotted from the original rather than recomputed from the
+   * buyer's current address, which may have changed since.
+   */
+  placeOfSupply: String,
+  taxTreatment: { type: String, default: 'taxable' },
+  supplyType: { type: String, default: 'regular' },
+  reverseCharge: { type: Boolean, default: false },
   reason: { type: String, enum: CREDIT_NOTE_REASONS, default: 'sales-return' },
   reasonNote: String,
   items: { type: [lineItemSchema], default: [] },

@@ -7,6 +7,7 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const { recordActivity } = require('../services/usageEventService');
 const { logAudit } = require('../services/auditService');
 const { isForbiddenWhileImpersonating } = require('../services/impersonationService');
+const { requireVerifiedEmail, requireSuperadminMfa } = require('./accountGuards');
 
 // Routes a suspended tenant may still write to. Suspension is a commercial
 // measure, not a punishment: the tenant keeps access to the pages that let them
@@ -152,7 +153,23 @@ const protect = asyncHandler(async (req, res, next) => {
    */
   if (!req.impersonation) recordActivity(req);
 
-  next();
+  /**
+   * Account-state guards, run here rather than mounted globally.
+   *
+   * A global `app.use` would execute *before* this middleware and therefore before
+   * `req.user` exists, so both guards would no-op on every request — enforcement that
+   * reads like enforcement and does nothing. Running them from inside `protect` is the
+   * only placement where the thing they inspect has been loaded, and it means every
+   * authenticated route gets them without any router having to remember.
+   *
+   * Each is a plain `(req, res, next)` and calls `next(error)` on refusal, so the
+   * chaining below hands control to the error handler exactly as a mounted middleware
+   * would.
+   */
+  return requireSuperadminMfa(req, res, mfaError => {
+    if (mfaError) return next(mfaError);
+    return requireVerifiedEmail(req, res, next);
+  });
 });
 
 module.exports = { protect };

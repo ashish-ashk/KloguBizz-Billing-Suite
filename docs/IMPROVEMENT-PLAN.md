@@ -159,6 +159,93 @@ billing depth, then Phase 5's GSTR-1 export, purchases/ITC and e-invoicing.
 
 ---
 
+## STATUS — Phase 5 shipped, plus the long-deferred items (2026-07-30)
+
+**Phase 5 (compliance depth): items #29, #30, #31, and Part 2.1's #2 (GSTR-1),
+#3 (GSTR-3B), #4 (e-invoicing seam), #5 (purchases/vendors/ITC) and #8.
+Previously deferred and now done: #7 (MFA + superadmin IP allowlist), #37 (soft
+delete / recycle bin), #52 (email verification), #58 (email delivery logging,
+bounces and suppression), #62 (tenant export + self-service erasure).**
+
+Verified by **175 automated tests** (14 unit + 161 integration against a real
+MongoDB, including a new 37-test `compliance.test.js`), clean `eslint` on both
+packages, clean production *and* development `ng build`s, migration 005 exercised
+end-to-end against a live database, and a real `node server.js` boot in both
+development and production mode.
+
+| Area | What changed |
+|---|---|
+| Classification (#29–#31) | `gstRate: 0` was the only way to express "no tax", which collapsed five legally distinct things into one and made correct GSTR-1 classification impossible. New `placeOfSupply`, `taxTreatment`, `supplyType`, `reverseCharge` and `exportDetails` on both invoices and credit notes, resolved by one new `gstService.resolveTaxContext` so the document, the PDF and both returns cannot disagree. Three rules that a naive version gets wrong, each with a test: an **export is inter-state by definition** (an SEZ unit in your own state is still IGST, which `from !== to` gets wrong); a **LUT export charges nothing** while still reporting its taxable value; and a **reverse-charge invoice collects no tax** because the recipient pays it directly — collecting it would tax the same supply twice. Defaults reproduce the previous behaviour exactly, so no existing invoice computes differently |
+| GSTR-1 (2.1 #2, #8) | The old report was a month × rate summary that did not group by HSN and had no notion of sections. New `gstReturnService.buildGstr1` produces **B2B, B2CL, B2CS, CDNR, CDNUR, EXP, NIL, HSN and DOC_ISSUE**, downloadable as the GSTN offline-utility JSON or as one CSV per section. The hard part is not the arithmetic, it is that two invoices with identical totals belong in different tables — so the tests cover the threshold cases: a nil-rated invoice to a registered buyer appears under NIL and **not** also under B2B (which would double-count turnover), and a cancelled invoice leaves the outward tables but is still counted in the document series, because a series with an unexplained gap is a red flag in a return |
+| Purchases and ITC (2.1 #5) | The gap that made this "sales-only": no supplier model, no purchase document, therefore no input tax credit, therefore no net liability. New `Vendor` and `Purchase`, priced by the same GST engine, with an explicit ITC category (inputs / capital goods / input services / ineligible / blocked) because "can I claim this" has more than two answers and GSTR-3B asks for them separately. `{orgId, vendorId, billNumber}` is unique: the document number belongs to the *supplier*, so nothing else stops the same bill being entered twice — and entering it twice claims the same credit twice |
+| GSTR-3B (2.1 #3) | Uncomputable before purchases existed, because it is a subtraction. Outward liability less ITC, **per tax head** — credit under one head cannot be set off against another arbitrarily, so a surplus is reported as carry-forward rather than quietly reducing another head's cash. Reverse charge deliberately appears on **both** sides (3.1(d) liability and 4(A)(3) credit): netting them to zero is right on the total and wrong on both lines, and the return is filed line by line |
+| E-invoicing (2.1 #4) | The `gst-einvoice-qr` template draws a *decorative, non-scannable* QR, which is worse than nothing on a legal document. Now: `eInvoice` state on the invoice, a validator that applies the rules the IRP would reject on (missing HSN, invalid buyer GSTIN, no place of supply), a builder that produces the real NIC schema-1.1 payload, the 24-hour IRN cancellation window with the right advice when it has passed, and a worklist of documents that need an IRN and lack one. The network call is a **documented refusal**, not a mock: with no provider credentials it returns `501 IRP_NOT_CONFIGURED` **with the validated payload attached** so it can be uploaded to the portal by hand. A fake success stamping a made-up IRN would be indistinguishable from compliance until an audit |
+| MFA (#7) | Deferred four times with the note "needs a TOTP dependency", which was wrong: TOTP is HMAC-SHA1 over a counter and Node has HMAC-SHA1. New dependency-free `utils/totp.js`, **verified against all four RFC 6238 SHA-1 test vectors**. Secrets are AES-256-GCM encrypted at rest (a readable TOTP secret is a second password anyone with the database can use forever); enrolment is *staged* until a live code proves the app works, so a misconfigured authenticator cannot lock anyone out; the consumed counter is recorded, so the same six digits cannot be replayed inside their 30-second window; single-use recovery codes exist because a lost phone must not be a permanent lockout whose only remedy is support disabling the control. Login issues **no token at all** until the second factor is presented — there is no window in which a half-authenticated session exists and no route that has to remember to check a flag. Plus a CIDR-aware IP allowlist on `/superadmin`, and mandatory enrolment for platform accounts that deliberately still permits the enrolment routes, so "mandatory" is not a lockout |
+| Soft delete (#37) | Clients, items and draft invoices were gone instantly with no undo. `deletedAt` plus a shared `utils/softDelete.js` whose whole point is that the *reads* cannot forget: `scopeFilter` is the tenant filter and the exclusion together, and a deleted row that still appeared in a report would be worse than a hard delete because the numbers would be wrong invisibly. A deleted draft **keeps its invoice number** (releasing it would let a restore collide with a number the counter has since issued), an issued invoice is still not deletable at all, and the bin is purged after 30 days so it does not become permanent hidden storage |
+| Email delivery (#58) | `sendEmail` returned `{skipped:true}` and logged a line, so a deployment that was sending and one that was not looked identical and nothing recorded which. New `EmailLog` records **every** outcome including `skipped` and `suppressed`; a `Suppression` list stops mail to bounced and complained addresses, because continuing to send is what destroys a sending domain's reputation for every tenant; a signature-checked SendGrid event webhook ingests delivery, bounces and complaints. A **soft** bounce deliberately does not suppress — permanently cutting off a customer whose mailbox was briefly full is the obvious wrong answer. Surfaced as a deliverability console with per-flow and per-tenant failure rates |
+| Email verification (#52) | Registration accepted anything, so one typo produced an account that could never receive a reset link. Enforced only when a mail provider is actually configured — requiring a verification that cannot be sent would make every local install and every test fail for an unrelated reason — and enforcement blocks *writes* while leaving reads and exports open, the same trade-off suspension makes |
+| Data rights (#62) | No export beyond per-list CSV and no self-service deletion. A complete machine-readable export, **streamed with back-pressure** (a full export is the largest response the API produces, and the version that builds a string first works in testing and times out for the customer who most needs it), with credentials and MFA secrets excluded. Deletion is owner-only, password-confirmed, type-the-name, and takes effect after a 30-day grace window during which the export keeps working — an erasure request made in anger is otherwise unrecoverable, and Indian tax records are usually required to be retained for years |
+| Two bugs found while building | (1) The ITC register's `$match` used the org id as a **string**: Mongoose casts that for `find` but not inside an aggregation, so the whole register silently returned nothing — and an empty ITC report reads as "no credit available", a wrong answer that looks like a correct one. (2) A deliberate 5xx (`501 IRP_NOT_CONFIGURED`, `503 WEBHOOK_NOT_CONFIGURED`) was logged as an unhandled fault with a stack trace *and*, in production, had its actionable message replaced by "something went wrong on our side" — making a configuration problem undiagnosable for the person who could fix it. `errorMiddleware` now distinguishes a 5xx we raised on purpose from one we did not |
+
+**Deliberately not done, and why:**
+- **Refresh tokens and a device/session list (#50, #51).** These change session
+  semantics for every user of the product — token lifetime, rotation, revocation —
+  and need a `Session` collection that `sessionVersion` (a counter, not a registry)
+  cannot stand in for. Force-logout, the actionable half, already exists.
+- **Memberships and the org-switcher (#53, #54).** Email is globally unique on
+  `User`, so one person genuinely cannot belong to two organisations — and fixing
+  that means changing the identity model every other feature is built on, plus
+  migrating every existing account. It is its own phase, not a line item.
+- **E-way bills (2.1 #6) and GSTR-2A/2B reconciliation (#7).** Both need a live
+  GSP connection; the e-invoice seam is where that integration lands, and building
+  two more unreachable adapters first would be speculative.
+- **OpenAPI (#63) and frontend tests (#59's frontend half).** Real gaps, but neither
+  is compliance depth: the frontend has no test runner configured at all, so that is
+  a tooling task rather than a test-writing one.
+- **A QR code on the MFA enrolment screen.** Deliberate: it would need either a
+  dependency on the auth path or a hand-written encoder I cannot verify decodes, and
+  a subtly wrong QR produces an authenticator whose codes the server will never
+  accept — indistinguishable, to the user, from "my code is wrong". The setup key
+  and the `otpauth://` link both provably work.
+
+**Still open, in the doc's own ordering:** refresh tokens and session list (#50–#51),
+memberships and the org-switcher (#53–#54), OpenAPI (#63), Part 3.3's billing depth
+(plan versioning, coupons, dunning, the platform's own GST invoices), the queue and
+deliverability consoles' remaining halves in 3.5, e-way bills and GSTR-2A/2B, then
+Phase 6's premium polish.
+
+---
+
+## STATUS — Phase 6a: the fields that lied (2026-07-30)
+
+**Done: Part 2.3 #19, #24, #25, #26 · Part 2.4 #28, #29, #31, #33, #34 ·
+Part 2.5 #37, #38, #39 · Part 2.6 #50.**
+
+Verified by **195 automated tests** (14 unit + 181 integration, including a new
+20-test `operations.test.js`), clean `eslint` on both packages, clean production and
+development `ng build`s, and the invoice PDF re-rendered and inspected by
+instrumenting pdfkit's own `text()`/`image()` calls rather than trusting the byte size.
+
+The theme of this tranche is **schema that promised behaviour it did not have**, which
+is worse than an absent feature because it gets trusted:
+
+| Area | What changed |
+|---|---|
+| Stock is no longer a dead field (2.5 #37–#39) | `Item.stockQty` and `reorderLevel` existed from the first version and **nothing ever wrote to them** — the Inventory page showed a stock column that only moved when somebody edited it by hand. New `StockMovement` ledger (append-only, signed quantities, balance-after on each row) plus `stockService`: issuing an invoice takes stock out, cancelling puts it back, a credit note returns **only what it credits**, a purchase brings it in. Three deliberate refusals: a **draft** moves nothing, a **service** is never tracked, and a line that matches no catalogue item moves **nothing rather than guessing** — silently decrementing the wrong product is a balance that is wrong in a way nobody can trace. `stockQty` is now a cached balance the ledger can always rebuild, moved with `$inc` so two concurrent sales cannot lose one another. Manual adjustments require a note, which is exactly what the old hand-edited number never had. Low-stock alerts only consider items that actually have a reorder level — a missing level means "untracked", not zero, or every service sits in the alert list forever |
+| Receivables (2.4 #28, #29, #33) | The product could say *how much* was outstanding and nothing else — not how old it was, not who owed it, not how long money takes to arrive. Added AR ageing (0-30/31-60/61-90/90+, per customer, sorted by the **worst** invoice rather than the largest total, because the report is read to decide who to chase), a statement of account with a running balance and a real **opening balance** (omitting it is the classic statement bug: the closing figure is only right if the period starts at the beginning of the relationship), and DSO / collection efficiency / payment-method mix. DSO is computed the standard way rather than by averaging invoice-to-payment gaps — the average silently ignores the invoices that were never paid at all, which is precisely where a collections problem hides. Every figure is `null` rather than `0` when there is no data, because a DSO of zero reads as "we collect instantly" |
+| Excel export (2.4 #34) | `exceljs` had been a dependency since the beginning and was used for exactly one thing: the blank bulk-upload template. Every export was CSV, which loses number formatting and cannot hold more than one table — so an ageing report became two files whose relationship was lost on download. New `excelService` streams real workbooks with `WorkbookWriter` (not `new Workbook()`, which holds every row in memory until the end), typed cells so dates sort and numbers sum, and multiple sheets. A test asserts the output is a `PK` zip container, because a CSV renamed `.xlsx` simply fails to open |
+| Emailing the invoice (2.3 #19) | There was **no send-invoice action at all** — only overdue reminders, plain text with nothing attached. So the loop the entire application exists to serve, "raise an invoice and give it to the customer", ended at a download the tenant then emailed themselves. Now `POST /invoices/:id/send` attaches the **same** `renderInvoicePdf` output the download produces (rendering a second, simpler version for email is how the customer's copy comes to differ from ours), sets `replyTo` to the tenant's own address so a customer's reply is not swallowed by our transactional sender, refuses on a draft, and reports what *actually* happened rather than a blanket success |
+| Three decorative toggles made real (2.3 #24–#26) | `showBankDetails` rendered an **empty block** for almost every invoice ever produced, because `bankDetails` lived only on the document and had to be retyped each time. `showSignature` drew a signature line with nothing above it. And there was no default terms text anywhere. New org-level `brandingConfig.invoiceDefaults` (bank, UPI id, signature image, signatory name, terms, default note), with per-invoice fields still winning. Mirrored byte-for-byte between `pdfService.js` and `invoice-document.component.ts` per the house convention, and the bank panel is now sized to the rows that have a value rather than a fixed box that clipped the UPI line |
+| The tenant's own audit trail (2.6 #50) | `AuditLog` has recorded `orgId` since Phase 1 and was exposed **only** on the superadmin route, so an owner could not see who on their own team changed what — the first question anyone asks after a mistake. New `/reports/activity`, admin-only, tenant-scoped, with the platform's internal ids stripped. Support access is shown in plain words rather than hidden: if somebody at KloguBizz acted inside the account, the customer sees it, which is the visible half of Part 3.4's data-access log and what makes impersonation defensible rather than merely audited internally |
+| Two bugs the tests found | (1) **The aggregation-cast trap recurred.** `stockService.recomputeBalance` passed string ids into a `$match`, which Mongoose casts for `find` but not inside a pipeline — so the repair path would have *zeroed* the balance it was asked to rebuild. Same class as the ITC register bug in Phase 5; now documented in both places. (2) **The duplicate-purchase guard depended on index state.** It relied solely on the unique index, which does not exist while Mongoose is still building it — and does not exist at all when `autoIndex` is off, the usual production setting. A guard against claiming the same input credit twice cannot be conditional on that, so there is now an explicit pre-check with the index kept as the race backstop |
+
+**Deliberately not done in this tranche:** a UPI **QR code** on the invoice. Same
+reasoning as the MFA QR: an encoder whose output I cannot verify scans is a payment
+instruction that might silently not work, which is worse than printing the UPI id as
+text that can be typed or copied.
+
+---
+
 ## PART 1 — BUGS & FIXES
 
 ### 1.1 Security · privilege escalation (P0)
@@ -536,7 +623,208 @@ band: MFA + the `/super-admin` IP allowlist (#7), two-person approval and break-
 the active-session registry (needs #50/#51), Part 3.3's billing depth, and the
 queue/deliverability consoles in 3.5.
 
-**Phase 5 — Compliance depth.** GSTR-1 export, purchases + ITC, e-invoicing, e-way bill.
-This is what moves the product from "invoice maker" to "GST software".
+**Phase 5 — Compliance depth.** ~~GSTR-1 export, purchases + ITC, e-invoicing, e-way bill.
+This is what moves the product from "invoice maker" to "GST software".~~
+**Shipped 2026-07-30** — see the Phase 5 status section above, which also covers the
+long-deferred #7, #37, #52, #58 and #62. Remaining from this band: e-way bills and
+GSTR-2A/2B reconciliation, both of which need a live GSP connection that lands behind
+the same seam as e-invoicing.
 
 **Phase 6 — Premium polish.** Part 4, continuously.
+
+---
+
+# WHAT IS ACTUALLY LEFT
+
+Written after Phase 6a, as one honest inventory. Ordered by what a paying customer
+notices first, not by section number. Every entry says **why it wasn't done** and **how
+to do it** — "remaining work" with no route through it is just a list of regrets.
+
+## Tier 1 — architectural, and blocking other things
+
+### 1. Refresh tokens + a session registry (#50, #51)
+
+**Why not yet:** this changes session semantics for every user at once, and
+`sessionVersion` is a counter, not a registry — there is nowhere to record "this device,
+last seen here", so a device list cannot be built on it. `JWT_REFRESH_SECRET` has been in
+`env.js` since the beginning and is still read by nothing.
+
+**How:** a `Session` model (`{userId, orgId, refreshTokenHash, userAgent, ip, lastSeenAt,
+revokedAt}`). Issue a short access token (~15 min) plus a rotating refresh token;
+`POST /auth/refresh` swaps one for the next and **detects reuse** — a replayed refresh
+token means it was stolen, so revoke the whole family. Replace the `sessionVersion` check
+in `protect` with a session lookup, keeping `sessionVersion` as the "revoke everything"
+lever. Frontend: the interceptor queues requests during a refresh instead of bouncing to
+`/login`, and `AuthService.scheduleExpiry` refreshes instead of logging out. This also
+unblocks the device list in Part 3.4 and lets the console show real active sessions.
+
+**Watch for:** two tabs refreshing at once. Without a single-flight guard in the
+interceptor one wins and the other's token has already been rotated — which the reuse
+detector will then treat as theft and revoke the user's whole family of tokens.
+
+### 2. Memberships + org-switcher (#53, #54)
+
+**Why not yet:** `User.email` is globally unique, so one person genuinely cannot belong to
+two organisations. Fixing it changes the identity model every other feature sits on, and
+requires migrating every existing account.
+
+**How:** a `Membership {userId, orgId, role, status}`; drop the global unique index on
+email and make it unique per membership instead. `User` keeps identity (name, password,
+MFA); role moves to the membership. The JWT gains an `activeOrgId` claim and `protect`
+resolves `req.orgId` from the membership rather than from `user.orgId`. Migration: one
+membership per existing user from their current `orgId` + `role`. Then
+`POST /auth/switch-org` re-issues a token for another membership, and the topbar gets a
+switcher.
+
+**Sequence this before anything else in Tier 2** — accountants serving several businesses
+are an entire customer segment that cannot use the product at all today.
+
+### 3. Object storage for images (#45's other half)
+
+**Why not yet:** needs S3/R2 credentials this deployment does not have. The base64 still
+sits in Mongo; what Phase 3 fixed was the part costing every request.
+
+**How:** the asset endpoints (`/assets/org/:id/logo`) are already the seam. Put a
+`storageService` behind them with a local-disk driver and an S3 driver selected by env,
+move the bytes on write, keep the content-addressed URL contract identical, and add a
+resize step (sharp) so a 4 MB phone photo becomes a 200 KB logo. A migration reads each
+`brandingConfig.logoUrl`, uploads it, and replaces it with a key.
+
+## Tier 2 — features customers ask for
+
+### 4. Quotations → invoice (2.2 #11), proforma (#12), delivery challans (#13)
+
+**Why not yet:** each is a new document type with its own number series and lifecycle.
+
+**How:** the pattern is established twice already (`Invoice`, `CreditNote`). Generalise
+`invoiceNumberService`'s atomic FY-aware counter into a `documentNumberService`, then one
+model per type with `status: draft|sent|accepted|rejected|expired` and a
+`convertToInvoice` that copies the lines and links back to the original. Reuse
+`renderInvoicePdf` with a different title — the existing `invoiceTitleLabel` override
+already proves the renderer is document-agnostic.
+
+### 5. Recurring invoices (2.2 #14)
+
+**How:** `RecurringInvoice {template, frequency, nextRunAt, endsAt}` plus a job in
+`maintenanceService` that generates and optionally sends. The scheduler pattern and the
+send path both exist now. The real work is the dedup discipline `ReminderLog` already
+demonstrates: never generate twice for the same period, even if the job runs twice.
+
+### 6. Payment links, hosted pay page, customer portal (2.3 #21, #23)
+
+**Why not yet:** Razorpay is wired only for *our* subscriptions, never for
+tenant → customer collection. That needs per-tenant gateway credentials (Razorpay Route,
+or per-tenant keys), which is a commercial decision as much as a technical one.
+
+**How:** store per-tenant credentials encrypted — `utils/totp.js`'s AES-256-GCM helper is
+the pattern to copy. Add a public `/pay/:token` route with a signed, expiring token, and
+reconcile through a webhook that calls the existing `createPayment` path so settlement
+logic stays in exactly one place.
+
+### 7. Inventory depth (2.5 #40–#44)
+
+**How:** the Phase 6a ledger is the foundation. Valuation (FIFO / weighted average) is a
+pass over `StockMovement` once `unitCost` is added to the row. Batch/expiry and warehouses
+each add a dimension to a movement — do **warehouses last**, because they change every
+balance query from "per item" to "per item per location". Barcode scanning is a frontend
+capability on `Item.barcode`, which exists and is still unused.
+
+### 8. P&L and expense reporting (2.4 #32)
+
+**How:** purchases exist now, so this is finally computable. It needs an expense-category
+master and a chart-of-accounts-lite: revenue from invoices, costs from purchases, grouped
+by period.
+
+## Tier 3 — platform and billing (Part 3.3, 3.5, 3.4)
+
+### 9. Plan versioning
+
+**Why it matters:** `upsertPlan` overwrites in place, so changing a price silently
+reprices every existing subscriber with no grandfathering.
+
+**How:** `PlanVersion` rows, and pin `Subscription.planVersionId` at signup. The pricing
+page reads the latest version; an existing subscriber keeps theirs.
+
+### 10. Dunning, coupons, refunds/proration, our own GST invoices
+
+**How:** dunning is a `maintenanceService` job over `Subscription.failedPaymentCount` with
+an escalating email sequence and auto-suspend at N days past due — the suspension
+machinery already exists and is enforced. The platform's own GST invoice is genuinely just
+an `Invoice` with us as the supplier; the honest version reuses the whole GST engine rather
+than growing a second one.
+
+### 11. Job/queue console, and deliverability replay (3.5)
+
+**Why not yet:** there is no queue. Everything asynchronous is `setInterval` plus
+fire-and-forget.
+
+**How:** two options, and the cheap one is right first. Either add a `JobRun` collection so
+the existing sweeps become *observable* (no new infrastructure, covers most of the value —
+"did the reminder sweep run, what did it do, did it fail"), or add BullMQ + Redis if
+retries and a dead-letter queue are genuinely needed. Do the first; only do the second when
+a real failure demands it.
+
+### 12. Two-person approval and break-glass elevation (3.4)
+
+**How:** an `ApprovalRequest` collection, a `requireApproval(capability)` middleware that
+returns `202 APPROVAL_PENDING` and records the intent, and a console screen for the second
+approver. Break-glass is the same mechanism with a TTL on the grant.
+
+## Tier 4 — engineering hygiene
+
+### 13. Frontend tests (#59's frontend half)
+
+**Why not yet:** no test runner is configured at all, so this is a tooling task before it is
+a test-writing one.
+
+**How:** `ng add @angular/build:karma`, or Vitest with `@analogjs/vitest-angular`. Start
+where a bug is expensive and the code is pure logic: `core/server-list.ts` (the
+stale-response guard), `core/invoice-templates.ts` (`resolveTemplate` and the legacy id
+map), `core/format.ts` (`numberToWords`, GSTIN validation). Then one Playwright smoke test:
+register → invoice → PDF.
+
+### 14. OpenAPI (#63)
+
+**How:** do **not** hand-write it — it will drift within a week. The zod schemas in
+`validators/schemas.js` are already the source of truth: add `zod-to-json-schema` and
+generate the spec from the route table, so an endpoint with no schema is visibly missing
+from the docs rather than silently undocumented.
+
+### 15. E-way bill (2.1 #6) and GSTR-2A/2B reconciliation (2.1 #7)
+
+**Why not yet:** both need a live GSP connection.
+
+**How:** they land behind the same adapter seam as e-invoicing
+(`eInvoiceService#callIrp`). Write the payload builder and the validator first — that is
+the majority of the work and is fully testable without credentials, exactly as
+e-invoicing demonstrated.
+
+### 16. Multi-GSTIN / branches (2.1 #9), composition & QRMP (2.1 #10)
+
+**Why not yet:** one org = one GSTIN is assumed by the invoice counter, both returns and
+the tax engine.
+
+**How:** this is really "memberships for GSTINs" — a `Branch` sub-entity owning its own
+GSTIN, invoice series and returns. Sequence it **after** memberships, because they are the
+same shape of problem and solving one teaches the other.
+
+## Part 4 (premium polish) — the honest position
+
+Twenty-eight of the thirty items are untouched, and that was the right call: they are
+polish on a product whose compliance and correctness gaps were the actual problem. Two got
+absorbed along the way — #22 (dark mode is now feature-flagged rather than plan-gated) and
+#16's page numbers and continued markers (Phase 3).
+
+If picking Part 4 up, this order returns the most per unit of work:
+
+1. **#14 accessibility.** The lint output already names ~225 real findings — focus traps,
+   ARIA on the drawer and toasts, contrast across 15 themes × 12 accent swatches. It is
+   also the only item on this list with a legal dimension.
+2. **#24 the loading/empty/error triad** and **#8 inline validation.** The app currently
+   surfaces most failures as one toast at the end of a submit.
+3. **#1 a command palette over real data.** `quick-search` is still a client-side list of
+   nav links; the server-side search it would need now exists on every list endpoint.
+4. **#3 bulk actions**, **#5 undo toasts** (the soft-delete restore endpoints make undo
+   nearly free now), **#11 date-range presets**.
+5. **#19 offline-first last.** It needs an IndexedDB queue with conflict resolution, which
+   is a project rather than a task.

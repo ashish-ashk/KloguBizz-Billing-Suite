@@ -134,8 +134,15 @@ app.use('/api/v1/credit-notes', require('./src/routes/creditNoteRoutes'));
 app.use('/api/v1/users', require('./src/routes/userRoutes'));
 app.use('/api/v1/subscriptions', require('./src/routes/subscriptionRoutes'));
 app.use('/api/v1/reports', require('./src/routes/reportRoutes'));
+// Purchases, vendors and the ITC register — the inward half of the ledger,
+// without which there is no input tax credit and no net GST liability.
+app.use('/api/v1/purchases', require('./src/routes/purchaseRoutes'));
 app.use('/api/v1/superadmin', require('./src/routes/superadminRoutes'));
 app.use('/api/v1/webhooks/razorpay', require('./src/routes/razorpayWebhookRoutes'));
+// SendGrid delivery events (bounces, complaints, opens). Authenticated by a shared
+// secret — an open endpoint that writes delivery state and suppresses addresses is
+// one anyone could use to stop a competitor's mail.
+app.use('/api/v1/webhooks/sendgrid', require('./src/routes/sendgridWebhookRoutes'));
 
 app.use(notFoundHandler);
 app.use(errorHandler);

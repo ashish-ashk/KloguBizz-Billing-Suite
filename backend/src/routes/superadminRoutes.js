@@ -19,6 +19,8 @@ const platform = require('../controllers/platformController');
 const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { CAPABILITY, requireCapability } = require('../middleware/platformRoleMiddleware');
+const { superadminIpAllowlist } = require('../middleware/accountGuards');
+const { emailDeliverability, releaseSuppression, listSuppressions } = require('../controllers/platformController');
 
 /**
  * The platform console.
@@ -32,7 +34,12 @@ const { CAPABILITY, requireCapability } = require('../middleware/platformRoleMid
  * Read routes take `platformRead`, so an auditor sees the console; every write
  * takes the capability that names it, so the auditor cannot use it.
  */
-router.use(protect, requireRole('superadmin'));
+/**
+ * The IP allowlist is mounted here and nowhere else: it must never restrict a
+ * tenant, and one mount point at the only place it applies means it cannot drift.
+ * Empty by default (see env.SUPERADMIN_IP_ALLOWLIST).
+ */
+router.use(superadminIpAllowlist, protect, requireRole('superadmin'));
 
 // What this operator is allowed to do — the console reads it to decide what to
 // render. Not a control (each route is guarded), a courtesy.
@@ -104,5 +111,10 @@ router.get('/audit-logs/export.csv', requireCapability(CAPABILITY.auditRead), ex
 router.get('/audit-logs', requireCapability(CAPABILITY.auditRead), listAuditLogs);
 router.get('/security/logins', requireCapability(CAPABILITY.auditRead), platform.loginHistory);
 router.get('/security/alerts', requireCapability(CAPABILITY.auditRead), platform.securityAlerts);
+
+// ── Email deliverability (3.5 / #58) ─────────────
+router.get('/email/deliverability', requireCapability(CAPABILITY.platformRead), emailDeliverability);
+router.get('/email/suppressions', requireCapability(CAPABILITY.platformRead), listSuppressions);
+router.post('/email/suppressions/release', requireCapability(CAPABILITY.settingsWrite), releaseSuppression);
 
 module.exports = router;

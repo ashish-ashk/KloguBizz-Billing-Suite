@@ -41,6 +41,45 @@ const userSchema = new mongoose.Schema({
   lastLoginAt: Date,
   termsAcceptedAt: Date,
   termsVersion: String,
+
+  /**
+   * Email verification (#52).
+   *
+   * Registration accepted any address and never checked it, so a typo'd address was
+   * an account that could never receive a reset link, and a deliberately false one
+   * was free to use. `emailVerifiedAt` is set at registration when no mail provider
+   * is configured — there is no way to verify an address without one, and blocking
+   * every local install on an email that cannot be sent would be worse than not
+   * having the feature. See env.emailVerificationEnforced.
+   */
+  emailVerifiedAt: Date,
+  emailVerifyTokenHash: String,
+  emailVerifyTokenExpires: Date,
+  /** The address a change was requested to, pending its own verification. */
+  pendingEmail: String,
+
+  /**
+   * Two-factor authentication (#7).
+   *
+   * The secret is AES-256-GCM encrypted at rest (see utils/totp.js) because a stored
+   * TOTP secret is a second password — anyone who can read this collection could
+   * otherwise mint valid codes forever, and MFA would have bought nothing.
+   *
+   * `lastUsedCounter` is the replay guard: a code is valid for a 30-second step, so
+   * without recording which step was consumed the same six digits work twice for
+   * anyone who saw them.
+   */
+  mfa: {
+    enabled: { type: Boolean, default: false },
+    secret: String,
+    lastUsedCounter: Number,
+    enrolledAt: Date,
+    /** SHA-256 hashes of single-use recovery codes. A lost phone must not be a
+     *  permanently locked account whose only route back is support disabling the
+     *  control on request. */
+    backupCodes: { type: [String], default: [] },
+    backupCodesGeneratedAt: Date
+  },
   // Bumped on every login (and password change) to invalidate JWTs issued
   // before the bump — enforces a single active session per user.
   sessionVersion: { type: Number, default: 0 },
@@ -58,5 +97,6 @@ userSchema.index({ orgId: 1, role: 1 });
 // pending token don't all collide on null.
 userSchema.index({ inviteTokenHash: 1 }, { sparse: true });
 userSchema.index({ resetTokenHash: 1 }, { sparse: true });
+userSchema.index({ emailVerifyTokenHash: 1 }, { sparse: true });
 
 module.exports = { User: mongoose.model('User', userSchema) };

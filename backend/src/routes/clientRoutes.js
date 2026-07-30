@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { listClients, createClient, updateClient, deleteClient } = require('../controllers/clientController');
+const { listClients, createClient, updateClient, deleteClient, restoreClient } = require('../controllers/clientController');
 const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { requireTenant } = require('../middleware/tenantMiddleware');
@@ -11,5 +11,6 @@ router.get('/', listClients);
 router.post('/', requireRole('admin', 'accountant'), validate(clientCreateSchema), createClient);
 router.put('/:id', requireRole('admin', 'accountant'), validate(clientUpdateSchema), updateClient);
 router.delete('/:id', requireRole('admin'), deleteClient);
+router.post('/:id/restore', requireRole('admin'), restoreClient);
 
 module.exports = router;

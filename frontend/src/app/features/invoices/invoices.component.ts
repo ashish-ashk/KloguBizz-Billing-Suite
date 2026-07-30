@@ -98,6 +98,12 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft' | 'cancelle
                           <button class="btn ghost sm" type="button" [disabled]="downloadingId() === inv._id" (click)="downloadPdf(inv)">
                             @if (downloadingId() === inv._id) { <span class="spinner"></span> } @else { <app-icon name="download" [size]="13" /> } Download PDF
                           </button>
+                          @if (inv.status !== 'draft' && inv.status !== 'cancelled') {
+                            <!-- 2.3 #19: emailing the invoice, with the PDF attached. There
+                                 was no send action at all — only overdue reminders — so the
+                                 loop the product exists for ended at a download. -->
+                            <button class="btn ghost sm" type="button" (click)="openSend(inv)"><app-icon name="mail" [size]="13" /> Send to customer</button>
+                          }
                           <button class="btn ghost sm" type="button" (click)="duplicate(inv)"><app-icon name="copy" [size]="13" /> Duplicate</button>
                           <!-- An issued invoice cannot be deleted: it is a document the
                                customer holds and the GST return has counted. The correct
@@ -217,6 +223,36 @@ type StatusFilter = 'all' | 'paid' | 'pending' | 'overdue' | 'draft' | 'cancelle
         </div>
       </app-modal>
     </app-shell>
+
+    <!-- Send invoice -->
+    <app-modal [open]="!!sendTarget()" title="Send invoice to customer" [width]="520" (close)="sendTarget.set(null)">
+      @if (sendTarget(); as inv) {
+        <p style="margin:0 0 14px">
+          Invoice <strong>{{ inv.invoiceNumber }}</strong> will be emailed with the PDF attached.
+        </p>
+        <div class="field">
+          <label>To</label>
+          <input type="email" [(ngModel)]="sendTo" placeholder="accounts@customer.com">
+          <div class="card-sub" style="margin-top:4px">
+            Defaults to the address on the customer's record. Replies go to your organisation's email.
+          </div>
+        </div>
+        <div class="field">
+          <label>CC (optional)</label>
+          <input type="email" [(ngModel)]="sendCc">
+        </div>
+        <div class="field">
+          <label>Message (optional)</label>
+          <textarea rows="3" [(ngModel)]="sendMessage" placeholder="Hi — please find this month's invoice attached."></textarea>
+        </div>
+        <div class="modal-foot">
+          <button class="btn ghost" type="button" (click)="sendTarget.set(null)">Cancel</button>
+          <button class="btn primary" type="button" [disabled]="sending()" (click)="confirmSend()">
+            @if (sending()) { <span class="spinner"></span> } Send invoice
+          </button>
+        </div>
+      }
+    </app-modal>
   `
 })
 export class InvoicesComponent implements OnInit, OnDestroy {
@@ -243,6 +279,12 @@ export class InvoicesComponent implements OnInit, OnDestroy {
   stats = signal<InvoiceStats | null>(null);
   busy = signal(false);
   exporting = signal(false);
+  sendTarget = signal<Invoice | null>(null);
+  sending = signal(false);
+  sendTo = '';
+  sendCc = '';
+  sendMessage = '';
+
   downloadingId = signal<string | null>(null);
   filter = signal<StatusFilter>('all');
   confirmDelete = signal<Invoice | null>(null);
@@ -399,7 +441,38 @@ export class InvoicesComponent implements OnInit, OnDestroy {
     });
   }
 
-  downloadPdf(inv: Invoice) {
+openSend(invoice: Invoice) {
+    const client = invoice.clientId;
+    // Prefilled from the client record, and editable — an accounts-payable address is
+    // frequently not the one on the contact.
+    this.sendTo = (client && typeof client === 'object' ? client.email : '') || invoice.billTo?.email || '';
+    this.sendCc = '';
+    this.sendMessage = '';
+    this.sendTarget.set(invoice);
+  }
+
+  confirmSend() {
+    const invoice = this.sendTarget();
+    if (!invoice) return;
+    this.sending.set(true);
+    this.api.sendInvoiceToCustomer(invoice._id, {
+      to: this.sendTo.trim() || undefined,
+      cc: this.sendCc.trim() || undefined,
+      message: this.sendMessage.trim() || undefined
+    }).subscribe({
+      next: res => {
+        this.sending.set(false);
+        this.sendTarget.set(null);
+        // Reports what actually happened: with no email provider configured nothing was
+        // sent, and saying "sent" would be the exact invisibility #58 was about.
+        if (res.delivered) this.toast.success(res.message);
+        else this.toast.info(res.message);
+      },
+      error: err => { this.sending.set(false); this.toast.httpError(err); }
+    });
+  }
+
+    downloadPdf(inv: Invoice) {
     this.downloadingId.set(inv._id);
     this.api.downloadInvoicePdf(inv._id).subscribe({
       next: blob => { this.downloadingId.set(null); downloadBlob(blob, `${inv.invoiceNumber}.pdf`); },

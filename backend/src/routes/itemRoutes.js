@@ -1,6 +1,6 @@
 const multer = require('multer');
 const router = require('express').Router();
-const { listItems, createItem, updateItem, deleteItem, downloadItemTemplate, bulkUploadItems } = require('../controllers/itemController');
+const { listItems, createItem, updateItem, deleteItem, restoreItem, downloadItemTemplate, bulkUploadItems } = require('../controllers/itemController');
 const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { requireTenant } = require('../middleware/tenantMiddleware');
@@ -40,5 +40,6 @@ router.post('/bulk-upload', requireRole('admin', 'accountant'), requireFlag('bul
 router.post('/', requireRole('admin', 'accountant'), validate(itemCreateSchema), createItem);
 router.put('/:id', requireRole('admin', 'accountant'), validate(itemUpdateSchema), updateItem);
 router.delete('/:id', requireRole('admin'), deleteItem);
+router.post('/:id/restore', requireRole('admin'), restoreItem);
 
 module.exports = router;

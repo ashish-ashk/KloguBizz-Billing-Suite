@@ -110,23 +110,119 @@ function calculateLine(item = {}, invoiceDiscountPercent = 0, field = 'item') {
 }
 
 /**
+ * How a supply is classified for GST.
+ *
+ * `gstRate: 0` used to be the only way to express "no tax on this line", which
+ * collapsed five legally distinct things into one and made correct GSTR-1
+ * classification impossible: an exempt supply, a nil-rated supply, a non-GST
+ * supply, a zero-rated export and a genuinely 0% taxable supply all appear in
+ * different tables of the return, and only one of them counts towards the
+ * turnover on which registration and e-invoicing thresholds are based.
+ */
+const TAX_TREATMENTS = ['taxable', 'exempt', 'nil-rated', 'non-gst', 'zero-rated'];
+
+/**
+ * The nature of the supply, which decides both the tax head and the GSTR-1 table.
+ *
+ * A zero-rated supply (export or SEZ) can be made two ways, and the difference is
+ * not cosmetic: **with payment** of IGST, which is then refunded, or **without
+ * payment** under a Letter of Undertaking. Charging IGST on a LUT export
+ * overcharges the customer and misreports the return; not charging it on a
+ * with-payment export understates the liability.
+ */
+const SUPPLY_TYPES = [
+  'regular',
+  'export-with-payment',
+  'export-without-payment',
+  'sez-with-payment',
+  'sez-without-payment',
+  'deemed-export'
+];
+
+const ZERO_RATED_SUPPLY_TYPES = new Set([
+  'export-with-payment', 'export-without-payment',
+  'sez-with-payment', 'sez-without-payment'
+]);
+const WITHOUT_PAYMENT_SUPPLY_TYPES = new Set(['export-without-payment', 'sez-without-payment']);
+
+/**
+ * Decides the tax head and whether tax is charged at all.
+ *
+ * One function so the invoice, the credit note, the PDF, the reports and both GST
+ * returns cannot disagree about what kind of supply a document is. `reason` is
+ * returned rather than inferred by callers because it is what the UI shows the
+ * user to explain a zero-tax invoice — "why is there no GST on this?" is otherwise
+ * indistinguishable from a bug.
+ *
+ * @param fromStateCode  supplier's state
+ * @param toStateCode    the **place of supply** — not necessarily the buyer's
+ *                       registered state (see #29)
+ */
+function resolveTaxContext(fromStateCode, toStateCode, {
+  taxTreatment = 'taxable',
+  supplyType = 'regular',
+  reverseCharge = false
+} = {}) {
+  const from = normaliseStateCode(fromStateCode);
+  const to = normaliseStateCode(toStateCode);
+  const treatment = TAX_TREATMENTS.includes(taxTreatment) ? taxTreatment : 'taxable';
+  const supply = SUPPLY_TYPES.includes(supplyType) ? supplyType : 'regular';
+  const zeroRated = ZERO_RATED_SUPPLY_TYPES.has(supply) || treatment === 'zero-rated';
+
+  // An export or SEZ supply is inter-state by definition, whatever the state codes
+  // say — an SEZ unit in the supplier's own state is still a zero-rated supply
+  // attracting IGST, which is the case a plain `from !== to` comparison gets wrong.
+  const isIGST = zeroRated ? true : (Boolean(from && to) && from !== to);
+  // The UT question only arises for an intra-territory supply; an inter-state
+  // supply is IGST regardless of whether either end is a UT.
+  const isUT = !isIGST && UT_STATE_CODES.has(to);
+
+  let chargeTax = true;
+  let reason = '';
+  if (treatment === 'exempt' || treatment === 'nil-rated' || treatment === 'non-gst') {
+    chargeTax = false;
+    reason = `No GST charged — ${treatment} supply.`;
+  } else if (WITHOUT_PAYMENT_SUPPLY_TYPES.has(supply)) {
+    // Zero-rated without payment of tax, under a Letter of Undertaking.
+    chargeTax = false;
+    reason = 'Zero-rated supply under LUT — no IGST charged, to be claimed as a refund of input tax.';
+  } else if (reverseCharge) {
+    // Under reverse charge the *recipient* pays the tax directly to the
+    // government, so the supplier must not collect it — while still reporting the
+    // taxable value in GSTR-1. Charging it here would tax the same supply twice.
+    chargeTax = false;
+    reason = 'Tax payable by the recipient under reverse charge.';
+  }
+
+  return {
+    isIGST,
+    isUT,
+    chargeTax,
+    zeroRated,
+    reverseCharge: Boolean(reverseCharge),
+    taxTreatment: treatment,
+    supplyType: supply,
+    reason
+  };
+}
+
+/**
  * @param items          line items: { qty, rate, gstRate, cessRate, discountPercent, taxInclusive }
  * @param fromStateCode  the supplier's GST state code
  * @param toStateCode    the place of supply's GST state code
  * @param options.discountPercent  invoice-level discount, applied after line discounts
  * @param options.roundOff         round the payable total to a whole rupee (default true)
+ * @param options.taxTreatment     taxable | exempt | nil-rated | non-gst | zero-rated
+ * @param options.supplyType       regular, an export/SEZ variant, or deemed-export
+ * @param options.reverseCharge    tax payable by the recipient, so not collected here
  */
 function calculateInvoiceTotals(items, fromStateCode, toStateCode, options = {}) {
   const list = Array.isArray(items) ? items : [];
   const invoiceDiscount = clampPercent(options.discountPercent, 'discountPercent');
   const applyRoundOff = options.roundOff !== false;
 
-  const from = normaliseStateCode(fromStateCode);
-  const to = normaliseStateCode(toStateCode);
-  const isIGST = Boolean(from && to) && from !== to;
-  // The UT question only arises for an intra-territory supply; an inter-state
-  // supply is IGST regardless of whether either end is a UT.
-  const isUT = !isIGST && UT_STATE_CODES.has(to);
+  const context = resolveTaxContext(fromStateCode, toStateCode, options);
+  const { isIGST, isUT, chargeTax } = context;
 
   let grossSubtotal = 0;
   let discountTotal = 0;
@@ -141,9 +237,14 @@ function calculateInvoiceTotals(items, fromStateCode, toStateCode, options = {})
 
     grossSubtotal = roundMoney(grossSubtotal + line.gross);
     discountTotal = roundMoney(discountTotal + line.discount);
+    // The taxable value is recorded even when no tax is charged. An exempt or
+    // reverse-charge supply still has a value that has to appear in the return —
+    // dropping it would understate turnover, not just tax.
     subtotal = roundMoney(subtotal + line.taxable);
-    cess = roundMoney(cess + line.cess);
 
+    if (!chargeTax) return;
+
+    cess = roundMoney(cess + line.cess);
     if (isIGST) {
       igst = roundMoney(igst + line.tax);
     } else {
@@ -172,8 +273,26 @@ function calculateInvoiceTotals(items, fromStateCode, toStateCode, options = {})
     isIGST,
     // Render layers use this to label the state share UTGST instead of SGST;
     // the amount itself lives in `sgst` either way.
-    isUT
+    isUT,
+    // Persisted so the document, the PDF and both returns can classify the supply
+    // without re-deriving it — and so a zero-tax invoice can explain itself.
+    taxTreatment: context.taxTreatment,
+    supplyType: context.supplyType,
+    reverseCharge: context.reverseCharge,
+    zeroRated: context.zeroRated,
+    taxCharged: chargeTax,
+    taxNote: context.reason
   };
 }
 
-module.exports = { calculateInvoiceTotals, calculateLine, roundMoney, UT_STATE_CODES };
+module.exports = {
+  calculateInvoiceTotals,
+  calculateLine,
+  resolveTaxContext,
+  roundMoney,
+  UT_STATE_CODES,
+  TAX_TREATMENTS,
+  SUPPLY_TYPES,
+  ZERO_RATED_SUPPLY_TYPES,
+  WITHOUT_PAYMENT_SUPPLY_TYPES
+};

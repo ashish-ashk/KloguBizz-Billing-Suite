@@ -1,6 +1,7 @@
 const sgMail = require('@sendgrid/mail');
 const { env } = require('../config/env');
 const { logger } = require('../utils/logger');
+const { EmailLog, Suppression } = require('../models/EmailLog');
 
 if (env.SENDGRID_API_KEY) {
   sgMail.setApiKey(env.SENDGRID_API_KEY);
@@ -51,32 +52,94 @@ function layout({ title, body, ctaLabel, ctaUrl, footer }) {
 }
 
 /**
+ * Whether an address is on the platform-wide suppression list.
+ *
+ * Checked before every send, not as a courtesy to the recipient: continuing to mail
+ * an address that hard-bounced or complained is what destroys a sending domain's
+ * reputation, at which point every tenant's mail starts landing in spam. A lookup
+ * failure returns `false` -- a database blip must not stop the product sending mail,
+ * and the downside of one message to a bounced address is small next to that.
+ */
+async function isSuppressed(email) {
+  try {
+    const row = await Suppression.findOne({
+      email: String(email).toLowerCase().trim(),
+      releasedAt: null
+    }).lean();
+    return row ? { suppressed: true, reason: row.reason, detail: row.detail } : { suppressed: false };
+  } catch (error) {
+    logger.warn('suppression check failed', { err: error });
+    return { suppressed: false };
+  }
+}
+
+/**
+ * Records an attempt. Fire-and-forget for the same reason the audit writer is:
+ * bookkeeping must not be able to fail the thing it is recording.
+ */
+function recordEmail(entry) {
+  EmailLog.create(entry).catch(error => logger.warn('email log write failed', { err: error }));
+}
+
+/**
  * Generic sender. With no SendGrid key it logs and reports the message as
  * skipped, so flows that depend on email still succeed locally.
  *
  * Returns a result object rather than throwing on a provider error: a failed
  * reminder must not abort a whole sweep, and the caller records the outcome so
  * delivery is auditable instead of invisible.
+ *
+ * Every outcome -- including `skipped` and `suppressed` -- is written to `EmailLog`.
+ * The silent skip was the actual bug in #58: a deployment with no provider key
+ * behaved identically to one that was sending, and nothing anywhere recorded which
+ * it was.
  */
-async function sendEmail({ to, subject, text, html }) {
+async function sendEmail({ to, subject, text, html, type = 'generic', orgId, meta, attachments, cc, replyTo }) {
+  const base = { orgId: orgId || undefined, to: String(to || ''), subject, type, meta };
+
   if (!to) return { skipped: true, reason: 'no recipient address' };
+
+  const suppression = await isSuppressed(to);
+  if (suppression.suppressed) {
+    recordEmail({ ...base, status: 'suppressed', reason: `${suppression.reason}: ${suppression.detail || ''}`.trim() });
+    logger.info('email suppressed', { to, subject, reason: suppression.reason });
+    return { skipped: true, suppressed: true, reason: `This address is suppressed (${suppression.reason}).` };
+  }
+
   if (!env.SENDGRID_API_KEY) {
     logger.info('email skipped — no provider configured', { to, subject });
+    recordEmail({ ...base, status: 'skipped', reason: 'SENDGRID_API_KEY is not configured' });
     return { skipped: true, reason: 'SENDGRID_API_KEY is not configured' };
   }
+
   try {
-    await sgMail.send({ to, from: env.FROM_EMAIL, subject, text, html });
-    return { sent: true };
+    const [response] = await sgMail.send({
+      to,
+      from: env.FROM_EMAIL,
+      subject,
+      text,
+      html,
+      ...(cc ? { cc } : {}),
+      // The tenant's own address, so a customer's reply reaches them rather than us.
+      ...(replyTo ? { replyTo } : {}),
+      ...(attachments?.length ? { attachments } : {})
+    });
+    // The provider's own id is what its webhook events reference, so without
+    // capturing it a later bounce cannot be attached to the message that bounced.
+    const providerMessageId = response?.headers?.['x-message-id'];
+    recordEmail({ ...base, status: 'sent', providerMessageId });
+    return { sent: true, providerMessageId };
   } catch (error) {
     // SendGrid nests the useful part; surface it so a log entry is actually
     // diagnosable rather than just "failed".
     const detail = error.response?.body?.errors?.[0]?.message || error.message;
     logger.error('email delivery failed', { to, subject, detail });
+    recordEmail({ ...base, status: 'failed', reason: detail });
     return { failed: true, reason: detail };
   }
 }
 
-async function sendInviteEmail({ to, name, inviteUrl, orgName, inviterName, expiresAt }) {
+async function sendInviteEmail({ to, name, inviteUrl, orgName, inviterName, expiresAt, orgId }) {
   const expiry = expiresAt
     ? new Date(expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
     : null;
@@ -89,6 +152,8 @@ async function sendInviteEmail({ to, name, inviteUrl, orgName, inviterName, expi
     <p style="margin:0;">Choose a password to activate your account and get started.</p>`;
   return sendEmail({
     to,
+    orgId,
+    type: 'invite',
     subject: `${inviterName || 'Your team'} invited you to ${orgName || 'KloguBizz'}`,
     html: layout({
       title: 'Set up your account',
@@ -103,7 +168,7 @@ async function sendInviteEmail({ to, name, inviteUrl, orgName, inviterName, expi
   });
 }
 
-async function sendPasswordResetEmail({ to, name, resetUrl }) {
+async function sendPasswordResetEmail({ to, name, resetUrl, orgId }) {
   const body = `
     <p style="margin:0 0 12px;">Hello ${escapeHtml(name || 'there')},</p>
     <p style="margin:0 0 12px;">
@@ -113,6 +178,8 @@ async function sendPasswordResetEmail({ to, name, resetUrl }) {
     <p style="margin:0;">This link is valid for one hour and can only be used once.</p>`;
   return sendEmail({
     to,
+    orgId,
+    type: 'password-reset',
     subject: 'Reset your KloguBizz password',
     html: layout({
       title: 'Reset your password',
@@ -151,7 +218,7 @@ Warm regards,
 
 async function sendReminderEmail({
   to, clientName, invoiceNumber, amount, dueDate, orgName, overdueDays,
-  balanceDue, subject: subjectTemplate, template: bodyTemplate, viewUrl
+  balanceDue, subject: subjectTemplate, template: bodyTemplate, viewUrl, orgId
 }) {
   const due = new Date(dueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   const dueState = overdueDays > 0
@@ -175,6 +242,11 @@ async function sendReminderEmail({
 
   return sendEmail({
     to,
+    orgId,
+    type: 'reminder',
+    // Recorded per invoice so a delivery question can be answered per document, not
+    // just per address.
+    meta: { invoiceNumber, overdueDays },
     subject,
     text,
     html: layout({
@@ -190,10 +262,105 @@ async function sendReminderEmail({
   });
 }
 
+/**
+ * Confirms a newly registered address (#52).
+ *
+ * Registration previously accepted anything, so a typo produced an account that
+ * could never receive a reset link -- an unrecoverable account created by a
+ * one-character mistake.
+ */
+async function sendEmailVerification({ to, name, verifyUrl, orgId }) {
+  const body = `
+    <p style="margin:0 0 12px;">Hello ${escapeHtml(name || 'there')},</p>
+    <p style="margin:0 0 12px;">
+      Please confirm this email address so we can send you invoices, reminders and
+      password resets.
+    </p>
+    <p style="margin:0;">This link is valid for 48 hours.</p>`;
+  return sendEmail({
+    to,
+    orgId,
+    type: 'email-verification',
+    subject: 'Confirm your email address',
+    html: layout({
+      title: 'Confirm your email address',
+      body,
+      ctaLabel: 'Confirm email address',
+      ctaUrl: verifyUrl,
+      footer: 'If you did not create a KloguBizz account, you can ignore this email.'
+    }),
+    text: `Hello ${name || 'there'},\n\nConfirm your email address (valid for 48 hours):\n${verifyUrl}\n`
+  });
+}
+
+/**
+ * Emails an invoice to the customer, with the PDF attached (2.3 #19).
+ *
+ * There was **no send-invoice action at all** — only reminders, and those were plain
+ * text with nothing attached. So the actual product loop, "raise an invoice and give
+ * it to the customer", ended at a PDF download the tenant then had to email themselves.
+ *
+ * `replyTo` is the tenant's own address rather than ours: the customer's natural
+ * response to an invoice is to reply to it, and routing that to our transactional
+ * sender loses it silently.
+ */
+async function sendInvoiceEmail({
+  to, cc, clientName, invoiceNumber, amount, dueDate, orgName, replyTo,
+  pdf, viewUrl, message, orgId
+}) {
+  const due = dueDate
+    ? new Date(dueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    : null;
+  const intro = message?.trim()
+    // A tenant-written note is escaped before it is placed in the HTML: it is
+    // user-authored content going into an email body.
+    ? `<p style="margin:0 0 12px;">${escapeHtml(message.trim()).replace(/\n/g, '<br />')}</p>`
+    : '';
+  const body = `
+    <p style="margin:0 0 12px;">Dear ${escapeHtml(clientName || 'Customer')},</p>
+    ${intro}
+    <p style="margin:0 0 12px;">
+      Please find invoice <strong>${escapeHtml(invoiceNumber)}</strong> for
+      <strong>${escapeHtml(amount)}</strong> attached${due ? `, due on <strong>${due}</strong>` : ''}.
+    </p>
+    <p style="margin:0;">Thank you for your business.</p>`;
+
+  return sendEmail({
+    to,
+    cc,
+    orgId,
+    replyTo,
+    type: 'invoice',
+    meta: { invoiceNumber },
+    subject: `Invoice ${invoiceNumber} from ${orgName || 'KloguBizz'}`,
+    html: layout({
+      title: `Invoice ${escapeHtml(invoiceNumber)}`,
+      body,
+      ctaLabel: viewUrl ? 'View invoice' : undefined,
+      ctaUrl: viewUrl,
+      footer: `Sent by ${escapeHtml(orgName || 'KloguBizz')} via KloguBizz.`
+    }),
+    text: `Dear ${clientName || 'Customer'},\n\n${message?.trim() ? `${message.trim()}\n\n` : ''}`
+      + `Invoice ${invoiceNumber} for ${amount}${due ? `, due on ${due}` : ''} is attached.\n`,
+    attachments: pdf
+      ? [{
+        content: pdf.toString('base64'),
+        filename: `${invoiceNumber}.pdf`,
+        type: 'application/pdf',
+        disposition: 'attachment'
+      }]
+      : undefined
+  });
+}
+
 module.exports = {
   sendEmail,
+  sendInvoiceEmail,
+  isSuppressed,
+  recordEmail,
   sendInviteEmail,
   sendPasswordResetEmail,
+  sendEmailVerification,
   sendReminderEmail,
   renderTemplate,
   DEFAULT_REMINDER_SUBJECT,

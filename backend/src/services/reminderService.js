@@ -180,7 +180,8 @@ async function runReminderSweep({ orgId = null, dryRun = false } = {}) {
       // The configured copy, finally used.
       subject: stage.subject,
       template: stage.template,
-      viewUrl: `${env.FRONTEND_URL}/invoices/${invoice._id}/print`
+      viewUrl: `${env.FRONTEND_URL}/invoices/${invoice._id}/print`,
+      orgId: invoice.orgId
     });
 
     if (outcome.sent) result.sent += 1;

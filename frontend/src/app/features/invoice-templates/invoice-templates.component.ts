@@ -7,6 +7,7 @@ import { InvoiceDocumentComponent } from '../../shared/invoice-document.componen
 import { AuthService } from '../../core/auth.service';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
+import { Organisation } from '../../core/models';
 import {
   COLOR_PALETTE, CUSTOM_TEMPLATE_ID, CustomInvoiceTemplate, DEFAULT_CUSTOM_INVOICE_TEMPLATE, DIVIDER_STYLE_OPTIONS,
   FONT_OPTIONS, HEADER_STYLE_OPTIONS, INVOICE_TEMPLATES, PAPER_TONE_OPTIONS, TABLE_STYLE_OPTIONS, TEMPLATE_CATEGORIES,
@@ -119,6 +120,88 @@ const DEFAULT_CONTENT: ContentToggles = {
             @if (headerImageUrl()) {
               <button class="btn ghost sm" type="button" style="margin-top:8px;" (click)="removeHeaderImage()">Remove header image</button>
             }
+          </section>
+
+          <!--
+            Bank details, signature and terms (2.3 #24, #25, #26).
+
+            Three toggles in "Document Content" promised something the data could not
+            deliver: showBankDetails rendered an empty block because the details lived only
+            on the invoice and had to be retyped every time; showSignature drew a line with
+            nothing above it; and there was no default terms text anywhere. Held on the
+            organisation because they are properties of the business, not of one document.
+          -->
+          <section class="card">
+            <div class="card-title" style="margin-bottom:4px;">Bank Details</div>
+            <div class="card-sub" style="margin-bottom:12px;">
+              Printed on every invoice with "Show bank details" on. Saved once here instead of
+              retyped per invoice — a per-invoice override still wins when set.
+            </div>
+            <div class="grid grid-2">
+              <div class="field"><label>Account name</label><input [(ngModel)]="defaults.accountName" (ngModelChange)="touchDefaults()"></div>
+              <div class="field"><label>Bank</label><input [(ngModel)]="defaults.bankName" (ngModelChange)="touchDefaults()"></div>
+            </div>
+            <div class="grid grid-2">
+              <div class="field"><label>Account number</label><input class="mono" [(ngModel)]="defaults.accountNumber" (ngModelChange)="touchDefaults()"></div>
+              <div class="field">
+                <label>IFSC</label>
+                <input class="mono" [(ngModel)]="defaults.ifsc" (ngModelChange)="touchDefaults()" placeholder="HDFC0001234">
+              </div>
+            </div>
+            <div class="grid grid-2">
+              <div class="field"><label>Branch</label><input [(ngModel)]="defaults.branch" (ngModelChange)="touchDefaults()"></div>
+              <div class="field">
+                <label>UPI ID</label>
+                <input class="mono" [(ngModel)]="defaults.upiId" (ngModelChange)="touchDefaults()" placeholder="business@bank">
+                <!-- Text, not a QR: a payment code this product cannot verify scans is a
+                     payment instruction that might silently not work. -->
+                <div class="card-sub" style="margin-top:4px;">Printed as text so it can be typed or copied.</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-title" style="margin-bottom:4px;">Signature</div>
+            <div class="card-sub" style="margin-bottom:12px;">
+              Appears above the signature line. Without one, "Show signature" draws a line with
+              nothing on it.
+            </div>
+            <button type="button" (click)="signatureInput.click()"
+              style="width:100%;border:2px dashed var(--border);border-radius:10px;padding:16px;text-align:center;background:var(--card);cursor:pointer;">
+              @if (defaults.signatureUrl) {
+                <img [src]="defaults.signatureUrl" alt="Signature" style="max-height:44px;max-width:100%;display:block;margin:0 auto 8px;" />
+                <div style="font-size:11px;color:var(--green);font-weight:600;display:flex;gap:4px;align-items:center;justify-content:center;">
+                  <app-icon name="checkCircle" [size]="13" /> Uploaded — click to replace
+                </div>
+              } @else {
+                <div style="color:var(--muted);display:flex;justify-content:center;"><app-icon name="upload" [size]="20" [strokeWidth]="1.5" /></div>
+                <div style="font-size:12px;color:var(--muted);margin-top:6px;">Upload a signature image</div>
+              }
+            </button>
+            <input #signatureInput type="file" accept="image/*" hidden (change)="onSignatureFile($event)" />
+            @if (defaults.signatureUrl) {
+              <button class="btn ghost sm" type="button" style="margin-top:8px;" (click)="removeSignature()">Remove signature</button>
+            }
+            <div class="field" style="margin-top:12px;">
+              <label>Signatory name</label>
+              <input [(ngModel)]="defaults.signatoryName" (ngModelChange)="touchDefaults()" [placeholder]="auth.organisation()?.name || ''">
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-title" style="margin-bottom:4px;">Default Terms &amp; Notes</div>
+            <div class="card-sub" style="margin-bottom:12px;">
+              Pre-filled on every new invoice, and still editable per invoice.
+            </div>
+            <div class="field">
+              <label>Terms &amp; conditions</label>
+              <textarea rows="3" [(ngModel)]="defaults.termsAndConditions" (ngModelChange)="touchDefaults()"
+                placeholder="Payment due within 15 days. Interest at 18% p.a. on overdue amounts."></textarea>
+            </div>
+            <div class="field">
+              <label>Default note</label>
+              <input [(ngModel)]="defaults.defaultNotes" (ngModelChange)="touchDefaults()" placeholder="Thank you for your business!">
+            </div>
           </section>
 
           <section class="card">
@@ -287,7 +370,8 @@ const DEFAULT_CONTENT: ContentToggles = {
               [showBankDetails]="content().showBankDetails"
               [showAmountInWords]="content().showAmountInWords"
               [invoiceTitleLabel]="invoiceTitleLabel()"
-              [headerImageUrl]="headerImageUrl()" />
+              [headerImageUrl]="headerImageUrl()"
+              [invoiceDefaults]="defaults" />
           </div>
         </div>
       </div>
@@ -311,6 +395,17 @@ export class InvoiceTemplatesComponent implements OnInit {
 
   logoUrl = signal('');
   headerImageUrl = signal('');
+
+  /**
+   * Organisation-level invoice defaults (2.3 #24–#26).
+   *
+   * A plain object rather than a signal per field: it is bound with `[(ngModel)]`
+   * throughout and passed to the preview as a whole, and fifteen signals would buy
+   * nothing here. `defaultsDirty` tracks whether it needs saving, the same way the two
+   * image fields do.
+   */
+  defaults: NonNullable<NonNullable<Organisation['brandingConfig']>['invoiceDefaults']> = {};
+  defaultsDirty = signal(false);
   /**
    * Whether the user has uploaded or removed the image in this session.
    *
@@ -357,6 +452,7 @@ export class InvoiceTemplatesComponent implements OnInit {
   });
 
   dirty = computed(() =>
+    this.defaultsDirty() ||
     this.logoUrl() !== this.savedLogoUrl() ||
     this.headerImageUrl() !== this.savedHeaderImageUrl() ||
     this.accentColor() !== this.savedAccentColor() ||
@@ -384,6 +480,8 @@ export class InvoiceTemplatesComponent implements OnInit {
     const custom = { ...DEFAULT_CUSTOM_INVOICE_TEMPLATE, ...(branding.customInvoiceTemplate || {}) };
     const content = { ...DEFAULT_CONTENT, ...(branding.invoiceContent || {}) };
 
+    this.defaults = { ...(branding.invoiceDefaults || {}) };
+    this.defaultsDirty.set(false);
     this.logoUrl.set(logo); this.savedLogoUrl.set(logo);
     this.headerImageUrl.set(headerImage); this.savedHeaderImageUrl.set(headerImage);
     this.accentColor.set(accent); this.savedAccentColor.set(accent);
@@ -438,6 +536,39 @@ export class InvoiceTemplatesComponent implements OnInit {
     reader.readAsDataURL(file);
   }
 
+  /** Marks the defaults block as needing a save. */
+  touchDefaults() {
+    this.defaultsDirty.set(true);
+  }
+
+  /**
+   * Reads a signature upload as a data URI.
+   *
+   * Capped at 200KB — a signature is a small monochrome image, and the cap exists
+   * because this rides inside the organisation document. An oversized upload is refused
+   * with the reason rather than silently truncated.
+   */
+  onSignatureFile(event: Event) {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    if (file.size > 200 * 1024) {
+      this.toast.error('That signature is over 200 KB. A signature only needs to be a small image.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      this.defaults.signatureUrl = reader.result as string;
+      this.touchDefaults();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  removeSignature() {
+    // An empty string clears it server-side; `undefined` would leave it untouched.
+    this.defaults.signatureUrl = '';
+    this.touchDefaults();
+  }
+
   removeHeaderImage() {
     this.headerImageUrl.set('');
     this.headerImageDirty.set(true);
@@ -477,6 +608,9 @@ export class InvoiceTemplatesComponent implements OnInit {
       customInvoiceTemplate: this.customTemplate(),
       invoiceContent: this.content()
     };
+    // Only when touched, for the same reason as the images: the signature is base64
+    // image data, and sending a stale copy of the whole object back would rewrite it.
+    if (this.defaultsDirty()) brandingConfig['invoiceDefaults'] = this.defaults;
     // A data URI sets a new image; an empty string clears it. Either way this is
     // image data, never a URL.
     if (this.logoDirty()) brandingConfig['logoUrl'] = this.logoUrl();
@@ -495,6 +629,8 @@ export class InvoiceTemplatesComponent implements OnInit {
         this.headerImageUrl.set(header);
         this.logoDirty.set(false);
         this.headerImageDirty.set(false);
+        this.defaultsDirty.set(false);
+        this.defaults = { ...(saved.invoiceDefaults || this.defaults) };
         this.savedLogoUrl.set(logo);
         this.savedHeaderImageUrl.set(header);
         this.savedAccentColor.set(this.accentColor());

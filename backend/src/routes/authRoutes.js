@@ -1,16 +1,19 @@
 const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
 const {
-  register, login, me,
+  register, login, me, verifyMfa,
   inviteDetails, acceptInvite,
-  forgotPassword, resetPassword
+  forgotPassword, resetPassword,
+  verifyEmail, resendVerification
 } = require('../controllers/authController');
+const { setupMfa, enableMfa, disableMfa, regenerateBackupCodes } = require('../controllers/mfaController');
 const { changePassword } = require('../controllers/userController');
 const { protect } = require('../middleware/authMiddleware');
 const { validate } = require('../middleware/validate');
 const {
   registerSchema, loginSchema, changePasswordSchema,
-  acceptInviteSchema, forgotPasswordSchema, resetPasswordSchema
+  acceptInviteSchema, forgotPasswordSchema, resetPasswordSchema,
+  mfaEnableSchema, mfaVerifySchema, mfaDisableSchema, verifyEmailSchema
 } = require('../validators/schemas');
 const { skipRateLimitInTests } = require('../middleware/rateLimitOptions');
 
@@ -76,5 +79,24 @@ router.post('/accept-invite', tokenLimiter, validate(acceptInviteSchema), accept
 // Password reset — also unauthenticated, for the same reason.
 router.post('/forgot-password', resetRequestLimiter, validate(forgotPasswordSchema), forgotPassword);
 router.post('/reset-password', tokenLimiter, validate(resetPasswordSchema), resetPassword);
+
+// Email verification (#52) — the confirm link is unauthenticated because it is
+// frequently opened on a different device from the one that registered.
+router.post('/verify-email', tokenLimiter, validate(verifyEmailSchema), verifyEmail);
+router.post('/resend-verification', protect, resetRequestLimiter, resendVerification);
+
+/**
+ * Two-factor authentication (#7).
+ *
+ * `/mfa/verify` is unauthenticated in the ordinary sense — there is no session yet,
+ * that is the point — but it is not unauthenticated in effect: it requires the
+ * short-lived challenge token that `/login` issues only after a correct password.
+ * It carries the credential limiter because it is a guessable six digits.
+ */
+router.post('/mfa/verify', credentialLimiter, validate(mfaVerifySchema), verifyMfa);
+router.post('/mfa/setup', protect, credentialLimiter, setupMfa);
+router.post('/mfa/enable', protect, credentialLimiter, validate(mfaEnableSchema), enableMfa);
+router.post('/mfa/disable', protect, credentialLimiter, validate(mfaDisableSchema), disableMfa);
+router.post('/mfa/backup-codes', protect, credentialLimiter, validate(mfaEnableSchema), regenerateBackupCodes);
 
 module.exports = router;

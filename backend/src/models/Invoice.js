@@ -38,7 +38,74 @@ const totalsSchema = new mongoose.Schema({
   isIGST: { type: Boolean, default: false },
   // Intra-territory supply to a UT that levies UTGST rather than SGST — the
   // amount sits in `sgst`, this only changes the label.
-  isUT: { type: Boolean, default: false }
+  isUT: { type: Boolean, default: false },
+  // Classification, resolved by gstService.resolveTaxContext and stored so the
+  // document, the PDF and both returns never re-derive it differently.
+  taxTreatment: { type: String, default: 'taxable' },
+  supplyType: { type: String, default: 'regular' },
+  reverseCharge: { type: Boolean, default: false },
+  zeroRated: { type: Boolean, default: false },
+  // False for an exempt, nil-rated, non-GST, LUT-export or reverse-charge supply.
+  taxCharged: { type: Boolean, default: true },
+  // Why no tax was charged, in words, so a zero-tax invoice explains itself
+  // instead of looking like a bug.
+  taxNote: { type: String, default: '' }
+}, { _id: false });
+
+/**
+ * Export / SEZ particulars.
+ *
+ * Required on the shipping-bill side of GSTR-1's EXP table, and there was nowhere
+ * to record any of it: an export invoice was indistinguishable from a domestic one
+ * except by the buyer's address.
+ */
+const exportDetailsSchema = new mongoose.Schema({
+  // ISO 3166-1 alpha-2. Kept separate from `stateCode`, which is meaningless for
+  // an overseas buyer (GSTR-1 uses '96' for "other country").
+  countryCode: String,
+  portCode: String,
+  shippingBillNumber: String,
+  shippingBillDate: Date,
+  // The invoice is still raised and reported in INR; these record the original.
+  currency: { type: String, default: 'INR' },
+  conversionRate: { type: Number, default: 1, min: 0 },
+  // LUT/bond reference for a without-payment export.
+  lutNumber: String
+}, { _id: false });
+
+/**
+ * E-invoicing state (IRN + signed QR).
+ *
+ * Mandatory above a turnover threshold, and the product had no field for any of
+ * it — the `gst-einvoice-qr` template draws a *decorative, non-scannable* QR
+ * motif, which is worse than nothing if anyone mistook it for the real thing.
+ *
+ * `status` distinguishes the four situations that matter and which were previously
+ * indistinguishable: not applicable to this document, applicable but not yet
+ * reported, reported successfully, and reported then cancelled. `failed` keeps the
+ * IRP's own rejection message, because "it didn't work" is not actionable and the
+ * IRP's error codes are specific.
+ */
+const eInvoiceSchema = new mongoose.Schema({
+  status: {
+    type: String,
+    enum: ['not-required', 'pending', 'generated', 'cancelled', 'failed'],
+    default: 'not-required'
+  },
+  irn: String,
+  ackNo: String,
+  ackDate: Date,
+  // The base64 signed QR the IRP returns. This is the one that is actually
+  // scannable, unlike the template's decorative motif.
+  signedQrCode: String,
+  signedInvoice: String,
+  generatedAt: Date,
+  cancelledAt: Date,
+  cancelReason: String,
+  // The IRP's own error code and message from the last failed attempt.
+  errorCode: String,
+  error: String,
+  attempts: { type: Number, default: 0 }
 }, { _id: false });
 
 const billToSchema = new mongoose.Schema({
@@ -76,6 +143,27 @@ const invoiceSchema = new mongoose.Schema({
   items: { type: [lineItemSchema], default: [] },
   // Invoice-level discount, on top of any per-line discounts.
   discountPercent: { type: Number, default: 0, min: 0, max: 100 },
+
+  /**
+   * Place of supply — the state whose tax applies.
+   *
+   * Distinct from the buyer's registered state, which is what the tax head used to
+   * be decided from. They differ whenever bill-to and ship-to differ (goods
+   * delivered to a branch in another state) and for most services, and getting it
+   * wrong charges the wrong tax head on a document that is a legal declaration.
+   * Falls back to the buyer's state when not set, so existing invoices are
+   * unaffected.
+   */
+  placeOfSupply: String,
+  /** taxable | exempt | nil-rated | non-gst | zero-rated — see gstService. */
+  taxTreatment: { type: String, default: 'taxable' },
+  /** regular | export-with/without-payment | sez-with/without-payment | deemed-export. */
+  supplyType: { type: String, default: 'regular' },
+  /** Tax payable by the recipient; the supplier reports the value but collects no tax. */
+  reverseCharge: { type: Boolean, default: false },
+  exportDetails: { type: exportDetailsSchema, default: null },
+  eInvoice: { type: eInvoiceSchema, default: () => ({}) },
+
   totals: { type: totalsSchema, default: () => ({}) },
   // Settlement state, persisted rather than recomputed ad hoc. Previously the
   // paid amount was aggregated from Payment inside createPayment and then
@@ -95,7 +183,16 @@ const invoiceSchema = new mongoose.Schema({
     bank: String,
     account: String,
     ifsc: String
-  }
+  },
+  /**
+   * Soft delete (#37).
+   *
+   * Only ever set on a **draft**: an issued invoice is not deletable at all, soft or
+   * otherwise, because under GST it must be reversed by a credit note rather than
+   * removed. Purged after the grace window by maintenanceService.
+   */
+  deletedAt: { type: Date, default: null },
+  deletedBy: String
 }, { timestamps: true });
 
 invoiceSchema.index({ orgId: 1, invoiceNumber: 1 }, { unique: true });
@@ -107,5 +204,10 @@ invoiceSchema.index({ orgId: 1, status: 1, dueDate: 1 });
 invoiceSchema.index({ orgId: 1, createdAt: -1 });
 // Drives the GST report's period filter.
 invoiceSchema.index({ orgId: 1, date: -1 });
+// Recycle bin listing, and the scheduled purge of expired soft deletes.
+invoiceSchema.index({ orgId: 1, deletedAt: 1 });
+// GSTR-1 sections by place of supply, and the e-invoice worklist.
+invoiceSchema.index({ orgId: 1, placeOfSupply: 1, date: -1 });
+invoiceSchema.index({ orgId: 1, 'eInvoice.status': 1 }, { sparse: true });
 
 module.exports = { Invoice: mongoose.model('Invoice', invoiceSchema) };

@@ -9,8 +9,8 @@ import { ItemPickerComponent } from '../../shared/item-picker.component';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
-import { Client, Invoice, InvoiceItem, Item } from '../../core/models';
-import { fmtINR, fmtDate, today, addDays, numberToWords, stateName } from '../../core/format';
+import { Client, ExportDetails, Invoice, InvoiceItem, Item, SupplyType, TaxTreatment } from '../../core/models';
+import { fmtINR, fmtDate, today, addDays, numberToWords, stateName, STATES } from '../../core/format';
 
 @Component({
   selector: 'app-invoice-editor',
@@ -117,6 +117,107 @@ import { fmtINR, fmtDate, today, addDays, numberToWords, stateName } from '../..
                 </table>
               </div>
               @if (itemsError()) { <div class="field" style="margin-top:8px;"><span class="error">{{ itemsError() }}</span></div> }
+            </section>
+
+            <!--
+              GST treatment (#29, #30, #31).
+
+              Collapsed by default: the overwhelming majority of invoices are an ordinary
+              taxable domestic supply, and putting five tax-law selectors in front of
+              every user to serve the minority would make the common case worse. The
+              summary line states what is currently in force, so nothing is hidden — it is
+              just not in the way.
+            -->
+            <section class="card">
+              <div class="card-head">
+                <div>
+                  <div class="card-title">GST treatment</div>
+                  <div class="card-sub">{{ treatmentSummary() }}</div>
+                </div>
+                <button class="btn ghost sm" type="button" (click)="showGst.set(!showGst())">
+                  {{ showGst() ? 'Hide' : 'Change' }}
+                </button>
+              </div>
+
+              @if (showGst()) {
+                <div class="grid grid-2" style="margin-top:14px">
+                  <div class="field">
+                    <label>Place of supply</label>
+                    <select [(ngModel)]="placeOfSupply">
+                      <option value="">Same as the client's state</option>
+                      @for (st of states; track st.code) { <option [value]="st.code">{{ st.name }} ({{ st.code }})</option> }
+                    </select>
+                    <!-- The reason this field exists: the tax head follows the place of
+                         supply, which is not always where the buyer is registered. -->
+                    <div class="card-sub" style="margin-top:4px">
+                      Set this when goods go somewhere other than the billing address — it decides
+                      IGST versus CGST+SGST.
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label>Tax treatment</label>
+                    <select [(ngModel)]="taxTreatment">
+                      <option value="taxable">Taxable</option>
+                      <option value="exempt">Exempt</option>
+                      <option value="nil-rated">Nil-rated</option>
+                      <option value="non-gst">Non-GST supply</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="grid grid-2">
+                  <div class="field">
+                    <label>Supply type</label>
+                    <select [(ngModel)]="supplyType">
+                      <option value="regular">Domestic (regular)</option>
+                      <option value="export-with-payment">Export — with payment of IGST</option>
+                      <option value="export-without-payment">Export — under LUT, no IGST</option>
+                      <option value="sez-with-payment">To SEZ — with payment of IGST</option>
+                      <option value="sez-without-payment">To SEZ — under LUT, no IGST</option>
+                      <option value="deemed-export">Deemed export</option>
+                    </select>
+                  </div>
+                  <div class="field" style="display:flex;align-items:flex-end">
+                    <label style="display:flex;align-items:flex-start;gap:9px;cursor:pointer;font-weight:400">
+                      <input type="checkbox" [(ngModel)]="reverseCharge" style="margin-top:3px">
+                      <span>
+                        <span style="font-weight:600;font-size:12.5px">Reverse charge</span>
+                        <div class="muted" style="font-size:11px;line-height:1.5">
+                          The buyer pays the tax directly, so this invoice collects none.
+                        </div>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                @if (isExportLike()) {
+                  <div class="form-section-title">Export / SEZ particulars</div>
+                  <div class="grid grid-3">
+                    <div class="field">
+                      <label>Country code</label>
+                      <input class="mono" maxlength="2" [(ngModel)]="exportDetails.countryCode" placeholder="US">
+                    </div>
+                    <div class="field">
+                      <label>Currency</label>
+                      <input class="mono" maxlength="3" [(ngModel)]="exportDetails.currency" placeholder="USD">
+                    </div>
+                    <div class="field">
+                      <label>Port code</label>
+                      <input class="mono" [(ngModel)]="exportDetails.portCode" placeholder="INNSA1">
+                    </div>
+                  </div>
+                  <div class="grid grid-2">
+                    <div class="field">
+                      <label>Shipping bill number</label>
+                      <input [(ngModel)]="exportDetails.shippingBillNumber">
+                    </div>
+                    <div class="field">
+                      <label>Shipping bill date</label>
+                      <input type="date" [(ngModel)]="exportDetails.shippingBillDate">
+                    </div>
+                  </div>
+                  <div class="card-sub">Required on the EXP table of GSTR-1.</div>
+                }
+              }
             </section>
 
             <section class="card">
@@ -258,7 +359,22 @@ export class InvoiceEditorComponent implements OnInit {
   dueDate = addDays(15);
   status: Invoice['status'] = 'pending';
   paymentTerms = 'Net 15';
+  /**
+   * Seeded from the organisation's default note (2.3 #26) in `ngOnInit`.
+   *
+   * The literal stays as the fallback for a tenant that has not set one, so nothing
+   * changes for anyone who never visits the Invoice Templates page.
+   */
   notes = 'Thank you for your business!';
+
+  // ── GST treatment (#29, #30, #31) ──
+  showGst = signal(false);
+  placeOfSupply = '';
+  taxTreatment: TaxTreatment = 'taxable';
+  supplyType: SupplyType = 'regular';
+  reverseCharge = false;
+  exportDetails: ExportDetails = { countryCode: '', currency: '', portCode: '', shippingBillNumber: '', shippingBillDate: '' };
+  states = STATES;
   items: InvoiceItem[] = [this.blankItem()];
   bank: { bank: string; account: string; ifsc: string } = { bank: '', account: '', ifsc: '' };
 
@@ -280,6 +396,17 @@ export class InvoiceEditorComponent implements OnInit {
   }
 
   ngOnInit() {
+    /**
+     * The organisation's default note and terms, on a *new* invoice only.
+     *
+     * An existing invoice keeps what it was saved with: overwriting a document's own note
+     * with the current default when someone opens it to fix a typo would silently rewrite
+     * history.
+     */
+    const defaults = this.auth.organisation()?.brandingConfig?.invoiceDefaults;
+    if (defaults?.defaultNotes) this.notes = defaults.defaultNotes;
+    else if (defaults?.termsAndConditions) this.notes = defaults.termsAndConditions;
+
     const id = this.route.snapshot.paramMap.get('id');
     this.invoiceId.set(id);
     this.isEdit.set(!!id);
@@ -324,6 +451,22 @@ export class InvoiceEditorComponent implements OnInit {
         this.status = inv.status;
         this.paymentTerms = inv.paymentTerms || 'Net 15';
         this.notes = inv.notes || '';
+        this.placeOfSupply = inv.placeOfSupply || '';
+        this.taxTreatment = inv.taxTreatment || 'taxable';
+        this.supplyType = inv.supplyType || 'regular';
+        this.reverseCharge = !!inv.reverseCharge;
+        this.exportDetails = {
+          countryCode: inv.exportDetails?.countryCode || '',
+          currency: inv.exportDetails?.currency || '',
+          portCode: inv.exportDetails?.portCode || '',
+          shippingBillNumber: inv.exportDetails?.shippingBillNumber || '',
+          shippingBillDate: inv.exportDetails?.shippingBillDate ? String(inv.exportDetails.shippingBillDate).slice(0, 10) : ''
+        };
+        // Opened when this invoice is anything other than an ordinary taxable domestic
+        // supply, so an unusual classification is never invisible on an edit.
+        this.showGst.set(
+          this.taxTreatment !== 'taxable' || this.supplyType !== 'regular' || this.reverseCharge || !!this.placeOfSupply
+        );
         this.items = inv.items.length ? inv.items.map(i => ({ ...i })) : [this.blankItem()];
         this.bank = {
           bank: inv.bankDetails?.bank || '',
@@ -401,6 +544,39 @@ export class InvoiceEditorComponent implements OnInit {
   }
 
   /** Gross value of a line, before its discount. */
+  /** Whether the export/SEZ particulars apply, which is what reveals that panel. */
+  isExportLike(): boolean {
+    return this.supplyType !== 'regular' && this.supplyType !== 'deemed-export';
+  }
+
+  /** Drops empty strings so a blank optional field is absent rather than ''. */
+  cleanExportDetails(): ExportDetails {
+    const out: ExportDetails = {};
+    for (const [key, value] of Object.entries(this.exportDetails)) {
+      if (value !== '' && value !== null && value !== undefined) (out as Record<string, unknown>)[key] = value;
+    }
+    return out;
+  }
+
+  /**
+   * One line describing the current treatment, shown on the collapsed card.
+   *
+   * The point of collapsing the panel is that the common case stays out of the way; the
+   * point of this line is that doing so never hides a non-default setting.
+   */
+  treatmentSummary(): string {
+    const parts: string[] = [];
+    if (this.supplyType === 'regular') parts.push('Domestic supply');
+    else if (this.supplyType === 'deemed-export') parts.push('Deemed export');
+    else if (this.supplyType.startsWith('export')) parts.push('Export');
+    else parts.push('SEZ supply');
+    if (this.supplyType.endsWith('without-payment')) parts.push('under LUT (no IGST)');
+    if (this.taxTreatment !== 'taxable') parts.push(this.taxTreatment.replace('-', ' '));
+    if (this.reverseCharge) parts.push('reverse charge');
+    if (this.placeOfSupply) parts.push(`place of supply ${stateName(this.placeOfSupply)}`);
+    return parts.join(' · ');
+  }
+
   lineAmount(item: InvoiceItem): number {
     return this.line(item).gross;
   }
@@ -454,6 +630,13 @@ export class InvoiceEditorComponent implements OnInit {
       status: this.isEdit() ? this.status : intent,
       paymentTerms: this.paymentTerms,
       notes: this.notes,
+      // Omitted when empty rather than sent as '', so the backend's "fall back to the
+      // buyer's state" default keeps working.
+      placeOfSupply: this.placeOfSupply || undefined,
+      taxTreatment: this.taxTreatment,
+      supplyType: this.supplyType,
+      reverseCharge: this.reverseCharge,
+      exportDetails: this.isExportLike() ? this.cleanExportDetails() : undefined,
       items: validItems.map(i => ({
         desc: i.desc.trim(),
         hsn: i.hsn,

@@ -8,6 +8,7 @@ const { recordEvent, EVENT } = require('../services/usageEventService');
 const { pickFields } = require('../utils/pickFields');
 const { assertValidMaster } = require('../services/masterService');
 const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
+const { notDeleted, scopeFilter, deletionPatch, RESTORE_PATCH } = require('../utils/softDelete');
 
 // `orgId` is never accepted from the body — it comes from the token, so an
 // update can't relocate the record into another tenant.
@@ -20,7 +21,7 @@ const ITEM_FIELDS = [
 const ITEM_SORTS = ['name', 'itemCode', 'sellingPrice', 'stockQty', 'createdAt'];
 
 const listItems = asyncHandler(async (req, res) => {
-  const filter = tenantFilter(req);
+  const filter = scopeFilter(req);
   if (req.query.status) filter.status = req.query.status;
   if (req.query.type) filter.type = req.query.type;
   if (req.query.category) filter.category = req.query.category;
@@ -65,7 +66,7 @@ const updateItem = asyncHandler(async (req, res) => {
   const fields = pickFields(req.body, ITEM_FIELDS);
   await assertMasters(fields);
   const item = await Item.findOneAndUpdate(
-    { _id: req.params.id, ...tenantFilter(req) },
+    { _id: req.params.id, ...notDeleted(req) },
     fields,
     { new: true, runValidators: true }
   );
@@ -75,10 +76,27 @@ const updateItem = asyncHandler(async (req, res) => {
 });
 
 const deleteItem = asyncHandler(async (req, res) => {
-  const item = await Item.findOneAndDelete({ _id: req.params.id, ...tenantFilter(req) });
+  // Soft (#37). An item's name and HSN appear on every historic invoice that used it,
+  // and a catalogue of hundreds is exactly where a mis-click happens.
+  const item = await Item.findOneAndUpdate(
+    { _id: req.params.id, ...notDeleted(req) },
+    { $set: deletionPatch(req) },
+    { new: true }
+  );
   if (!item) throw httpError(404, 'Item not found');
-  logAudit({ req, action: 'item.deleted', entity: 'item', entityId: item._id, meta: { name: item.name } });
+  logAudit({ req, action: 'item.deleted', entity: 'item', entityId: item._id, meta: { name: item.name, recoverable: true } });
   res.status(204).end();
+});
+
+const restoreItem = asyncHandler(async (req, res) => {
+  const item = await Item.findOneAndUpdate(
+    { _id: req.params.id, ...tenantFilter(req), deletedAt: { $ne: null } },
+    { $set: RESTORE_PATCH },
+    { new: true }
+  );
+  if (!item) throw httpError(404, 'No deleted item with that id');
+  logAudit({ req, action: 'item.restored', entity: 'item', entityId: item._id, meta: { name: item.name } });
+  res.json(item);
 });
 
 const downloadItemTemplate = asyncHandler(async (req, res) => {
@@ -127,4 +145,4 @@ const bulkUploadItems = asyncHandler(async (req, res) => {
   res.json({ totalRows, created, failed: failedResults });
 });
 
-module.exports = { listItems, createItem, updateItem, deleteItem, downloadItemTemplate, bulkUploadItems };
+module.exports = { listItems, createItem, updateItem, deleteItem, restoreItem, downloadItemTemplate, bulkUploadItems };

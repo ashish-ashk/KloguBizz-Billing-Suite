@@ -43,6 +43,7 @@ import { downloadBlob } from '../../core/format';
             [showLogo]="org()?.brandingConfig?.invoiceContent?.showLogo !== false"
             [showSignature]="org()?.brandingConfig?.invoiceContent?.showSignature !== false"
             [showBankDetails]="org()?.brandingConfig?.invoiceContent?.showBankDetails !== false"
+            [invoiceDefaults]="org()?.brandingConfig?.invoiceDefaults || {}"
             [showAmountInWords]="org()?.brandingConfig?.invoiceContent?.showAmountInWords !== false"
             [invoiceTitleLabel]="org()?.brandingConfig?.invoiceTitleLabel || ''" />
         </div>

@@ -64,9 +64,16 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
             <a routerLink="/clients" routerLinkActive="active" title="Clients"><span class="nav-icon"><app-icon name="users" /></span><span class="nav-label">Clients</span></a>
             <a routerLink="/items" routerLinkActive="active" title="Inventory"><span class="nav-icon"><app-icon name="box" /></span><span class="nav-label">Inventory</span></a>
             <a routerLink="/payments" routerLinkActive="active" title="Payments"><span class="nav-icon"><app-icon name="creditCard" /></span><span class="nav-label">Payments</span></a>
+            <a routerLink="/purchases" routerLinkActive="active" title="Purchases"><span class="nav-icon"><app-icon name="inbox" /></span><span class="nav-label">Purchases</span></a>
+            <a routerLink="/receivables" routerLinkActive="active" title="Receivables"><span class="nav-icon"><app-icon name="clock" /></span><span class="nav-label">Receivables</span></a>
             <a routerLink="/reports" routerLinkActive="active" title="Reports"><span class="nav-icon"><app-icon name="chart" /></span><span class="nav-label">Reports</span></a>
+            <a routerLink="/gst-returns" routerLinkActive="active" title="GST Returns"><span class="nav-icon"><app-icon name="percent" /></span><span class="nav-label">GST Returns</span></a>
             <a routerLink="/users" routerLinkActive="active" title="Users &amp; Roles"><span class="nav-icon"><app-icon name="shieldUser" /></span><span class="nav-label">Users &amp; Roles</span></a>
             <a routerLink="/subscription" routerLinkActive="active" title="Subscription"><span class="nav-icon"><app-icon name="package" /></span><span class="nav-label">Subscription</span></a>
+            <a routerLink="/security" routerLinkActive="active" title="Security &amp; Privacy"><span class="nav-icon"><app-icon name="lock" /></span><span class="nav-label">Security &amp; Privacy</span></a>
+            @if (auth.user()?.role === 'admin') {
+              <a routerLink="/activity" routerLinkActive="active" title="Activity Log"><span class="nav-icon"><app-icon name="eye" /></span><span class="nav-label">Activity Log</span></a>
+            }
             @if (auth.user()?.role === 'admin') {
               <div class="nav-section">Customize</div>
               <a routerLink="/appearance" routerLinkActive="active" title="Appearance"><span class="nav-icon"><app-icon name="palette" /></span><span class="nav-label">Appearance</span></a>
@@ -243,7 +250,11 @@ export class AppShellComponent {
       { label: 'Clients', route: '/clients', icon: 'users' },
       { label: 'Inventory', route: '/items', icon: 'box' },
       { label: 'Payments', route: '/payments', icon: 'creditCard' },
+      { label: 'Purchases', route: '/purchases', icon: 'inbox' },
+      { label: 'Receivables', route: '/receivables', icon: 'clock' },
       { label: 'Reports', route: '/reports', icon: 'chart' },
+      { label: 'GST Returns', route: '/gst-returns', icon: 'percent' },
+      { label: 'Security & Privacy', route: '/security', icon: 'lock' },
       { label: 'Users & Roles', route: '/users', icon: 'shieldUser' },
       { label: 'Subscription', route: '/subscription', icon: 'package' }
     ];

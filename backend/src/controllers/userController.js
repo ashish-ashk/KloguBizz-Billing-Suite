@@ -58,6 +58,7 @@ async function issueInvite(user, req) {
   const org = await Organisation.findById(user.orgId).select('name').lean();
   const inviteUrl = `${env.FRONTEND_URL}/accept-invite?token=${encodeURIComponent(token)}`;
   const result = await sendInviteEmail({
+    orgId: user.orgId,
     to: user.email,
     name: user.name,
     inviteUrl,

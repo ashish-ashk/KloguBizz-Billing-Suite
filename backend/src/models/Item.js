@@ -23,10 +23,15 @@ const itemSchema = new mongoose.Schema({
   stockQty: { type: Number, default: 0 },
   reorderLevel: Number,
   barcode: { type: String, trim: true },
-  status: { type: String, enum: ['active', 'inactive'], default: 'active' }
+  status: { type: String, enum: ['active', 'inactive'], default: 'active' },
+  // Soft delete (#37) — an item named on a historic invoice should stay
+  // resolvable, and a mis-click on a catalogue of hundreds should be undoable.
+  deletedAt: { type: Date, default: null },
+  deletedBy: String
 }, { timestamps: true });
 
 itemSchema.index({ orgId: 1, name: 1 });
 itemSchema.index({ orgId: 1, itemCode: 1 });
+itemSchema.index({ orgId: 1, deletedAt: 1 });
 
 module.exports = { Item: mongoose.model('Item', itemSchema) };

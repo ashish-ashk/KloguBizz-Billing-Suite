@@ -1,4 +1,15 @@
 const { Invoice } = require('../models/Invoice');
+const { Client } = require('../models/Client');
+const { Item } = require('../models/Item');
+const { Vendor } = require('../models/Vendor');
+const { Purchase } = require('../models/Purchase');
+const { Payment } = require('../models/Payment');
+const { CreditNote } = require('../models/CreditNote');
+const { Subscription } = require('../models/Subscription');
+const { ReminderLog } = require('../models/ReminderLog');
+const { User } = require('../models/User');
+const { Organisation } = require('../models/Organisation');
+const { purgeCutoff } = require('../utils/softDelete');
 const { logger } = require('../utils/logger');
 
 /**
@@ -53,15 +64,65 @@ async function sweepOverdueInvoices() {
   return { matched: result.matchedCount ?? 0, updated: result.modifiedCount ?? 0 };
 }
 
+/**
+ * Empties the recycle bin (#37) and honours completed erasure requests (#62).
+ *
+ * A soft delete that is never purged is not a recycle bin, it is a hidden row that
+ * grows forever — and an erasure request that is never carried out is a compliance
+ * claim the product does not honour. Both windows are the same `SOFT_DELETE_GRACE_DAYS`
+ * so there is one number for a tenant to be told and one for an operator to reason
+ * about.
+ *
+ * Ordering matters in the tenant purge: the organisation row is removed **last**, so an
+ * interruption leaves a tenant whose data is partly gone but whose record still exists
+ * and can be purged again on the next run. The other order leaves orphans nothing will
+ * ever look for — the same reasoning as `saveMasters` writing before deleting.
+ */
+async function purgeExpiredDeletions() {
+  const cutoff = purgeCutoff();
+  const expired = { clients: 0, items: 0, invoices: 0, vendors: 0, purchases: 0, organisations: 0 };
+
+  for (const [key, Model] of [
+    ['clients', Client],
+    ['items', Item],
+    ['invoices', Invoice],
+    ['vendors', Vendor],
+    ['purchases', Purchase]
+  ]) {
+    const result = await Model.deleteMany({ deletedAt: { $ne: null, $lt: cutoff } });
+    expired[key] = result.deletedCount ?? 0;
+  }
+
+  // Tenants whose owner asked for erasure and whose grace window has passed.
+  const doomed = await Organisation.find({ deletedAt: { $ne: null, $lt: cutoff } }).select('_id name').lean();
+  for (const org of doomed) {
+    for (const Model of [User, Client, Item, Invoice, Payment, CreditNote, Vendor, Purchase, Subscription, ReminderLog]) {
+      await Model.deleteMany({ orgId: org._id });
+    }
+    await Organisation.deleteOne({ _id: org._id });
+    // Deliberately at info, not debug: an irreversible platform-wide deletion should
+    // be visible in the log without anyone having raised the level to find it.
+    // `AuditLog` is not touched — it is the surviving record that this happened.
+    logger.info('purged tenant after erasure grace period', { orgId: String(org._id), name: org.name });
+    expired.organisations += 1;
+  }
+
+  return expired;
+}
+
 async function runOnce() {
   if (running) return null;
   running = true;
   try {
     const result = await sweepOverdueInvoices();
     if (result.updated) logger.info('overdue sweep', result);
-    return result;
+
+    const purged = await purgeExpiredDeletions();
+    if (Object.values(purged).some(Boolean)) logger.info('recycle bin purge', purged);
+
+    return { ...result, purged };
   } catch (error) {
-    logger.error('overdue sweep failed', { err: error });
+    logger.error('maintenance sweep failed', { err: error });
     return null;
   } finally {
     running = false;
@@ -91,6 +152,7 @@ function stopMaintenanceScheduler() {
 
 module.exports = {
   sweepOverdueInvoices,
+  purgeExpiredDeletions,
   startMaintenanceScheduler,
   stopMaintenanceScheduler
 };

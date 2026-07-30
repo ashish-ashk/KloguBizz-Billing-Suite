@@ -164,6 +164,25 @@ const maybe = fn => async t => {
 };
 
 /**
+ * Polls until a predicate holds, or gives up.
+ *
+ * Usage events and `lastActiveAt` are written fire-and-forget on purpose — analytics
+ * must never be able to fail or slow the request that produced it — so the response
+ * returns before the insert completes. Asserting immediately after the call passes on an
+ * idle machine and fails under a loaded parallel test run, which is the worst kind of
+ * test. Polling is what the assertion actually means: "this eventually appears".
+ */
+async function waitUntil(check, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const result = await check();
+    if (result) return result;
+    if (Date.now() > deadline) return null;
+    await new Promise(resolve => { setTimeout(resolve, 50); });
+  }
+}
+
+/**
  * Waits for an audit entry to land.
  *
  * `logAudit` is deliberately fire-and-forget — an audit write must never be able to
@@ -192,7 +211,15 @@ test('product usage is captured as events, and an active tenant is stamped', may
   const client = await createClient(tenant.token);
   await createInvoice(tenant.token, client._id);
 
-  const events = await UsageEvent.find({ orgId: tenant.org._id }).lean();
+  // Four distinct types are expected; wait until they have all arrived rather than
+  // sampling whatever happened to be written by the time the last request returned.
+  const events = await waitUntil(async () => {
+    const rows = await UsageEvent.find({ orgId: tenant.org._id }).lean();
+    const seen = new Set(rows.map(row => row.type));
+    return ['org.signup', 'client.created', 'invoice.created', 'app.active'].every(type => seen.has(type))
+      ? rows
+      : null;
+  }) || await UsageEvent.find({ orgId: tenant.org._id }).lean();
   const types = events.map(e => e.type);
   assert.ok(types.includes('org.signup'), 'signup is recorded');
   assert.ok(types.includes('client.created'), 'client creation is recorded');
@@ -207,8 +234,11 @@ test('product usage is captured as events, and an active tenant is stamped', may
 
   // `lastActiveAt` has to be readable without touching the event collection: three
   // separate console screens show it.
-  const org = await Organisation.findById(tenant.org._id).lean();
-  assert.ok(org.lastActiveAt, 'the organisation records when it was last seen');
+  const org = await waitUntil(async () => {
+    const row = await Organisation.findById(tenant.org._id).lean();
+    return row?.lastActiveAt ? row : null;
+  });
+  assert.ok(org?.lastActiveAt, 'the organisation records when it was last seen');
 }));
 
 test('a quick bill is reported as a different feature from an invoice', maybe(async () => {
@@ -222,7 +252,10 @@ test('a quick bill is reported as a different feature from an invoice', maybe(as
       items: [{ desc: 'Repair', qty: 1, rate: 500, gstRate: 18 }]
     }
   });
-  const events = await UsageEvent.find({ orgId: tenant.org._id, type: 'bill.created' }).lean();
+  const events = await waitUntil(async () => {
+    const rows = await UsageEvent.find({ orgId: tenant.org._id, type: 'bill.created' }).lean();
+    return rows.length ? rows : null;
+  }) || [];
   // Two different workflows with different audiences. One number for both would
   // hide which one tenants actually reach for.
   assert.equal(events.length, 1, 'a clientless invoice is a Bill Generator event');

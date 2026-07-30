@@ -49,11 +49,27 @@ function errorHandler(error, req, res, next) {
   }
 
   const statusCode = error.statusCode || 500;
-  const isServerFault = statusCode >= 500;
 
-  // Only server faults are logged with a stack — a 404 or a rejected login is
-  // expected traffic, and logging those at error level makes the real failures
-  // impossible to find (and, once an error reporter is wired up, drowns it).
+  /**
+   * A 5xx we raised on purpose is not a fault.
+   *
+   * Some 5xx responses are deliberate statements about capability rather than
+   * failures: `501 IRP_NOT_CONFIGURED` when no e-invoice provider is set up, `503
+   * WEBHOOK_NOT_CONFIGURED` when the delivery webhook has no secret. Treating those
+   * as faults did two harmful things — a stack trace in the log on every attempt
+   * (drowning real failures, and firing the error reporter), and, in production, the
+   * message replaced by "something went wrong on our side", which makes a
+   * configuration problem completely undiagnosable for the person who can fix it.
+   *
+   * A string `code` is the discriminator: `utils/httpError` sets it deliberately,
+   * whereas an unexpected throw has none (and a driver error's `code` is numeric).
+   */
+  const isDeliberate = typeof error.code === 'string' && Boolean(error.statusCode);
+  const isServerFault = statusCode >= 500 && !isDeliberate;
+
+  // Only genuine server faults are logged with a stack — a 404, a rejected login or
+  // a documented "not configured" is expected traffic, and logging those at error
+  // level makes the real failures impossible to find.
   if (isServerFault) {
     log.error('unhandled request error', {
       err: error,
@@ -61,6 +77,15 @@ function errorHandler(error, req, res, next) {
       path: req.originalUrl.split('?')[0],
       orgId: req.orgId ? String(req.orgId) : undefined,
       userId: req.user?._id ? String(req.user._id) : undefined
+    });
+  } else if (statusCode >= 500) {
+    // Deliberate, but still worth seeing: a deployment sitting on an unconfigured
+    // integration should be visible without anyone raising the log level to find it.
+    log.warn('request refused — not configured', {
+      status: statusCode,
+      code: error.code,
+      message: error.message,
+      path: req.originalUrl.split('?')[0]
     });
   } else {
     log.debug('request error', { status: statusCode, message: error.message, code: error.code });

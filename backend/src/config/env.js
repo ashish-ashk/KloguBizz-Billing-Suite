@@ -34,10 +34,62 @@ const env = {
   FROM_EMAIL: process.env.FROM_EMAIL || 'invoices@klogubizz.local',
   RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID || '',
   RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET || '',
-  RAZORPAY_WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET || DEV_DEFAULTS.RAZORPAY_WEBHOOK_SECRET
+  RAZORPAY_WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET || DEV_DEFAULTS.RAZORPAY_WEBHOOK_SECRET,
+
+  // ── E-invoicing (IRN + signed QR) ──
+  // The provider boundary. All four are needed before services/eInvoiceService.js
+  // will attempt to report an invoice; with any of them missing it validates and
+  // builds the payload but refuses to pretend it was filed.
+  IRP_BASE_URL: process.env.IRP_BASE_URL || '',
+  IRP_USERNAME: process.env.IRP_USERNAME || '',
+  IRP_PASSWORD: process.env.IRP_PASSWORD || '',
+  IRP_CLIENT_ID: process.env.IRP_CLIENT_ID || '',
+  IRP_CLIENT_SECRET: process.env.IRP_CLIENT_SECRET || '',
+
+  // ── SendGrid event webhook (delivery, bounces, complaints) ──
+  // Without this the webhook route refuses every request: an unauthenticated
+  // endpoint that writes delivery state is an endpoint anyone can use to mark a
+  // competitor's address as bounced.
+  SENDGRID_WEBHOOK_SECRET: process.env.SENDGRID_WEBHOOK_SECRET || '',
+
+  // ── MFA ──
+  // Encrypts the TOTP secrets at rest. Falls back to a key derived from
+  // JWT_SECRET so MFA works out of the box, which is documented rather than
+  // silent: rotating JWT_SECRET then invalidates every enrolled authenticator.
+  MFA_ENCRYPTION_KEY: process.env.MFA_ENCRYPTION_KEY || '',
+
+  // Comma-separated IPs or CIDR blocks allowed to reach /api/v1/superadmin.
+  // Empty (the default) means no restriction.
+  SUPERADMIN_IP_ALLOWLIST: String(process.env.SUPERADMIN_IP_ALLOWLIST || '')
+    .split(',').map(v => v.trim()).filter(Boolean)
 };
 
 env.isProduction = env.NODE_ENV === 'production';
+
+/**
+ * Whether a superadmin must enrol in MFA before using the console.
+ *
+ * On in production, off locally. Making it unconditional would be correct on
+ * principle and would lock the platform owner out of a fresh local install before
+ * they could enrol; making it opt-in would mean it is never on. Enforcement still
+ * *allows* the enrolment routes, so an existing superadmin signs in, is sent to
+ * set up MFA, and proceeds — they are never actually locked out.
+ */
+env.requireSuperadminMfa = process.env.REQUIRE_SUPERADMIN_MFA
+  ? process.env.REQUIRE_SUPERADMIN_MFA === 'true'
+  : env.isProduction;
+
+/**
+ * Whether an unverified email address blocks writes.
+ *
+ * Defaults to "only when we can actually send the verification email". Requiring
+ * verification with no mail provider configured would make a local install
+ * unusable and every test fail for a reason unrelated to what it tests — so the
+ * address is treated as verified at registration when there is no way to verify it.
+ */
+env.emailVerificationEnforced = process.env.EMAIL_VERIFICATION_ENFORCED
+  ? process.env.EMAIL_VERIFICATION_ENFORCED === 'true'
+  : Boolean(process.env.SENDGRID_API_KEY);
 // True only when Razorpay credentials are present. Billing flows check this
 // and fail closed in production instead of activating a plan for free.
 env.billingConfigured = Boolean(env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET);

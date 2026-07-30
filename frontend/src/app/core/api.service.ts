@@ -6,11 +6,15 @@ import { environment } from '../../environments/environment';
 import { CacheService } from './cache.service';
 import {
   AttentionLists, AuditEntry, AuditFilters, Client, CreditNote, CreditNoteReason, CreditSummary,
-  FeatureAdoption, FeatureFlags, GstSummary, ImpersonationSession, Invoice, InvoiceItem,
-  InvoiceStats, Item, ItemBulkUploadResult, ListParams, LoginHistoryFilters, Master, MastersResponse,
-  MetricsSeries, Organisation, OrgSummary, OrgSupportContext, OrgUser, Page, Payment, Plan, PlanUsage,
-  PlatformMe, PlatformSummary, PlatformUser, PublicBranding, Reminder, SecurityAlerts, Subscription,
-  SuperOverview, SystemHealth, TenantDetail, TenantNotice
+  DataRightsStatus, EInvoiceCheck, EInvoiceState, EInvoiceWorklist,
+  FeatureAdoption, FeatureFlags, Gstr1Report, Gstr3bReport, GstSummary, ImpersonationSession,
+  Invoice, InvoiceItem, InvoiceStats, ItcRegister, Item, ItemBulkUploadResult, ListParams,
+  LoginHistoryFilters, Master, MastersResponse, MetricsSeries, MfaSetup,
+  Organisation, OrgSummary, OrgSupportContext, OrgUser, Page, Payment, Plan, PlanUsage,
+  PlatformMe, PlatformSummary, PlatformUser, PublicBranding, Purchase, Reminder, SecurityAlerts,
+  Subscription, SuperOverview, SystemHealth, TenantDetail, TenantNotice, Vendor,
+  ArAgeing, CollectionMetrics, CustomerStatement, LowStockReport, SalesBreakdown,
+  StockMovement, TenantActivityEntry
 } from './models';
 
 /**
@@ -28,6 +32,8 @@ const NS = {
   organisation: 'organisation',
   subscription: 'subscription',
   reports: 'reports',
+  vendors: 'vendors',
+  purchases: 'purchases',
   superadmin: 'superadmin'
 } as const;
 
@@ -217,6 +223,233 @@ export class ApiService {
   }
   exportPaymentsCsv(params: ListParams = {}) {
     return this.http.get(`${this.api}/payments/export.csv`, { params: this.params(params), responseType: 'blob' });
+  }
+
+  // ── Vendors & purchases (Phase 5) ────────────
+  //
+  // The inward side of the ledger. Without it there is no input tax credit, and without
+  // ITC there is no net GST liability — only output tax, which is one side of one.
+
+  vendors(params: ListParams = {}) { return this.list<Vendor>(NS.vendors, '/purchases/vendors', params); }
+  createVendor(payload: Partial<Vendor>) {
+    return this.afterWrite(this.http.post<Vendor>(`${this.api}/purchases/vendors`, payload), NS.vendors);
+  }
+  updateVendor(id: string, payload: Partial<Vendor>) {
+    return this.afterWrite(this.http.put<Vendor>(`${this.api}/purchases/vendors/${id}`, payload), NS.vendors, NS.purchases);
+  }
+  /** Archives rather than deletes — a vendor named on a purchase is referenced by every
+   *  ITC figure that purchase contributed to. */
+  deleteVendor(id: string) {
+    return this.afterWrite(
+      this.http.delete<{ ok: boolean; purchases: number; message: string }>(`${this.api}/purchases/vendors/${id}`),
+      NS.vendors
+    );
+  }
+  restoreVendor(id: string) {
+    return this.afterWrite(this.http.post<Vendor>(`${this.api}/purchases/vendors/${id}/restore`, {}), NS.vendors);
+  }
+
+  purchases(params: ListParams = {}) { return this.list<Purchase>(NS.purchases, '/purchases', params); }
+  purchase(id: string) { return this.http.get<Purchase>(`${this.api}/purchases/${id}`); }
+  createPurchase(payload: Record<string, unknown>) {
+    return this.afterWrite(this.http.post<Purchase>(`${this.api}/purchases`, payload), NS.purchases, NS.reports);
+  }
+  updatePurchase(id: string, payload: Record<string, unknown>) {
+    return this.afterWrite(this.http.put<Purchase>(`${this.api}/purchases/${id}`, payload), NS.purchases, NS.reports);
+  }
+  payPurchase(id: string, amount: number) {
+    return this.afterWrite(this.http.post<Purchase>(`${this.api}/purchases/${id}/pay`, { amount }), NS.purchases);
+  }
+  deletePurchase(id: string) {
+    return this.afterWrite(
+      this.http.delete<{ ok: boolean; message: string }>(`${this.api}/purchases/${id}`),
+      NS.purchases, NS.reports
+    );
+  }
+  restorePurchase(id: string) {
+    return this.afterWrite(this.http.post<Purchase>(`${this.api}/purchases/${id}/restore`, {}), NS.purchases, NS.reports);
+  }
+  /** The document behind GSTR-3B table 4, and the first thing a CA asks for. */
+  itcRegister(params: ListParams = {}) {
+    return this.cache.through(
+      this.key(`${NS.reports}:itc`, params),
+      () => this.http.get<ItcRegister>(`${this.api}/purchases/itc-register`, { params: this.params(params) })
+    );
+  }
+  exportPurchasesCsv(params: ListParams = {}) {
+    return this.http.get(`${this.api}/purchases/export.csv`, { params: this.params(params), responseType: 'blob' });
+  }
+
+  // ── GST returns (Phase 5) ────────────────────
+  //
+  // The existing gstSummary is a month × rate glance and cannot be filed. These are the
+  // actual section-wise return.
+
+  /** `params` takes `month=YYYY-MM`, or `from`/`to`. Defaults to the last complete
+   *  month — the one someone sitting down to file is filing. */
+  gstr1(params: ListParams = {}) {
+    return this.cache.through(
+      this.key(`${NS.reports}:gstr1`, params),
+      () => this.http.get<Gstr1Report>(`${this.api}/reports/gstr1`, { params: this.params(params) })
+    );
+  }
+  /** The GSTN offline-utility file, for upload rather than retyping. */
+  downloadGstr1Json(params: ListParams = {}) {
+    return this.http.get(`${this.api}/reports/gstr1/export.json`, { params: this.params(params), responseType: 'blob' });
+  }
+  downloadGstr1Csv(params: ListParams = {}) {
+    return this.http.get(`${this.api}/reports/gstr1/export.csv`, { params: this.params(params), responseType: 'blob' });
+  }
+  gstr3b(params: ListParams = {}) {
+    return this.cache.through(
+      this.key(`${NS.reports}:gstr3b`, params),
+      () => this.http.get<Gstr3bReport>(`${this.api}/reports/gstr3b`, { params: this.params(params) })
+    );
+  }
+
+  // ── E-invoicing (Phase 5) ────────────────────
+
+  /** Pre-flight: what the IRP would reject, and why, before any network call. */
+  checkEInvoice(invoiceId: string) {
+    return this.http.get<EInvoiceCheck>(`${this.api}/reports/e-invoice/${invoiceId}/check`);
+  }
+  generateEInvoice(invoiceId: string) {
+    return this.afterWrite(
+      this.http.post<{ ok: boolean; eInvoice: EInvoiceState }>(`${this.api}/reports/e-invoice/${invoiceId}/generate`, {}),
+      NS.invoices
+    );
+  }
+  eInvoiceWorklist(params: ListParams = {}) {
+    return this.http.get<EInvoiceWorklist>(`${this.api}/reports/e-invoice/worklist`, { params: this.params(params) });
+  }
+
+  // ── Recycle bin (#37) ────────────────────────
+
+  restoreClient(id: string) {
+    return this.afterWrite(this.http.post<Client>(`${this.api}/clients/${id}/restore`, {}), NS.clients);
+  }
+  restoreItem(id: string) {
+    return this.afterWrite(this.http.post<Item>(`${this.api}/items/${id}/restore`, {}), NS.items);
+  }
+  restoreInvoice(id: string) {
+    return this.afterWrite(this.http.post<Invoice>(`${this.api}/invoices/${id}/restore`, {}), NS.invoices, NS.reports);
+  }
+
+  // ── Data rights (#62) ────────────────────────
+
+  dataRights() { return this.http.get<DataRightsStatus>(`${this.api}/organisations/current/data-rights`); }
+  /** A complete, machine-readable export — streamed server-side. */
+  exportTenantData() {
+    return this.http.get(`${this.api}/organisations/current/export`, { responseType: 'blob' });
+  }
+  requestAccountDeletion(payload: { confirmName: string; password: string; reason?: string }) {
+    return this.http.post<{ ok: boolean; scheduledFor: string; graceDays: number; message: string }>(
+      `${this.api}/organisations/current/delete-account`, payload
+    );
+  }
+  cancelAccountDeletion() {
+    return this.http.post<{ ok: boolean; message: string }>(`${this.api}/organisations/current/cancel-deletion`, {});
+  }
+
+  // ── MFA (#7) ─────────────────────────────────
+
+  /** Stages a secret. Nothing about sign-in changes until `enableMfa` proves the
+   *  authenticator app can actually produce a code. */
+  mfaSetup() { return this.http.post<MfaSetup>(`${this.api}/auth/mfa/setup`, {}); }
+  mfaEnable(code: string) {
+    return this.http.post<{ ok: boolean; backupCodes: string[]; message: string }>(`${this.api}/auth/mfa/enable`, { code });
+  }
+  mfaDisable(payload: { password: string; code: string }) {
+    return this.http.post<{ ok: boolean; message: string }>(`${this.api}/auth/mfa/disable`, payload);
+  }
+  mfaRegenerateBackupCodes(code: string) {
+    return this.http.post<{ ok: boolean; backupCodes: string[]; message: string }>(`${this.api}/auth/mfa/backup-codes`, { code });
+  }
+  resendEmailVerification() {
+    return this.http.post<{ ok: boolean; delivered: boolean; verifyUrl?: string; message: string }>(
+      `${this.api}/auth/resend-verification`, {}
+    );
+  }
+
+  // ── Receivables & reporting (2.4 #28–#34) ────
+  //
+  // All of this was computable from data that already existed; it was simply never
+  // asked for. The product could say how much was outstanding and nothing else.
+
+  /** AR ageing with per-customer buckets. */
+  arAgeing() {
+    return this.cache.through(`${NS.reports}:ageing`, () => this.http.get<ArAgeing>(`${this.api}/reports/ageing`));
+  }
+  downloadAgeingExcel() {
+    return this.http.get(`${this.api}/reports/ageing/export.xlsx`, { responseType: 'blob' });
+  }
+  /** Statement of account: invoices and payments interleaved with a running balance. */
+  customerStatement(clientId: string, params: ListParams = {}) {
+    return this.cache.through(
+      this.key(`${NS.reports}:statement:${clientId}`, params),
+      () => this.http.get<CustomerStatement>(`${this.api}/reports/statement/${clientId}`, { params: this.params(params) })
+    );
+  }
+  downloadStatementExcel(clientId: string, params: ListParams = {}) {
+    return this.http.get(`${this.api}/reports/statement/${clientId}/export.xlsx`, {
+      params: this.params(params), responseType: 'blob'
+    });
+  }
+  /** DSO, collection efficiency and the payment-method mix. */
+  collectionMetrics(days = 90) {
+    return this.cache.through(
+      this.key(`${NS.reports}:collections`, { days }),
+      () => this.http.get<CollectionMetrics>(`${this.api}/reports/collections`, { params: this.params({ days }) })
+    );
+  }
+  salesBreakdown(params: ListParams = {}) {
+    return this.cache.through(
+      this.key(`${NS.reports}:sales`, params),
+      () => this.http.get<SalesBreakdown>(`${this.api}/reports/sales-breakdown`, { params: this.params(params) })
+    );
+  }
+  downloadInvoicesExcel(params: ListParams = {}) {
+    return this.http.get(`${this.api}/reports/invoices/export.xlsx`, { params: this.params(params), responseType: 'blob' });
+  }
+
+  // ── Stock (2.5 #37–#39) ──────────────────────
+
+  stockLedger(params: ListParams = {}) {
+    return this.list<StockMovement>(`${NS.items}:ledger`, '/reports/stock/ledger', params);
+  }
+  lowStock() {
+    return this.cache.through(`${NS.items}:low`, () => this.http.get<LowStockReport>(`${this.api}/reports/stock/low`));
+  }
+  /** A correction, posted as a movement with a mandatory note — not an edit. */
+  adjustStock(itemId: string, payload: { quantity: number; note: string; reason?: string }) {
+    return this.afterWrite(
+      this.http.post<{ stockQty: number }>(`${this.api}/reports/stock/${itemId}/adjust`, payload),
+      NS.items
+    );
+  }
+  recomputeStock(itemId: string) {
+    return this.afterWrite(
+      this.http.post<{ ok: boolean; stockQty: number }>(`${this.api}/reports/stock/${itemId}/recompute`, {}),
+      NS.items
+    );
+  }
+
+  // ── Tenant activity log (2.6 #50) ────────────
+
+  /** The tenant's own audit trail. Recorded since Phase 1, exposed only to the
+   *  platform until now — so an owner could not see who changed what. */
+  tenantActivity(params: ListParams = {}) {
+    return this.list<TenantActivityEntry>('activity', '/reports/activity', params);
+  }
+
+  /** Emails the invoice to the customer with the PDF attached (2.3 #19). */
+  sendInvoiceToCustomer(id: string, payload: { to?: string; cc?: string; message?: string } = {}) {
+    return this.afterWrite(
+      this.http.post<{ ok: boolean; delivered: boolean; suppressed: boolean; to: string; message: string }>(
+        `${this.api}/invoices/${id}/send`, payload
+      ),
+      NS.invoices
+    );
   }
 
   // ── Reports ──────────────────────────────────

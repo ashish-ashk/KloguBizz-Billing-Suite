@@ -24,6 +24,36 @@ const customInvoiceTemplateSchema = new mongoose.Schema({
   narrow: { type: Boolean, default: false }
 }, { _id: false });
 
+/**
+ * Organisation-level invoice defaults (2.3 #24, #25, #26).
+ *
+ * Three toggles in `invoiceContent` promised something the data could not deliver:
+ * `showBankDetails` rendered an empty block because `bankDetails` lived only on
+ * `Invoice` and had to be retyped every time; `showSignature` drew a signature line
+ * with nothing to put on it; and there was no default terms text anywhere, so every
+ * invoice started from the same hardcoded 'Thank you for your business!'.
+ *
+ * Held here because they are properties of the business, not of a document. The
+ * per-invoice fields still win when set, so a one-off account or a special condition
+ * is still expressible.
+ */
+const invoiceDefaultsSchema = new mongoose.Schema({
+  bankName: { type: String, default: '' },
+  accountName: { type: String, default: '' },
+  accountNumber: { type: String, default: '' },
+  ifsc: { type: String, default: '' },
+  branch: { type: String, default: '' },
+  /** UPI id printed on the invoice. Stored as text, not a QR: a QR this product
+   *  cannot verify scans is a payment instruction that might not work. */
+  upiId: { type: String, default: '' },
+  /** Base64 signature image, same storage choice as the logo (see #45's note). */
+  signatureUrl: { type: String, default: '' },
+  signatoryName: { type: String, default: '' },
+  /** Default terms, overridable per invoice. */
+  termsAndConditions: { type: String, default: '' },
+  defaultNotes: { type: String, default: '' }
+}, { _id: false });
+
 const brandingSchema = new mongoose.Schema({
   logoUrl: String,
   headerImageUrl: String,
@@ -42,7 +72,8 @@ const brandingSchema = new mongoose.Schema({
   roundOffTotal: { type: Boolean, default: true },
   invoiceTemplateId: { type: String, default: 'modern-minimal' },
   customInvoiceTemplate: { type: customInvoiceTemplateSchema, default: null },
-  invoiceContent: { type: invoiceContentSchema, default: () => ({}) }
+  invoiceContent: { type: invoiceContentSchema, default: () => ({}) },
+  invoiceDefaults: { type: invoiceDefaultsSchema, default: () => ({}) }
 }, { _id: false });
 
 // Custom palette a tenant admin builds from scratch in the Appearance page.
@@ -158,6 +189,32 @@ const organisationSchema = new mongoose.Schema({
    *  Maintained by services/usageEventService.js at most once per day per
    *  process, so it costs nothing on the request path. */
   lastActiveAt: Date,
+  /**
+   * E-invoicing configuration.
+   *
+   * `enabled` is a tenant decision, not something inferred from invoices raised
+   * here: the threshold is measured on the *previous year's aggregate* turnover
+   * across all of a business's GSTINs, which this product cannot see and would get
+   * wrong for anyone who onboarded mid-year. `turnoverDeclared` records what the
+   * tenant told us, so the figure behind the decision is on file.
+   */
+  eInvoicing: {
+    enabled: { type: Boolean, default: false },
+    turnoverDeclared: { type: Number, default: null },
+    enabledAt: Date,
+    /** Their own LUT reference, for zero-rated supplies without payment of tax. */
+    lutNumber: { type: String, default: '' }
+  },
+  /**
+   * Self-service account deletion (#62 / DPDP erasure).
+   *
+   * A grace window rather than an immediate wipe: an erasure request made in anger
+   * or by mistake is unrecoverable, and a tenant's invoices are records they may be
+   * statutorily required to keep. Purged by maintenanceService after the window.
+   */
+  deletedAt: { type: Date, default: null },
+  deletionRequestedBy: String,
+  deletionReason: String,
   brandingConfig: { type: brandingSchema, default: () => ({}) },
   themeConfig: { type: themeConfigSchema, default: () => ({}) },
   invoiceSequence: { type: Number, default: 0 },
@@ -181,5 +238,7 @@ organisationSchema.index({ status: 1, plan: 1 });
 // an index on the field they sort by.
 organisationSchema.index({ status: 1, trialEndsAt: 1 });
 organisationSchema.index({ lastActiveAt: 1 });
+// Drives the scheduled purge of tenants past their erasure grace window.
+organisationSchema.index({ deletedAt: 1 }, { sparse: true });
 
 module.exports = { Organisation: mongoose.model('Organisation', organisationSchema) };

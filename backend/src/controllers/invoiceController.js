@@ -11,7 +11,7 @@ const { calculateInvoiceTotals, roundMoney } = require('../services/gstService')
 const { nextInvoiceNumber } = require('../services/invoiceNumberService');
 const { renderInvoicePdf } = require('../services/pdfService');
 const { getPlatformDefaults } = require('../services/platformSettingsService');
-const { sendReminderEmail } = require('../services/emailService');
+const { sendReminderEmail, sendInvoiceEmail } = require('../services/emailService');
 const { assertInvoiceQuota } = require('../services/planService');
 const { logAudit } = require('../services/auditService');
 const { runReminderSweep, daysPastDue } = require('../services/reminderService');
@@ -21,6 +21,8 @@ const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
 const { streamCsv } = require('../services/csvService');
 const { env } = require('../config/env');
 const { recordEvent, EVENT } = require('../services/usageEventService');
+const stock = require('../services/stockService');
+const { scopeFilter, deletionPatch, RESTORE_PATCH } = require('../utils/softDelete');
 
 /**
  * The configured reminder stage an invoice at `overdueDays` has reached, so a
@@ -37,21 +39,37 @@ async function currentReminderStage(overdueDays) {
 
 async function totalsFor(req, body) {
   const org = await Organisation.findById(req.orgId);
-  let toStateCode;
+  let buyerStateCode;
   if (body.clientId) {
     const client = await Client.findOne({ _id: body.clientId, ...tenantFilter(req) });
     if (!client) throw httpError(400, 'Valid clientId is required');
-    toStateCode = client.stateCode;
+    buyerStateCode = client.stateCode;
   } else if (body.billTo?.name) {
-    toStateCode = body.billTo.stateCode || org.stateCode;
+    buyerStateCode = body.billTo.stateCode || org.stateCode;
   } else {
     throw httpError(400, 'Provide a registered client or buyer details');
   }
-  return calculateInvoiceTotals(body.items || [], org.stateCode, toStateCode, {
+
+  /**
+   * The tax head follows the **place of supply**, not the buyer's registered state
+   * (#29). They differ whenever goods are delivered somewhere other than the
+   * billing address, and for most services — and the difference decides whether the
+   * invoice carries IGST or CGST+SGST, which is a legal declaration rather than a
+   * presentation choice. The buyer's state remains the fallback, so every existing
+   * invoice computes exactly as it did before.
+   */
+  const placeOfSupply = body.placeOfSupply || buyerStateCode;
+
+  return calculateInvoiceTotals(body.items || [], org.stateCode, placeOfSupply, {
     discountPercent: body.discountPercent,
     // Whole-rupee rounding is the Indian billing convention, but a tenant that
     // bills in exact paise can turn it off.
-    roundOff: org.brandingConfig?.roundOffTotal !== false
+    roundOff: org.brandingConfig?.roundOffTotal !== false,
+    // Classification (#30, #31). Defaults reproduce the previous behaviour exactly:
+    // a taxable, regular, non-reverse-charge supply.
+    taxTreatment: body.taxTreatment,
+    supplyType: body.supplyType,
+    reverseCharge: body.reverseCharge
   });
 }
 
@@ -183,7 +201,11 @@ function applyStatusFilter(filter, status) {
 const INVOICE_SORTS = ['date', 'createdAt', 'invoiceNumber', 'dueDate', 'status'];
 
 function buildInvoiceFilter(req) {
-  const filter = tenantFilter(req);
+  // `scopeFilter` is the tenant filter plus the soft-delete exclusion, and honours
+  // `?deleted=only` for the recycle bin. A deleted draft that still showed up in a
+  // list or a report would be worse than a hard delete, because the numbers would be
+  // wrong in a way nobody can see.
+  const filter = scopeFilter(req);
   applyStatusFilter(filter, req.query.status);
   if (req.query.clientId) filter.clientId = req.query.clientId;
   if (req.query.q) {
@@ -407,7 +429,25 @@ const createInvoice = asyncHandler(async (req, res) => {
     value: totals.total,
     meta: { invoiceNumber: invoice.invoiceNumber }
   });
-  res.status(201).json(invoice);
+
+  /**
+   * Stock (2.5 #37).
+   *
+   * `Item.stockQty` existed from the beginning and nothing ever wrote to it, so the
+   * Inventory page showed a stock column that only changed when somebody edited it by
+   * hand. A draft moves nothing — it has not been issued, so no goods have left.
+   *
+   * Awaited so the response can report what moved, but a stock failure never fails the
+   * invoice: an invoice that was legitimately issued must not be rejected because the
+   * ledger had a bad moment. The ledger is repairable; an unissued invoice is not.
+   */
+  const stockResult = invoice.status === 'draft' ? null : await stock.applyInvoice(req, invoice);
+  res.status(201).json({
+    ...invoice.toObject(),
+    // Surfaced rather than silent: a line that matched no catalogue item moved no
+    // stock, and the alternative to saying so is a balance that is quietly wrong.
+    stock: stockResult ? { moved: stockResult.moved, unmatched: stockResult.unmatched, lowStock: stockResult.lowStock } : undefined
+  });
 });
 
 const updateInvoice = asyncHandler(async (req, res) => {
@@ -415,10 +455,23 @@ const updateInvoice = asyncHandler(async (req, res) => {
   // Immutable once issued — same reasoning as createInvoice above, and it
   // also stops an edit from accidentally reassigning an already-used number.
   delete update.invoiceNumber;
+  /**
+   * Anything that changes what the invoice charges.
+   *
+   * The classification fields belong here, not with the presentational ones: moving
+   * an invoice to `exempt`, flagging it reverse-charge, or changing the place of
+   * supply all change the tax on the document. Treating them as cosmetic would let
+   * an issued invoice be silently re-taxed — exactly the hole the issued-invoice
+   * lock below exists to close.
+   */
   const pricingChanged = req.body.items
     || req.body.discountPercent !== undefined
     || req.body.clientId !== undefined
-    || req.body.billTo !== undefined;
+    || req.body.billTo !== undefined
+    || req.body.placeOfSupply !== undefined
+    || req.body.taxTreatment !== undefined
+    || req.body.supplyType !== undefined
+    || req.body.reverseCharge !== undefined;
 
   const existing = await Invoice.findOne({ _id: req.params.id, ...tenantFilter(req) });
   if (!existing) throw httpError(404, 'Invoice not found');
@@ -574,7 +627,8 @@ const sendReminder = asyncHandler(async (req, res) => {
     overdueDays,
     subject: stage?.subject,
     template: stage?.template,
-    viewUrl: `${env.FRONTEND_URL}/invoices/${invoice._id}/print`
+    viewUrl: `${env.FRONTEND_URL}/invoices/${invoice._id}/print`,
+    orgId: req.orgId
   });
 
   await ReminderLog.create({
@@ -633,6 +687,9 @@ const cancelInvoice = asyncHandler(async (req, res) => {
   invoice.paidDate = undefined;
   await invoice.save();
 
+  // The goods never left, so the stock comes back. Idempotent: a second cancel finds
+  // the existing reversal and posts nothing.
+  await stock.reverseInvoice(req, invoice);
   logAudit({ req, action: 'invoice.cancelled', entity: 'invoice', entityId: invoice._id, meta: { invoiceNumber: invoice.invoiceNumber, reason: invoice.cancelReason } });
   res.json(invoice);
 });
@@ -663,9 +720,33 @@ const deleteInvoice = asyncHandler(async (req, res) => {
     throw httpError(409, 'This invoice has payments recorded against it and cannot be deleted.', 'INVOICE_HAS_PAYMENTS');
   }
 
-  await existing.deleteOne();
-  logAudit({ req, action: 'invoice.deleted', entity: 'invoice', entityId: existing._id, meta: { invoiceNumber: existing.invoiceNumber } });
+  /**
+   * Soft (#37).
+   *
+   * Only ever reachable for a draft — an issued invoice is refused above, because
+   * under GST it must be reversed by a credit note rather than removed. So this is a
+   * recycle bin for work in progress, which is exactly where an accidental delete
+   * actually happens.
+   *
+   * The invoice **number is not released**. It was drawn from the org's atomic
+   * counter, and handing it back out would produce two documents with the same
+   * number if the draft were later restored.
+   */
+  await Invoice.updateOne({ _id: existing._id }, { $set: deletionPatch(req) });
+  logAudit({ req, action: 'invoice.deleted', entity: 'invoice', entityId: existing._id, meta: { invoiceNumber: existing.invoiceNumber, recoverable: true } });
   res.status(204).end();
+});
+
+/** Brings a deleted draft back, number intact. */
+const restoreInvoice = asyncHandler(async (req, res) => {
+  const invoice = await Invoice.findOneAndUpdate(
+    { _id: req.params.id, ...tenantFilter(req), deletedAt: { $ne: null } },
+    { $set: RESTORE_PATCH },
+    { new: true }
+  );
+  if (!invoice) throw httpError(404, 'No deleted invoice with that id');
+  logAudit({ req, action: 'invoice.restored', entity: 'invoice', entityId: invoice._id, meta: { invoiceNumber: invoice.invoiceNumber } });
+  res.json(invoice);
 });
 
 // Missing/undefined figures export as 0.00 rather than blowing up on
@@ -792,6 +873,90 @@ const invoicePdf = asyncHandler(async (req, res) => {
   res.send(buffer);
 });
 
+/**
+ * Emails the invoice to the customer, with the PDF attached (2.3 #19).
+ *
+ * The product had **no send-invoice action at all** — only overdue reminders, which were
+ * plain text with nothing attached. So the loop the whole application exists to serve,
+ * "raise an invoice and give it to the customer", stopped at a download the tenant then
+ * had to email themselves from Outlook.
+ *
+ * Deliberately reuses the same `renderInvoicePdf` the download uses, so the attachment is
+ * byte-identical to what the tenant sees when they preview it. Rendering a second,
+ * simpler version for email is how the customer's copy comes to differ from ours.
+ */
+const sendInvoiceToCustomer = asyncHandler(async (req, res) => {
+  const invoice = await Invoice.findOne({ _id: req.params.id, ...tenantFilter(req) }).populate('clientId');
+  if (!invoice) throw httpError(404, 'Invoice not found');
+
+  if (invoice.status === 'draft') {
+    // A draft has no number the customer should ever see and may still change.
+    throw httpError(409, 'This invoice is still a draft. Issue it before sending it to the customer.', 'INVOICE_DRAFT');
+  }
+
+  const org = await Organisation.findById(req.orgId);
+  const client = invoice.clientId || (invoice.billTo?.name ? {
+    companyName: invoice.billTo.name,
+    address: invoice.billTo.address,
+    gstin: invoice.billTo.gstin,
+    stateCode: invoice.billTo.stateCode,
+    email: invoice.billTo.email
+  } : null);
+
+  // An explicit recipient wins, so a tenant can send to an accounts-payable address that
+  // is not the one on the client record.
+  const to = String(req.body?.to || client?.email || '').trim();
+  if (!to) {
+    throw httpError(
+      400,
+      'There is no email address for this customer. Add one to their record, or supply one with the request.',
+      'NO_RECIPIENT'
+    );
+  }
+
+  const platformDefaults = await getPlatformDefaults();
+  const pdf = await renderInvoicePdf({ invoice, client, org, platformDefaults });
+
+  const result = await sendInvoiceEmail({
+    to,
+    cc: req.body?.cc || undefined,
+    orgId: req.orgId,
+    clientName: client?.companyName,
+    invoiceNumber: invoice.invoiceNumber,
+    amount: `INR ${Number(invoice.totals?.total || 0).toLocaleString('en-IN')}`,
+    dueDate: invoice.dueDate,
+    orgName: org?.name,
+    // The customer's natural reaction to an invoice is to reply to it; routing that to
+    // our transactional sender loses it silently.
+    replyTo: org?.adminEmail,
+    message: req.body?.message,
+    pdf,
+    viewUrl: `${env.FRONTEND_URL}/invoices/${invoice._id}/print`
+  });
+
+  logAudit({
+    req,
+    action: 'invoice.sent',
+    entity: 'invoice',
+    entityId: invoice._id,
+    meta: { invoiceNumber: invoice.invoiceNumber, to, delivered: !!result.sent, suppressed: !!result.suppressed }
+  });
+  recordEvent({ req, type: EVENT.invoiceEmailed, meta: { invoiceNumber: invoice.invoiceNumber, sent: !!result.sent } });
+
+  res.json({
+    ok: !result.failed,
+    delivered: !!result.sent,
+    suppressed: !!result.suppressed,
+    to,
+    // Says what actually happened rather than a blanket success: with no provider
+    // configured nothing was sent, and reporting that as sent is the exact invisibility
+    // #58 was about.
+    message: result.sent
+      ? `Invoice ${invoice.invoiceNumber} has been emailed to ${to}.`
+      : (result.reason || 'No email provider is configured, so nothing was sent.')
+  });
+});
+
 module.exports = {
   recalculateSettlement,
   listInvoices,
@@ -805,6 +970,8 @@ module.exports = {
   sendReminder,
   remindAll,
   deleteInvoice,
+  restoreInvoice,
+  sendInvoiceToCustomer,
   invoicePdf,
   exportInvoicesCsv
 };

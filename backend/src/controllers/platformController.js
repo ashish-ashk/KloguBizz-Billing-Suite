@@ -11,6 +11,7 @@ const { CreditNote } = require('../models/CreditNote');
 const { Subscription } = require('../models/Subscription');
 const { UsageEvent } = require('../models/UsageEvent');
 const { AuditLog, GlobalSetting } = require('../models/Settings');
+const { EmailLog, Suppression } = require('../models/EmailLog');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { logAudit } = require('../services/auditService');
@@ -858,8 +859,115 @@ const securityAlerts = asyncHandler(async (req, res) => {
   });
 });
 
+// ── Email deliverability (3.5 / #58) ─────────────
+
+/**
+ * Where the platform's mail is going.
+ *
+ * The panel that makes #58 usable: sent versus delivered versus bounced, per flow and
+ * per tenant. `sent` and `delivered` are reported separately because the gap between
+ * them is where every real delivery problem lives, and a dashboard that shows only
+ * "sent" is how "we emailed them" gets said about mail that bounced.
+ */
+const emailDeliverability = asyncHandler(async (req, res) => {
+  const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+  const since = new Date(Date.now() - days * 86400000);
+
+  const [byStatus, byType, worstTenants, suppressionCount, recentFailures] = await Promise.all([
+    EmailLog.aggregate([
+      { $match: { createdAt: { $gte: since } } },
+      { $group: { _id: '$status', count: { $sum: 1 } } }
+    ]),
+    EmailLog.aggregate([
+      { $match: { createdAt: { $gte: since } } },
+      { $group: { _id: { type: '$type', status: '$status' }, count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]),
+    // Tenants whose mail is failing, which is the actionable form of the question.
+    EmailLog.aggregate([
+      { $match: { createdAt: { $gte: since }, status: { $in: ['bounced', 'failed', 'spam', 'dropped'] }, orgId: { $ne: null } } },
+      { $group: { _id: '$orgId', failures: { $sum: 1 } } },
+      { $sort: { failures: -1 } },
+      { $limit: 10 },
+      { $lookup: { from: 'organisations', localField: '_id', foreignField: '_id', as: 'org' } },
+      { $project: { _id: 0, orgId: '$_id', failures: 1, orgName: { $first: '$org.name' } } }
+    ]),
+    Suppression.countDocuments({ releasedAt: null }),
+    EmailLog.find({ createdAt: { $gte: since }, status: { $in: ['bounced', 'failed', 'spam'] } })
+      .select('to subject type status reason createdAt')
+      .sort({ createdAt: -1 })
+      .limit(25)
+      .lean()
+  ]);
+
+  const counts = Object.fromEntries(byStatus.map(row => [row._id, row.count]));
+  const attempted = Object.values(counts).reduce((total, count) => total + count, 0);
+  const failed = (counts.bounced || 0) + (counts.failed || 0) + (counts.spam || 0) + (counts.dropped || 0);
+
+  const flows = {};
+  for (const row of byType) {
+    const flow = flows[row._id.type] || { type: row._id.type, total: 0, byStatus: {} };
+    flow.total += row.count;
+    flow.byStatus[row._id.status] = row.count;
+    flows[row._id.type] = flow;
+  }
+
+  res.json({
+    days,
+    /** Whether mail is being sent at all — the first thing to check. */
+    providerConfigured: Boolean(env.SENDGRID_API_KEY),
+    eventWebhookConfigured: Boolean(env.SENDGRID_WEBHOOK_SECRET),
+    counts,
+    attempted,
+    failed,
+    failureRate: attempted ? Math.round((failed / attempted) * 1000) / 10 : 0,
+    // Deliberately called out: a deployment with no provider logs every message as
+    // `skipped`, and a console that showed 0 failures would read as healthy.
+    skipped: counts.skipped || 0,
+    suppressed: counts.suppressed || 0,
+    suppressionListSize: suppressionCount,
+    flows: Object.values(flows).sort((a, b) => b.total - a.total),
+    worstTenants,
+    recentFailures
+  });
+});
+
+const listSuppressions = asyncHandler(async (req, res) => {
+  const filter = req.query.released === 'true' ? { releasedAt: { $ne: null } } : { releasedAt: null };
+  if (req.query.q) {
+    const term = escapeRegex(String(req.query.q).trim());
+    if (term) filter.email = { $regex: term, $options: 'i' };
+  }
+  const page = await paginate(Suppression, filter, req.query, query => query.sort({ suppressedAt: -1 }).lean());
+  res.json(page);
+});
+
+/**
+ * Lifts a suppression.
+ *
+ * Needed because a hard bounce is sometimes wrong — a mail server misconfigured for a
+ * day, an address that has since been fixed — and without this the tenant is
+ * permanently unreachable with no recourse. `releasedAt` rather than a delete, so the
+ * history of why it was suppressed survives being overridden.
+ */
+const releaseSuppression = asyncHandler(async (req, res) => {
+  const email = String(req.body?.email || '').toLowerCase().trim();
+  if (!email) throw httpError(400, 'email is required');
+  const row = await Suppression.findOneAndUpdate(
+    { email, releasedAt: null },
+    { $set: { releasedAt: new Date(), releasedBy: req.user.name || req.user.email } },
+    { new: true }
+  );
+  if (!row) throw httpError(404, 'That address is not currently suppressed.');
+  logAudit({ req, action: 'email.suppression_released', entity: 'email', entityId: email, meta: { reason: row.reason } });
+  res.json({ ok: true, email, message: `${email} will receive mail again.` });
+});
+
 module.exports = {
   platformMe,
+  emailDeliverability,
+  listSuppressions,
+  releaseSuppression,
   metricsSummary,
   metricsSeries,
   metricsAttention,

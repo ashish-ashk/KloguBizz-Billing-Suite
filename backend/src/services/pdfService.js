@@ -1,6 +1,7 @@
 const PDFDocument = require('pdfkit');
 const { resolveTemplate, ITALIC_VARIANTS } = require('./invoiceTemplates');
 const { calculateLine } = require('./gstService');
+const { parseDataUri } = require('./brandingAssetService');
 
 const DARK = '#1e1b4b';
 const MUTED = '#6b7280';
@@ -737,14 +738,42 @@ function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
       doc.fillColor(MUTED).font(font).fontSize(9).text(invoice.notes, left, leftY, { width: width / 2 - 20 });
       leftY += 34;
     }
-    if (showBankDetails && (invoice.bankDetails?.bank || invoice.bankDetails?.account)) {
-      doc.rect(left, leftY, width / 2 - 20, 66).fill(panelBg);
+    /**
+     * Bank details, falling back to the organisation's (2.3 #24).
+     *
+     * `bankDetails` lived only on `Invoice`, so it had to be retyped on every document and
+     * in practice never was — which meant `showBankDetails` rendered an empty block for
+     * almost every invoice ever produced. The org-level defaults are the answer; the
+     * per-invoice fields still win when set, so a one-off account is still expressible.
+     */
+    const orgBank = org?.brandingConfig?.invoiceDefaults || {};
+    const bank = {
+      bank: invoice.bankDetails?.bank || orgBank.bankName || '',
+      account: invoice.bankDetails?.account || orgBank.accountNumber || '',
+      ifsc: invoice.bankDetails?.ifsc || orgBank.ifsc || '',
+      accountName: orgBank.accountName || '',
+      branch: orgBank.branch || '',
+      upiId: orgBank.upiId || ''
+    };
+    if (showBankDetails && (bank.bank || bank.account)) {
+      // Sized to the rows that actually have a value, rather than a fixed 66pt box that
+      // either clipped the UPI line or left a gap when half the fields were empty.
+      const bankLines = [
+        bank.accountName ? `Name: ${bank.accountName}` : null,
+        bank.bank ? `Bank: ${bank.bank}${bank.branch ? ` (${bank.branch})` : ''}` : null,
+        bank.account ? `A/c: ${bank.account}` : null,
+        bank.ifsc ? `IFSC: ${bank.ifsc}` : null,
+        bank.upiId ? `UPI: ${bank.upiId}` : null
+      ].filter(Boolean);
+      const panelHeight = 24 + bankLines.length * 13;
+      doc.rect(left, leftY, width / 2 - 20, panelHeight).fill(panelBg);
       doc.fillColor(FAINT).font(fontBold).fontSize(8).text('BANK DETAILS', left + 12, leftY + 10);
       doc.fillColor('#334155').font(font).fontSize(9);
       let by = leftY + 24;
-      if (invoice.bankDetails?.bank) { doc.text(`Bank: ${invoice.bankDetails.bank}`, left + 12, by); by += 13; }
-      if (invoice.bankDetails?.account) { doc.text(`A/c: ${invoice.bankDetails.account}`, left + 12, by); by += 13; }
-      if (invoice.bankDetails?.ifsc) doc.text(`IFSC: ${invoice.bankDetails.ifsc}`, left + 12, by);
+      for (const line of bankLines) {
+        doc.text(line, left + 12, by);
+        by += 13;
+      }
     }
 
     const sx = left + width / 2 + 10;
@@ -832,11 +861,32 @@ function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
     const footY = pageBottom - FOOTER_BLOCK_HEIGHT;
     doc.fillColor(FAINT).font(font).fontSize(8).text('This is a computer generated invoice.', left, footY, { width: 250 });
     if (showSignature) {
+      /**
+       * The signature image, when one has been uploaded (2.3 #25).
+       *
+       * `showSignature` used to draw a line with nothing above it, because there was
+       * nowhere to store a signature at all. Drawn *above* the rule and clipped to a fixed
+       * box: an over-tall upload would otherwise push into the totals panel, the same
+       * failure the letterhead image had before it was bounded.
+       */
+      const signatureSource = org?.brandingConfig?.invoiceDefaults?.signatureUrl;
+      if (signatureSource) {
+        try {
+          const parsed = parseDataUri(signatureSource);
+          if (parsed) {
+            doc.image(parsed.buffer, right - 145, footY - 34, { fit: [145, 30], align: 'center' });
+          }
+        } catch {
+          // A corrupt upload must not take the whole PDF down — the line and the name
+          // below still print, which is what the document had before.
+        }
+      }
       doc.moveTo(right - 145, footY).lineTo(right, footY).strokeColor(brand).lineWidth(1).stroke();
       const sigLabel = (template.id === 'corporate-formal' || template.id === 'gst-ledger-register') ? `For ${org?.name || ''}` : 'Authorised Signatory';
       doc.fillColor(brand).fontSize(8).text(sigLabel, right - 145, footY + 4, { width: 145, align: 'center' });
       doc.fillColor(DARK).font(fontBold).text(
-        (template.id === 'corporate-formal' || template.id === 'gst-ledger-register') ? 'Authorised Signatory' : (org?.name || ''),
+        org?.brandingConfig?.invoiceDefaults?.signatoryName
+          || ((template.id === 'corporate-formal' || template.id === 'gst-ledger-register') ? 'Authorised Signatory' : (org?.name || '')),
         right - 145, footY + 16, { width: 145, align: 'center' }
       );
     }

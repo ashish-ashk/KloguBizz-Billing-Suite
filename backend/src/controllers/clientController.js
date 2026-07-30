@@ -4,6 +4,7 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { logAudit } = require('../services/auditService');
+const { notDeleted, scopeFilter, deletionPatch, RESTORE_PATCH } = require('../utils/softDelete');
 const { recordEvent, EVENT } = require('../services/usageEventService');
 const { pickFields } = require('../utils/pickFields');
 const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
@@ -16,7 +17,7 @@ const CLIENT_FIELDS = ['companyName', 'email', 'phone', 'gstin', 'address', 'sta
 const CLIENT_SORTS = ['companyName', 'createdAt'];
 
 const listClients = asyncHandler(async (req, res) => {
-  const filter = tenantFilter(req);
+  const filter = scopeFilter(req);
   if (req.query.status) filter.status = req.query.status;
   if (req.query.q) {
     // Server-side search, so a tenant with a long customer list is not obliged
@@ -45,7 +46,7 @@ const createClient = asyncHandler(async (req, res) => {
 
 const updateClient = asyncHandler(async (req, res) => {
   const client = await Client.findOneAndUpdate(
-    { _id: req.params.id, ...tenantFilter(req) },
+    { _id: req.params.id, ...notDeleted(req) },
     pickFields(req.body, CLIENT_FIELDS),
     { new: true, runValidators: true }
   );
@@ -68,10 +69,33 @@ const deleteClient = asyncHandler(async (req, res) => {
       'CLIENT_IN_USE'
     );
   }
-  const client = await Client.findOneAndDelete({ _id: req.params.id, ...tenantFilter(req) });
+  /**
+   * Soft (#37).
+   *
+   * A client with invoices is refused outright above, so this only ever removes an
+   * unreferenced record — but 'unreferenced' is not the same as 'worthless': it is a
+   * contact with an address and a GSTIN somebody typed in, and getting it back should
+   * not require retyping it.
+   */
+  const client = await Client.findOneAndUpdate(
+    { _id: req.params.id, ...notDeleted(req) },
+    { $set: deletionPatch(req) },
+    { new: true }
+  );
   if (!client) throw httpError(404, 'Client not found');
-  logAudit({ req, action: 'client.deleted', entity: 'client', entityId: client._id, meta: { companyName: client.companyName } });
+  logAudit({ req, action: 'client.deleted', entity: 'client', entityId: client._id, meta: { companyName: client.companyName, recoverable: true } });
   res.status(204).end();
 });
 
-module.exports = { listClients, createClient, updateClient, deleteClient };
+const restoreClient = asyncHandler(async (req, res) => {
+  const client = await Client.findOneAndUpdate(
+    { _id: req.params.id, ...tenantFilter(req), deletedAt: { $ne: null } },
+    { $set: RESTORE_PATCH },
+    { new: true }
+  );
+  if (!client) throw httpError(404, 'No deleted client with that id');
+  logAudit({ req, action: 'client.restored', entity: 'client', entityId: client._id, meta: { companyName: client.companyName } });
+  res.json(client);
+});
+
+module.exports = { listClients, createClient, updateClient, deleteClient, restoreClient };

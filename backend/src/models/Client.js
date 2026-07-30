@@ -9,10 +9,16 @@ const clientSchema = new mongoose.Schema({
   address: String,
   state: String,
   stateCode: { type: String, required: true },
-  status: { type: String, enum: ['active', 'inactive'], default: 'active' }
+  status: { type: String, enum: ['active', 'inactive'], default: 'active' },
+  // Soft delete (#37). A client referenced by invoices must never actually vanish —
+  // `populate` would yield null and the invoice list, CSV and PDF would render a
+  // blank buyer. Purged only after the grace window, and only if still unreferenced.
+  deletedAt: { type: Date, default: null },
+  deletedBy: String
 }, { timestamps: true });
 
 clientSchema.index({ orgId: 1, companyName: 1 });
 clientSchema.index({ orgId: 1, gstin: 1 });
+clientSchema.index({ orgId: 1, deletedAt: 1 });
 
 module.exports = { Client: mongoose.model('Client', clientSchema) };

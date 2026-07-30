@@ -11,6 +11,9 @@ export const routes: Routes = [
   { path: 'accept-invite', loadComponent: () => import('./features/auth/accept-invite.component').then(m => m.AcceptInviteComponent) },
   { path: 'forgot-password', loadComponent: () => import('./features/auth/forgot-password.component').then(m => m.ForgotPasswordComponent) },
   { path: 'reset-password', loadComponent: () => import('./features/auth/reset-password.component').then(m => m.ResetPasswordComponent) },
+  // Confirming an address has to work without a session: the link arrives by email and
+  // is frequently opened on a different device from the one that registered.
+  { path: 'verify-email', loadComponent: () => import('./features/auth/verify-email.component').then(m => m.VerifyEmailComponent) },
   { path: 'terms', data: { type: 'terms' }, loadComponent: () => import('./features/legal/legal-page.component').then(m => m.LegalPageComponent) },
   { path: 'sla', data: { type: 'sla' }, loadComponent: () => import('./features/legal/legal-page.component').then(m => m.LegalPageComponent) },
   {
@@ -28,6 +31,12 @@ export const routes: Routes = [
       { path: 'items', loadComponent: () => import('./features/items/items.component').then(m => m.ItemsComponent) },
       { path: 'payments', loadComponent: () => import('./features/payments/payments.component').then(m => m.PaymentsComponent) },
       { path: 'reports', loadComponent: () => import('./features/reports/reports.component').then(m => m.ReportsComponent) },
+      // Phase 5: the section-wise return, which is what can actually be filed.
+      { path: 'gst-returns', loadComponent: () => import('./features/reports/gst-returns.component').then(m => m.GstReturnsComponent) },
+      { path: 'purchases', loadComponent: () => import('./features/purchases/purchases.component').then(m => m.PurchasesComponent) },
+      { path: 'receivables', loadComponent: () => import('./features/reports/receivables.component').then(m => m.ReceivablesComponent) },
+      { path: 'activity', loadComponent: () => import('./features/account/activity.component').then(m => m.ActivityComponent) },
+      { path: 'security', loadComponent: () => import('./features/account/security.component').then(m => m.AccountSecurityComponent) },
       { path: 'users', loadComponent: () => import('./features/users/users.component').then(m => m.UsersComponent) },
       { path: 'subscription', loadComponent: () => import('./features/subscription/subscription.component').then(m => m.SubscriptionComponent) },
       { path: 'appearance', canActivate: [tenantAdminGuard], loadComponent: () => import('./features/appearance/appearance.component').then(m => m.AppearanceComponent) },

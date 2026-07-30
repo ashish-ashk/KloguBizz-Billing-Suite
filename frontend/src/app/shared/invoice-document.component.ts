@@ -562,13 +562,19 @@ export interface InvoiceDocClient {
               <div style="font-size:12px;color:var(--muted);line-height:1.6;">{{ invoice().notes }}</div>
             </div>
           }
-          @if (showBankDetails() && (invoice().bankDetails?.bank || invoice().bankDetails?.account)) {
+          @if (showBankDetails() && (bank().bank || bank().account)) {
+            <!-- Falls back to the organisation's saved bank details, mirroring
+                 pdfService.js exactly. The showBankDetails toggle used to render an
+                 empty block for almost every invoice, because the details lived only
+                 on the document and had to be retyped each time. -->
             <div style="border-radius:10px;padding:14px;" [style.background]="panelBg()">
               <div style="font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:6px;">Bank Details</div>
               <div style="font-size:12px;color:#334155;line-height:1.8;">
-                @if (invoice().bankDetails?.bank) { <div>Bank: {{ invoice().bankDetails?.bank }}</div> }
-                @if (invoice().bankDetails?.account) { <div>A/c: <span class="mono">{{ invoice().bankDetails?.account }}</span></div> }
-                @if (invoice().bankDetails?.ifsc) { <div>IFSC: <span class="mono">{{ invoice().bankDetails?.ifsc }}</span></div> }
+                @if (bank().accountName) { <div>Name: {{ bank().accountName }}</div> }
+                @if (bank().bank) { <div>Bank: {{ bank().bank }}@if (bank().branch) { <span> ({{ bank().branch }})</span> }</div> }
+                @if (bank().account) { <div>A/c: <span class="mono">{{ bank().account }}</span></div> }
+                @if (bank().ifsc) { <div>IFSC: <span class="mono">{{ bank().ifsc }}</span></div> }
+                @if (bank().upiId) { <div>UPI: <span class="mono">{{ bank().upiId }}</span></div> }
               </div>
             </div>
           }
@@ -618,8 +624,15 @@ export interface InvoiceDocClient {
         <div style="font-size:11px;color:var(--faint);">This is a computer generated invoice.</div>
         @if (showSignature()) {
           <div style="text-align:center;">
+            <!-- The uploaded signature, above the rule and height-capped so an
+                 over-tall image cannot push into the block above it — the same
+                 bound the letterhead image needed. -->
+            @if (invoiceDefaults().signatureUrl) {
+              <img [src]="invoiceDefaults().signatureUrl" alt="Signature"
+                style="display:block;margin:0 auto 2px;max-height:38px;max-width:180px;object-fit:contain;" />
+            }
             <div style="border-top:1.5px solid;padding-top:9px;font-size:12px;min-width:180px;" [style.color]="accentColor()" [style.borderColor]="accentColor()">Authorised Signatory</div>
-            <div style="font-size:12px;font-weight:700;margin-top:3px;" [style.color]="dark">{{ orgName() }}</div>
+            <div style="font-size:12px;font-weight:700;margin-top:3px;" [style.color]="dark">{{ invoiceDefaults().signatoryName || orgName() }}</div>
           </div>
         }
       </div>
@@ -675,9 +688,36 @@ export class InvoiceDocumentComponent {
   showLogo = input(true);
   showSignature = input(true);
   showBankDetails = input(true);
+  /**
+   * The organisation's saved invoice defaults (2.3 #24–#26).
+   *
+   * Passed in rather than read from a service, because this component also renders the
+   * live preview on the Invoice Templates page against *unsaved* edits — reading the
+   * stored organisation there would show the previous values while the user is changing
+   * them.
+   */
+  invoiceDefaults = input<{
+    bankName?: string; accountName?: string; accountNumber?: string; ifsc?: string;
+    branch?: string; upiId?: string; signatureUrl?: string; signatoryName?: string;
+    termsAndConditions?: string;
+  }>({});
   showAmountInWords = input(true);
   /** Overrides every template's default title word ("Invoice"/"Tax Invoice") — e.g. "Proforma Invoice", "Bill", "Receipt". Empty keeps each template's own default. */
   invoiceTitleLabel = input('');
+
+  /** Per-invoice bank details win; the organisation's fill the gaps. */
+  bank = computed(() => {
+    const perInvoice = this.invoice().bankDetails || {};
+    const defaults = this.invoiceDefaults() || {};
+    return {
+      bank: perInvoice.bank || defaults.bankName || '',
+      account: perInvoice.account || defaults.accountNumber || '',
+      ifsc: perInvoice.ifsc || defaults.ifsc || '',
+      accountName: defaults.accountName || '',
+      branch: defaults.branch || '',
+      upiId: defaults.upiId || ''
+    };
+  });
 
   dark = '#1e1b4b';
   readonly perforationDots = Array.from({ length: 40 });

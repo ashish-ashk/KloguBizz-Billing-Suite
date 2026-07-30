@@ -11,6 +11,8 @@ const {
   sendReminder,
   remindAll,
   deleteInvoice,
+  restoreInvoice,
+  sendInvoiceToCustomer,
   invoicePdf,
   exportInvoicesCsv
 } = require('../controllers/invoiceController');
@@ -34,6 +36,12 @@ router.post('/:id/mark-paid', requireRole('admin', 'accountant'), validate(markP
 router.post('/:id/cancel', requireRole('admin'), cancelInvoice);
 router.post('/:id/remind', requireRole('admin', 'accountant'), sendReminder);
 router.get('/:id/pdf', invoicePdf);
+// Sending the invoice to the customer (2.3 #19) — the loop the product exists for,
+// which previously ended at a download.
+router.post('/:id/send', requireRole('admin', 'accountant'), sendInvoiceToCustomer);
 router.delete('/:id', requireRole('admin'), deleteInvoice);
+// Recycle bin (#37): a deleted draft keeps its invoice number, so restoring it
+// cannot collide with anything the counter has since handed out.
+router.post('/:id/restore', requireRole('admin'), restoreInvoice);
 
 module.exports = router;

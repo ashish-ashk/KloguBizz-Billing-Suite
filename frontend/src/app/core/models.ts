@@ -83,6 +83,27 @@ export interface Organisation {
       showAmountInWords?: boolean;
       showGstBreakdown?: boolean;
     };
+    /**
+     * Organisation-level invoice defaults (2.3 #24–#26).
+     *
+     * Three `invoiceContent` toggles used to promise something the data could not
+     * deliver: an empty bank block, a signature line with nothing above it, and no
+     * default terms anywhere. Per-invoice fields still win when set.
+     */
+    invoiceDefaults?: {
+      bankName?: string;
+      accountName?: string;
+      accountNumber?: string;
+      ifsc?: string;
+      branch?: string;
+      /** Printed as text, not a QR — see the note in the security component about
+       *  shipping a code this product cannot verify scans. */
+      upiId?: string;
+      signatureUrl?: string;
+      signatoryName?: string;
+      termsAndConditions?: string;
+      defaultNotes?: string;
+    };
   };
   themeConfig?: import('./theme').OrgThemeConfig;
   createdAt?: string;
@@ -246,6 +267,17 @@ export interface InvoiceTotals {
   /** Intra-territory supply to a UT that levies UTGST rather than SGST — the
    *  amount is still in `sgst`, this only changes the label. */
   isUT?: boolean;
+
+  // ── Classification, resolved server-side and stored (Phase 5) ──
+  taxTreatment?: TaxTreatment;
+  supplyType?: SupplyType;
+  reverseCharge?: boolean;
+  zeroRated?: boolean;
+  /** False for an exempt, nil-rated, non-GST, LUT-export or reverse-charge supply. */
+  taxCharged?: boolean;
+  /** Why no tax was charged, in words — so a zero-tax invoice explains itself instead
+   *  of looking like a bug. */
+  taxNote?: string;
 }
 
 export interface InvoiceItem {
@@ -337,6 +369,18 @@ export interface Invoice {
   items: InvoiceItem[];
   /** Invoice-level discount, on top of any per-line discounts. */
   discountPercent?: number;
+
+  // ── GST classification (Phase 5) ──
+  /** The state whose tax applies. Distinct from the buyer's registered state, and it is
+   *  what decides IGST versus CGST+SGST. */
+  placeOfSupply?: string;
+  taxTreatment?: TaxTreatment;
+  supplyType?: SupplyType;
+  /** Tax payable by the recipient: the value is reported, no tax is collected. */
+  reverseCharge?: boolean;
+  exportDetails?: ExportDetails | null;
+  eInvoice?: EInvoiceState;
+
   totals: InvoiceTotals;
   /** Settlement state, persisted by the backend from successful payments. */
   amountPaid?: number;
@@ -380,6 +424,338 @@ export interface GstSummary {
   /** HSN/SAC-wise summary — a required table in GSTR-1. */
   byHsn: Array<{ hsn: string; description?: string; qty: number; taxable: number; tax: number; cess: number }>;
   totals: { gross: number; discount: number; taxable: number; cgst: number; sgst: number; igst: number; cess: number; tax: number; total: number; invoiceCount: number };
+}
+
+// ── GST classification (Phase 5) ─────────────────
+
+/**
+ * How a supply is classified. `gstRate: 0` used to be the only way to say "no tax",
+ * which collapsed five legally distinct things — they appear in different tables of the
+ * return, and only some count towards turnover.
+ */
+export type TaxTreatment = 'taxable' | 'exempt' | 'nil-rated' | 'non-gst' | 'zero-rated';
+
+/**
+ * The nature of the supply. The with/without-payment distinction is not cosmetic:
+ * charging IGST on a LUT export overcharges the customer, and not charging it on a
+ * with-payment export understates the liability.
+ */
+export type SupplyType =
+  | 'regular'
+  | 'export-with-payment' | 'export-without-payment'
+  | 'sez-with-payment' | 'sez-without-payment'
+  | 'deemed-export';
+
+export interface ExportDetails {
+  countryCode?: string;
+  portCode?: string;
+  shippingBillNumber?: string;
+  shippingBillDate?: string;
+  currency?: string;
+  conversionRate?: number;
+  lutNumber?: string;
+}
+
+/** E-invoice state. `not-required`, `pending`, `generated` and `failed` are four
+ *  genuinely different situations that were previously indistinguishable. */
+export interface EInvoiceState {
+  status: 'not-required' | 'pending' | 'generated' | 'cancelled' | 'failed';
+  irn?: string;
+  ackNo?: string;
+  ackDate?: string;
+  /** The IRP's own scannable QR — unlike the template's decorative motif. */
+  signedQrCode?: string;
+  generatedAt?: string;
+  cancelledAt?: string;
+  errorCode?: string;
+  error?: string;
+  attempts?: number;
+}
+
+export interface Vendor {
+  _id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  /** Absent for an unregistered supplier — the case that attracts reverse charge. */
+  gstin?: string;
+  pan?: string;
+  address?: string;
+  state?: string;
+  stateCode: string;
+  registrationType?: 'regular' | 'composition' | 'unregistered' | 'overseas' | 'sez';
+  notes?: string;
+  status?: 'active' | 'inactive';
+  deletedAt?: string | null;
+}
+
+/** Where a purchase's credit goes in GSTR-3B table 4. Not a boolean, because "can I
+ *  claim this" has more than two answers and the return asks for them separately. */
+export type ItcCategory = 'inputs' | 'capital-goods' | 'input-services' | 'ineligible' | 'blocked';
+
+export interface PurchaseItc {
+  category: ItcCategory;
+  eligible: boolean;
+  note?: string;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  cess: number;
+  claimedInPeriod?: string;
+}
+
+export interface Purchase {
+  _id: string;
+  vendorId: Vendor | string;
+  /** The supplier's own number and date — what GSTR-2A/2B reconciliation matches on. */
+  billNumber: string;
+  billDate: string;
+  dueDate?: string;
+  vendorSnapshot?: { name?: string; gstin?: string; stateCode?: string; registrationType?: string };
+  items: InvoiceItem[];
+  discountPercent?: number;
+  placeOfSupply?: string;
+  taxTreatment?: TaxTreatment;
+  supplyType?: 'regular' | 'import-goods' | 'import-services' | 'sez' | 'deemed-export';
+  reverseCharge?: boolean;
+  totals: InvoiceTotals;
+  itc: PurchaseItc;
+  amountPaid?: number;
+  balanceDue?: number;
+  status: 'draft' | 'recorded' | 'partial' | 'paid' | 'cancelled';
+  notes?: string;
+  category?: string;
+  deletedAt?: string | null;
+}
+
+export interface ItcRegister {
+  period: { from: string; to: string };
+  byCategory: Array<{
+    category: ItcCategory; eligible: boolean; purchases: number;
+    taxableValue: number; invoiceValue: number;
+    cgst: number; sgst: number; igst: number; cess: number; total: number;
+    /** Tax paid, whether or not it was claimable. */
+    taxPaid: number;
+  }>;
+  claimable: { cgst: number; sgst: number; igst: number; cess: number; total: number };
+  /** Tax paid that cannot be claimed — a real cost. */
+  ineligible: number;
+}
+
+/** One rate-wise row inside a GSTR-1 document. Field names are the GSTN's. */
+export interface Gstr1RateRow {
+  rt: number; txval: number; iamt: number; camt: number; samt: number; csamt: number;
+}
+
+export interface Gstr1Report {
+  period: { from: string; to: string; label: string; fp: string; granularity: string };
+  supplier: { gstin: string; name: string; stateCode: string };
+  summary: {
+    invoiceCount: number; creditNoteCount: number;
+    taxable: number; igst: number; cgst: number; sgst: number; cess: number; invoiceValue: number;
+    creditNotes: { taxable: number; igst: number; cgst: number; sgst: number; cess: number; value: number };
+    netTaxable: number; netIgst: number; netCgst: number; netSgst: number; netCess: number;
+    b2clThreshold: number;
+  };
+  sections: {
+    b2b: Array<{ ctin: string; cfs: string; inv: Array<{ inum: string; idt: string; val: number; pos: string; rchrg: string; inv_typ: string; irn?: string; itms: Gstr1RateRow[] }> }>;
+    b2cl: Array<{ pos: string; inv: Array<{ inum: string; idt: string; val: number; itms: Gstr1RateRow[] }> }>;
+    b2cs: Array<{ sply_ty: string; pos: string; typ: string } & Gstr1RateRow>;
+    cdnr: Array<{ ctin: string; cfs: string; nt: Array<{ nt_num: string; nt_dt: string; inum: string; idt: string; val: number; pos: string; itms: Gstr1RateRow[] }> }>;
+    cdnur: Array<{ typ: string; nt_num: string; nt_dt: string; inum: string; val: number; pos: string }>;
+    exp: Array<{ exp_typ: string; inv: Array<{ inum: string; idt: string; val: number; sbnum: string; sbdt: string; sbpcode: string; itms: Gstr1RateRow[] }> }>;
+    nil: { exempt: number; nilRated: number; nonGst: number; inter_reg: number; intr_reg: number; inter_unreg: number; intr_unreg: number };
+    hsn: Array<{ hsn_sc: string; desc?: string; uqc: string; qty: number; txval: number; iamt: number; camt: number; samt: number; csamt: number; rt: number }>;
+    docIssued: Array<{ prefix: string; from: string; to: string; totnum: number; cancel: number; net_issue: number }>;
+  };
+}
+
+/** Tax amounts under one GSTR-3B line. */
+export interface Gstr3bBlock { taxable: number; igst: number; cgst: number; sgst: number; cess: number }
+
+export interface Gstr3bReport {
+  period: { from: string; to: string; label: string; fp: string };
+  supplier: { gstin: string; name: string; stateCode: string };
+  outward: {
+    taxable: Gstr3bBlock;
+    zeroRated: Gstr3bBlock;
+    nilExempt: Gstr3bBlock;
+    reverseChargeSupplies: Gstr3bBlock;
+    /** 3.1(d) — the liability an inward reverse-charge supply creates. */
+    inwardReverseCharge: Gstr3bBlock;
+    creditNotes: { taxable: number; igst: number; cgst: number; sgst: number; cess: number };
+  };
+  itc: {
+    importGoods: Gstr3bBlock; importServices: Gstr3bBlock;
+    /** 4(A)(3) — the credit for the same reverse-charge supply. Both lines are filed. */
+    inwardReverseCharge: Gstr3bBlock;
+    other: Gstr3bBlock;
+    available: { igst: number; cgst: number; sgst: number; cess: number };
+    ineligible: Gstr3bBlock;
+  };
+  inwardExemptNil: Gstr3bBlock;
+  netPayable: {
+    igst: Gstr3bHead; cgst: Gstr3bHead; sgst: Gstr3bHead; cess: Gstr3bHead;
+    totalCash: number;
+  };
+  /** Stated in the payload, not just the UI: this is a preparation aid. */
+  disclaimer: string;
+}
+
+/** Per-head, because credit under one head cannot be set off against another
+ *  arbitrarily — a surplus is carry-forward, not a reduction elsewhere. */
+export interface Gstr3bHead { liability: number; itc: number; payable: number; carryForward: number }
+
+export interface EInvoiceCheck {
+  invoiceNumber: string;
+  eligibility: { required: boolean; reason: string };
+  valid: boolean;
+  problems: Array<{ field: string; message: string }>;
+  providerConfigured: boolean;
+  current: EInvoiceState | null;
+  /** The validated NIC payload, so a tenant with no IRP integration can upload it by
+   *  hand rather than retyping the invoice into a portal. */
+  payload: Record<string, unknown> | null;
+}
+
+export interface EInvoiceWorklist {
+  enabled: boolean;
+  providerConfigured: boolean;
+  outstanding: number;
+  invoices: Array<Invoice & { eInvoice?: EInvoiceState }>;
+}
+
+export interface DataRightsStatus {
+  organisation: string;
+  isOwner: boolean;
+  records: Record<string, number>;
+  deletion: {
+    requested: boolean;
+    requestedAt?: string;
+    requestedBy?: string;
+    scheduledFor?: string;
+    graceDays?: number;
+  };
+}
+
+/** MFA enrolment material. A QR is rendered client-side from `uri` — every
+ *  authenticator app accepts either the code or manual entry of `secret`. */
+export interface MfaSetup {
+  secret: string;
+  uri: string;
+  digits: number;
+  period: number;
+  message: string;
+}
+
+// ── Receivables, stock and activity (2.4–2.6) ────
+
+/**
+ * AR ageing. The buckets are returned by the server rather than derived here, so the
+ * boundaries are defined in exactly one place — a report whose buckets are computed
+ * client-side eventually disagrees with the one that is exported.
+ */
+export interface ArAgeing {
+  asOf: string;
+  buckets: Array<{ key: string; label: string; amount: number }>;
+  total: number;
+  clients: Array<{
+    clientId: string | null;
+    name: string;
+    email: string;
+    phone: string;
+    buckets: Record<string, number>;
+    invoices: number;
+    total: number;
+    oldestDue: string | null;
+    /** Worst days overdue across this customer's open invoices — the sort key, because
+     *  the report is read to decide who to chase. */
+    maxDaysPastDue: number;
+  }>;
+}
+
+export interface CustomerStatement {
+  client: { _id: string; name: string; email?: string; phone?: string; gstin?: string; address?: string };
+  period: { from: string | null; to: string };
+  /** Everything owed before the window. Omitting it is the classic statement bug:
+   *  the closing balance is only right if the period starts at the beginning. */
+  openingBalance: number;
+  closingBalance: number;
+  totals: { invoiced: number; credited: number; received: number };
+  lines: Array<{
+    date: string;
+    type: 'invoice' | 'credit-note' | 'payment' | 'opening';
+    reference: string;
+    description: string;
+    debit: number;
+    credit: number;
+    balance: number;
+    status?: string;
+    dueDate?: string;
+  }>;
+}
+
+export interface CollectionMetrics {
+  period: { days: number; from: string };
+  invoiced: number;
+  received: number;
+  outstanding: number;
+  /** Days sales outstanding. Null when nothing was invoiced — a DSO of 0 would read
+   *  as "we collect instantly". */
+  dso: number | null;
+  collectionEfficiency: number | null;
+  averageDaysToPay: number | null;
+  settledInvoices: number;
+  paymentMix: Array<{ method: string; amount: number; count: number; share: number }>;
+}
+
+export interface SalesBreakdown {
+  period: { from: string | null; to: string };
+  byItem: Array<{ description: string; hsn: string; quantity: number; value: number; invoices: number }>;
+  byClient: Array<{ clientId: string | null; name: string; value: number; invoices: number }>;
+}
+
+/** One row of the stock ledger. Signed: negative reduces stock. */
+export interface StockMovement {
+  _id: string;
+  itemId: string;
+  itemName: string;
+  reason: 'sale' | 'sale-reversed' | 'purchase' | 'purchase-reversed' | 'opening' | 'adjustment' | 'damage' | 'return';
+  quantity: number;
+  /** The balance after this movement, so a row reads without re-summing above it. */
+  balanceAfter: number | null;
+  documentType: 'invoice' | 'credit-note' | 'purchase' | 'manual';
+  documentNumber?: string;
+  note?: string;
+  actorName?: string;
+  createdAt: string;
+}
+
+export interface LowStockReport {
+  count: number;
+  items: Array<{
+    _id: string;
+    name: string;
+    itemCode?: string;
+    unit: string;
+    stockQty: number;
+    reorderLevel: number;
+    shortfall: number;
+    category?: string;
+  }>;
+}
+
+export interface TenantActivityEntry {
+  _id: string;
+  action: string;
+  entity?: string;
+  entityId?: string;
+  actorName?: string;
+  meta?: Record<string, unknown>;
+  createdAt: string;
+  /** Set when the action was taken by KloguBizz support inside this account — the
+   *  visible half of the platform's data-access log. */
+  bySupport: string | null;
 }
 
 export interface Payment {

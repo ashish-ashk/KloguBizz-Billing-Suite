@@ -114,9 +114,41 @@ const billToSchema = z.object({
   gstin
 });
 
+/**
+ * GST classification, shared by invoices and purchases.
+ *
+ * These decide the tax head and the GSTR-1 table a document lands in, so they are
+ * validated as enums rather than accepted as free strings: an unrecognised
+ * `taxTreatment` would silently fall back to 'taxable' inside the engine and produce
+ * a return that puts an exempt supply in the wrong table.
+ */
+const TAX_TREATMENTS = ['taxable', 'exempt', 'nil-rated', 'non-gst', 'zero-rated'];
+const SUPPLY_TYPES = [
+  'regular', 'export-with-payment', 'export-without-payment',
+  'sez-with-payment', 'sez-without-payment', 'deemed-export'
+];
+
+const exportDetailsSchema = z.object({
+  // ISO 3166-1 alpha-2. Two letters, so a state code typed here is rejected rather
+  // than reported to the GSTN as a country.
+  countryCode: z.union([z.literal(''), z.string().trim().toUpperCase().length(2, 'must be a two-letter country code')]).optional().nullable(),
+  portCode: shortText.optional().nullable(),
+  shippingBillNumber: shortText.optional().nullable(),
+  shippingBillDate: isoDate.optional().nullable(),
+  currency: z.union([z.literal(''), z.string().trim().toUpperCase().length(3, 'must be a three-letter currency code')]).optional().nullable(),
+  conversionRate: money.optional(),
+  lutNumber: shortText.optional().nullable()
+}).optional().nullable();
+
 const invoiceBaseShape = {
   clientId: objectId.optional().nullable(),
   billTo: billToSchema.optional().nullable(),
+  // The state whose tax applies. Distinct from the buyer's registered state (#29).
+  placeOfSupply: stateCode.optional().nullable(),
+  taxTreatment: z.enum(TAX_TREATMENTS).optional(),
+  supplyType: z.enum(SUPPLY_TYPES).optional(),
+  reverseCharge: z.coerce.boolean().optional(),
+  exportDetails: exportDetailsSchema,
   date: isoDate,
   dueDate: isoDate,
   status: z.enum(['draft', 'pending', 'partial', 'paid', 'overdue']).optional(),
@@ -246,7 +278,69 @@ const subscriptionStartSchema = z.object({
   billingCycle: z.enum(['monthly', 'yearly']).optional()
 });
 
+// ── Vendors and purchases (Phase 5) ──────────────
+
+const vendorCreateSchema = z.object({
+  name: shortText.min(1, 'is required'),
+  email: optionalEmail,
+  phone,
+  // Optional on purpose: an unregistered supplier has no GSTIN, and a purchase from
+  // one is precisely the case that attracts reverse charge.
+  gstin,
+  pan,
+  address: longText.optional().nullable(),
+  state: shortText.optional().nullable(),
+  stateCode,
+  registrationType: z.enum(['regular', 'composition', 'unregistered', 'overseas', 'sez']).optional(),
+  notes: longText.optional().nullable(),
+  status: z.enum(['active', 'inactive']).optional()
+});
+const vendorUpdateSchema = vendorCreateSchema.partial();
+
+const purchaseBaseShape = {
+  vendorId: objectId,
+  // The supplier's own number, which is what GSTR-2A/2B reconciliation matches on.
+  billNumber: shortText.min(1, 'is required'),
+  billDate: isoDate,
+  dueDate: isoDate.optional().nullable(),
+  items: z.array(lineItemSchema).min(1, 'must contain at least one line item').max(500, 'cannot exceed 500 line items'),
+  discountPercent: percent.optional(),
+  placeOfSupply: stateCode.optional().nullable(),
+  taxTreatment: z.enum(TAX_TREATMENTS).optional(),
+  supplyType: z.enum(['regular', 'import-goods', 'import-services', 'sez', 'deemed-export']).optional(),
+  reverseCharge: z.coerce.boolean().optional(),
+  itcCategory: z.enum(['inputs', 'capital-goods', 'input-services', 'ineligible', 'blocked']).optional(),
+  itcNote: longText.optional().nullable(),
+  notes: longText.optional().nullable(),
+  category: shortText.optional().nullable(),
+  status: z.enum(['draft', 'recorded']).optional()
+};
+const purchaseCreateSchema = z.object(purchaseBaseShape);
+const purchaseUpdateSchema = z.object(purchaseBaseShape).partial();
+const purchasePaySchema = z.object({ amount: money.refine(value => value > 0, 'must be greater than zero') });
+
+// ── MFA, verification and erasure ────────────────
+
+// Six digits, or a formatted backup code. Both are accepted here and told apart by
+// the verifier, so a user pasting a recovery code into the code box is not rejected
+// by validation before it is even tried.
+const mfaCode = z.string().trim().min(6, 'is required').max(20);
+const mfaEnableSchema = z.object({ code: mfaCode });
+const mfaVerifySchema = z.object({ mfaToken: z.string().min(10, 'is required'), code: mfaCode });
+const mfaDisableSchema = z.object({ password: z.string().min(1, 'is required'), code: mfaCode });
+const verifyEmailSchema = z.object({ token: z.string().min(10, 'is required') });
+const accountDeletionSchema = z.object({
+  confirmName: z.string().min(1, 'is required'),
+  password: z.string().min(1, 'is required'),
+  reason: longText.optional().nullable()
+});
+
 module.exports = {
+  TAX_TREATMENTS, SUPPLY_TYPES,
+  vendorCreateSchema, vendorUpdateSchema,
+  purchaseCreateSchema, purchaseUpdateSchema, purchasePaySchema,
+  mfaEnableSchema, mfaVerifySchema, mfaDisableSchema,
+  verifyEmailSchema, accountDeletionSchema,
   registerSchema, loginSchema, changePasswordSchema,
   acceptInviteSchema, forgotPasswordSchema, resetPasswordSchema,
   clientCreateSchema, clientUpdateSchema,

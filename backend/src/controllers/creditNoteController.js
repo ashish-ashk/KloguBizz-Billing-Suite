@@ -9,6 +9,7 @@ const { calculateInvoiceTotals, roundMoney } = require('../services/gstService')
 const { nextCreditNoteNumber } = require('../services/invoiceNumberService');
 const { logAudit } = require('../services/auditService');
 const { recordEvent, EVENT } = require('../services/usageEventService');
+const stock = require('../services/stockService');
 const { streamCsv } = require('../services/csvService');
 const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
 const { recalculateSettlement } = require('./invoiceController');
@@ -167,6 +168,9 @@ const createCreditNote = asyncHandler(async (req, res) => {
     meta: { creditNoteNumber: note.creditNoteNumber, invoiceNumber: invoice.invoiceNumber, total: totals.total, reason: note.reason }
   });
   recordEvent({ req, type: EVENT.creditNote, value: totals.total, meta: { creditNoteNumber: note.creditNoteNumber } });
+  // Only the quantities on the note. A partial credit returns part of the goods, and
+  // treating it as a full reversal of the invoice would inflate stock by the difference.
+  await stock.applyCreditNote(req, note);
 
   res.status(201).json({ creditNote: note, invoice });
 });
