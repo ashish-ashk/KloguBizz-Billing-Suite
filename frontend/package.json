@@ -30,7 +30,7 @@
     "@angular/cli": "^18.2.0",
     "@angular/compiler-cli": "^18.2.0",
     "angular-eslint": "^18.4.3",
-    "eslint": "^9.39.5",
+    "eslint": "^10.8.0",
     "prettier": "^3.9.6",
     "typescript": "~5.5.4",
     "typescript-eslint": "^8.65.0"
