@@ -789,7 +789,7 @@ test('a password reset revokes every session, in both modes', maybe(async () => 
 
   const reset = await call('POST', `/superadmin/users/${user._id}/reset-password`, {
     token: owner.token,
-    body: { mode: 'temporary' }
+    body: { mode: 'temporary', targetOrgId: tenant.org._id }
   });
   assert.equal(reset.status, 200);
   assert.ok(reset.body.tempPassword, 'the operator gets a credential to hand over, once');
@@ -805,7 +805,7 @@ test('a password reset revokes every session, in both modes', maybe(async () => 
 
   const linkMode = await call('POST', `/superadmin/users/${user._id}/reset-password`, {
     token: owner.token,
-    body: { mode: 'link' }
+    body: { mode: 'link', targetOrgId: tenant.org._id }
   });
   assert.equal(linkMode.status, 200);
   assert.equal(linkMode.body.tempPassword, undefined, 'link mode never reveals a password');
@@ -822,14 +822,14 @@ test('a locked-out account can be unlocked, and sessions can be revoked', maybe(
   assert.equal(locked.status, 429);
   assert.equal(locked.body.code, 'ACCOUNT_LOCKED');
 
-  const unlock = await call('POST', `/superadmin/users/${user._id}/unlock`, { token: owner.token, body: {} });
+  const unlock = await call('POST', `/superadmin/users/${user._id}/unlock`, { token: owner.token, body: { targetOrgId: tenant.org._id } });
   assert.equal(unlock.status, 200);
   assert.equal(unlock.body.wasLocked, true);
 
   const login = await call('POST', '/auth/login', { body: { email: tenant.email, password: 'Password@123' } });
   assert.equal(login.status, 200, 'support can rescue a locked-out owner');
 
-  const logout = await call('POST', `/superadmin/users/${user._id}/force-logout`, { token: owner.token, body: {} });
+  const logout = await call('POST', `/superadmin/users/${user._id}/force-logout`, { token: owner.token, body: { targetOrgId: tenant.org._id } });
   assert.equal(logout.status, 200);
   const after = await call('GET', '/invoices', { token: login.body.token });
   assert.equal(after.status, 401);
@@ -842,7 +842,7 @@ test('the organisation owner cannot be disabled from the console either', maybe(
 
   const attempt = await call('PUT', `/superadmin/users/${user._id}`, {
     token: owner.token,
-    body: { status: 'disabled' }
+    body: { status: 'disabled', targetOrgId: tenant.org._id }
   });
   // Disabling the owner leaves a tenant nobody can administer and nobody can
   // transfer ownership away from.

@@ -1,11 +1,12 @@
 const bcrypt = require('bcryptjs');
 const { Organisation } = require('../models/Organisation');
 const { User } = require('../models/User');
+const { Membership } = require('../models/Membership');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { logAudit } = require('../services/auditService');
 const { pickFields } = require('../utils/pickFields');
-const { serialiseOrganisation } = require('../services/brandingAssetService');
+const { serialiseOrganisation, storeImage } = require('../services/brandingAssetService');
 const { resolveFlags } = require('../services/featureFlagService');
 const { noticesFor } = require('../services/noticeService');
 
@@ -57,37 +58,113 @@ const getOrganisation = asyncHandler(async (req, res) => {
  */
 const MERGEABLE_OBJECTS = ['brandingConfig', 'themeConfig'];
 
+/**
+ * Sub-objects that must *also* be merged field by field rather than written
+ * whole.
+ *
+ * `invoiceDefaults` is here for exactly the reason `brandingConfig` is: it now
+ * contains an image (`signatureUrl`) that is no longer sent to the client — it
+ * comes back as an asset URL. A client that echoes `invoiceDefaults` back on an
+ * unrelated save (changing the bank name, say) would write the whole
+ * sub-document with an empty `signatureUrl` and silently erase the signature.
+ * There is a test for precisely that.
+ *
+ * Everything else nested stays written-whole, which is correct: a
+ * `customInvoiceTemplate` or a role's theme is chosen as a unit, not per field.
+ */
+const MERGEABLE_SUBOBJECTS = new Set(['brandingConfig.invoiceDefaults']);
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function flattenForMerge(update) {
   const flat = {};
   for (const [key, value] of Object.entries(update)) {
-    const isMergeable = MERGEABLE_OBJECTS.includes(key)
-      && value !== null
-      && typeof value === 'object'
-      && !Array.isArray(value);
-    if (!isMergeable) {
+    if (!MERGEABLE_OBJECTS.includes(key) || !isPlainObject(value)) {
       flat[key] = value;
       continue;
     }
     for (const [nestedKey, nestedValue] of Object.entries(value)) {
-      // One level deep is enough for every config this schema has, and it keeps
-      // the paths readable. A nested object (customInvoiceTemplate, a role's
-      // theme) is still written whole, which is correct — those are chosen as a
-      // unit, not field by field.
-      flat[`${key}.${nestedKey}`] = nestedValue;
+      const path = `${key}.${nestedKey}`;
+      if (MERGEABLE_SUBOBJECTS.has(path) && isPlainObject(nestedValue)) {
+        for (const [leafKey, leafValue] of Object.entries(nestedValue)) {
+          flat[`${path}.${leafKey}`] = leafValue;
+        }
+        continue;
+      }
+      flat[path] = nestedValue;
     }
   }
   return flat;
 }
 
+/**
+ * Uploaded images, and where each one is stored (#45).
+ *
+ * `field` is the dot path the client sends the data URI on; `key` is the dot
+ * path the resulting storage key is written to. Both are written on every
+ * upload — one with a value and one cleared — so the pair can never disagree
+ * about which holds the current image.
+ */
+const IMAGE_FIELDS = [
+  { kind: 'logo', field: 'brandingConfig.logoUrl', key: 'brandingConfig.logoKey' },
+  { kind: 'header', field: 'brandingConfig.headerImageUrl', key: 'brandingConfig.headerImageKey' },
+  {
+    kind: 'signature',
+    field: 'brandingConfig.invoiceDefaults.signatureUrl',
+    key: 'brandingConfig.invoiceDefaults.signatureKey'
+  }
+];
+
+/**
+ * Routes any uploaded image through resize-and-store before the write.
+ *
+ * Mutates the already-flattened `$set` object in place: the client sends a data
+ * URI on `brandingConfig.logoUrl`, and what actually gets written is either the
+ * resized data URI (no external store) or a storage key with the inline field
+ * cleared. Fields the request did not mention are left completely alone, which
+ * is what makes this safe alongside the dot-path merge — an unrelated save must
+ * not touch an image it never sent.
+ */
+async function placeUploadedImages(flat, orgId) {
+  const outcomes = [];
+  for (const { kind, field, key } of IMAGE_FIELDS) {
+    if (!(field in flat)) continue;
+    const placed = await storeImage({ scope: `org/${orgId}`, kind, dataUri: flat[field] });
+    if (!placed) {
+      // Present but not a usable image. Dropped rather than stored, so a
+      // malformed upload cannot blank an existing logo by half-succeeding.
+      delete flat[field];
+      continue;
+    }
+    flat[field] = placed.dataUri;
+    flat[key] = placed.key;
+    outcomes.push({ kind, bytesIn: placed.bytesIn, bytesOut: placed.bytesOut, stored: placed.key ? 'object-storage' : 'inline' });
+  }
+  return outcomes;
+}
+
 const updateOrganisation = asyncHandler(async (req, res) => {
   const update = pickFields(req.body, TENANT_EDITABLE_FIELDS);
+  const flat = flattenForMerge(update);
+  const images = await placeUploadedImages(flat, req.orgId);
+
   const org = await Organisation.findByIdAndUpdate(
     req.orgId,
-    { $set: flattenForMerge(update) },
+    { $set: flat },
     { new: true, runValidators: true }
   ).select(TENANT_HIDDEN_FIELDS);
   if (!org) throw httpError(404, 'Organisation not found');
-  logAudit({ req, action: 'org.updated', entity: 'organisation', entityId: org._id, meta: { fields: Object.keys(update) } });
+  logAudit({
+    req,
+    action: 'org.updated',
+    entity: 'organisation',
+    entityId: org._id,
+    // The image outcomes are recorded because "why is my logo blurry" and "did
+    // that 4MB upload actually get resized" are otherwise unanswerable.
+    meta: { fields: Object.keys(update), ...(images.length ? { images } : {}) }
+  });
   res.json(serialiseOrganisation(org));
 });
 
@@ -115,12 +192,16 @@ const transferOwnership = asyncHandler(async (req, res) => {
   if (String(newOwnerId) === String(req.user._id)) {
     throw httpError(400, 'Choose a different teammate to transfer ownership to');
   }
-  const target = await User.findOne({ _id: newOwnerId, orgId: req.orgId, status: 'active' });
-  if (!target) throw httpError(404, 'That teammate was not found in your organisation');
+  // Resolved via Membership rather than User.orgId — a teammate can belong to
+  // more than one organisation now (#53, #54), so "in my organisation" is a
+  // membership fact.
+  const target = await User.findOne({ _id: newOwnerId, status: 'active' });
+  const membership = target && await Membership.findOne({ userId: target._id, orgId: req.orgId, status: 'active' });
+  if (!target || !membership) throw httpError(404, 'That teammate was not found in your organisation');
 
-  if (target.role !== 'admin') {
-    target.role = 'admin';
-    await target.save();
+  if (membership.role !== 'admin') {
+    membership.role = 'admin';
+    await membership.save();
   }
   org.ownerId = target._id;
   await org.save();

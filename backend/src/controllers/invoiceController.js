@@ -959,6 +959,11 @@ const sendInvoiceToCustomer = asyncHandler(async (req, res) => {
 
 module.exports = {
   recalculateSettlement,
+  // Shared with salesDocumentController so a quotation is priced by exactly the
+  // same code as the invoice it becomes — a quotation that quotes a different
+  // tax head from the eventual invoice is worse than no quotation.
+  totalsFor,
+  normalizeBuyer,
   listInvoices,
   invoiceStats,
   getInvoice,

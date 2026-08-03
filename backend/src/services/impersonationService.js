@@ -31,12 +31,20 @@ const { env } = require('../config/env');
 
 const IMPERSONATION_TTL_SECONDS = 30 * 60;
 
-function issueImpersonationToken({ targetUser, operator, readOnly = true }) {
+/**
+ * `orgId`/`role` are passed explicitly rather than read off `targetUser` —
+ * since memberships (#53, #54), a user's org and role are properties of a
+ * specific membership, not of the identity, and the caller
+ * (platformController.impersonate) has already resolved exactly which
+ * membership is being viewed. `protect` re-checks that membership on every
+ * request, so it also still holds if it's revoked mid-session.
+ */
+function issueImpersonationToken({ targetUser, operator, readOnly = true, orgId, role }) {
   return jwt.sign(
     {
       sub: targetUser._id,
-      role: targetUser.role,
-      orgId: targetUser.orgId,
+      role,
+      orgId,
       // The customer's current session version, so their own sessions keep
       // working — and so that if they sign in (bumping it) this token stops,
       // which is the correct direction to fail.

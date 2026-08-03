@@ -99,7 +99,17 @@ export interface Organisation {
       /** Printed as text, not a QR — see the note in the security component about
        *  shipping a code this product cannot verify scans. */
       upiId?: string;
+      /**
+       * Write-only. The API never returns the signature's bytes — it returns
+       * `signatureAssetUrl` instead (#45), the same way the logo works — so this
+       * is only ever *sent*, carrying a data URI to set one or `''` to clear it.
+       * Never send a stale value back: that rewrites the image.
+       */
       signatureUrl?: string;
+      /** Cacheable URL for the uploaded signature. Read-only. */
+      signatureAssetUrl?: string;
+      /** Whether a signature is on file, without shipping it. */
+      hasSignature?: boolean;
       signatoryName?: string;
       termsAndConditions?: string;
       defaultNotes?: string;
@@ -646,6 +656,100 @@ export interface MfaSetup {
   digits: number;
   period: number;
   message: string;
+}
+
+/** One row in the signed-in user's device/session list (#50, #51). */
+export interface DeviceSession {
+  id: string;
+  userAgent: string | null;
+  ip: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+}
+
+/** One organisation the signed-in identity can act in (#53, #54) — the
+ *  org-switcher's data, returned by `/auth/me`. */
+export interface OrgMembership {
+  orgId: string;
+  orgName: string;
+  role: 'admin' | 'accountant' | 'viewer';
+}
+
+// ── Pre-invoice sales documents (2.2 #11–#13) ──
+
+export type SalesDocumentKind = 'quotation' | 'proforma' | 'delivery-challan';
+export type SalesDocumentStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired' | 'converted';
+export type ChallanPurpose =
+  | 'job-work' | 'approval' | 'supply-on-approval'
+  | 'liquid-gas' | 'semi-knocked-down' | 'exhibition' | 'other';
+
+/**
+ * A quotation, proforma invoice or delivery challan.
+ *
+ * **None of these is a tax invoice**, which is why none of them carries
+ * `amountPaid`/`balanceDue` — they are offers and movements, not debts. The one
+ * that matters commercially is `convertedToInvoiceNumber`: once set, the
+ * document is locked and the invoice is the live document.
+ */
+export interface SalesDocument {
+  _id: string;
+  kind: SalesDocumentKind;
+  /** For display — 'Quotation', 'Proforma Invoice', 'Delivery Challan'. */
+  kindLabel: string;
+  documentNumber: string;
+  clientId?: string | Client | null;
+  billTo?: {
+    type?: 'b2b-unreg' | 'b2c';
+    name?: string; phone?: string; email?: string;
+    address?: string; stateCode?: string; gstin?: string;
+  } | null;
+  date: string;
+  /** Quotation-only; null for the other kinds. */
+  validUntil?: string | null;
+  status: SalesDocumentStatus;
+  /**
+   * What to show the user. Differs from `status` for a lapsed quotation, whose
+   * stored status only catches up when the hourly sweep runs — expiry is derived
+   * server-side so the figure is right the instant it lapses.
+   */
+  effectiveStatus: SalesDocumentStatus;
+  isExpired: boolean;
+  isConverted: boolean;
+  isEditable: boolean;
+  items: InvoiceItem[];
+  discountPercent?: number;
+  placeOfSupply?: string;
+  taxTreatment?: string;
+  supplyType?: string;
+  reverseCharge?: boolean;
+  totals: Invoice['totals'];
+  challanPurpose?: ChallanPurpose;
+  transport?: {
+    vehicleNumber?: string; transporterName?: string; transporterGstin?: string;
+    lrNumber?: string; dispatchedFrom?: string; shipTo?: string; distanceKm?: number;
+  } | null;
+  convertedToInvoiceId?: string | null;
+  convertedToInvoiceNumber?: string;
+  convertedAt?: string;
+  notes?: string;
+  terms?: string;
+  paymentTerms?: string;
+  createdAt?: string;
+}
+
+/** Pipeline figures for one kind. Every rate is `null` rather than 0 when there
+ *  is nothing to divide by — a 0% win rate reads as "we lose everything". */
+export interface SalesDocumentSummary {
+  kind: SalesDocumentKind;
+  total: number;
+  totalValue: number;
+  byStatus: Partial<Record<SalesDocumentStatus, { count: number; value: number }>>;
+  openCount: number;
+  openValue: number;
+  conversionRate: number | null;
+  /** Challans only: goods that left and were never billed. */
+  awaitingInvoice?: number;
 }
 
 // ── Receivables, stock and activity (2.4–2.6) ────

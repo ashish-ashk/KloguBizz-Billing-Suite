@@ -640,68 +640,166 @@ Written after Phase 6a, as one honest inventory. Ordered by what a paying custom
 notices first, not by section number. Every entry says **why it wasn't done** and **how
 to do it** — "remaining work" with no route through it is just a list of regrets.
 
+---
+
+## STATUS — Tier 1 shipped (2026-08-03)
+
+**Done: all three architectural items — #50/#51 refresh tokens and a session
+registry, #53/#54 memberships and the org-switcher, and #45's object-storage and
+resize half.**
+Verified by **224 automated tests** (14 unit + 210 integration against a real
+MongoDB, including a new 6-test `memberships.test.js` and 17-test `storage.test.js`),
+clean `eslint` on both packages, clean production *and* development `ng build`s,
+migrations 006 and 007 exercised end-to-end against a live database (apply →
+idempotent re-run, with assertions on each backfill's semantics), a real PDF
+rendered with its images pulled from object storage, and a real `node server.js`
+boot.
+
+| Area | What changed |
+|---|---|
+| Refresh tokens (#50, #51) | Access tokens dropped from **12h to 15 minutes**, with a 30-day rotating refresh token in a new `Session` registry. **The "one device only" behaviour is gone**: signing in on a phone no longer silently evicts the desktop — each login starts its own session family. Rotation **detects reuse**: replaying an already-rotated token revokes the whole family *and* bumps `sessionVersion`, on the assumption a stolen token may already have minted a live access token. Self-service device list on `/security`. The frontend refreshes silently ~60s before expiry, single-flight (`shareReplay`) because the proactive timer and the interceptor's 401 handler can both fire at once — and a second caller presenting an already-rotated token would look exactly like theft. **The invariant that makes this safe:** every existing `sessionVersion` bump (password reset/change, suspend, force-logout, role change) now *also* revokes refresh tokens — bumping the counter alone is theatre once a refresh token can mint a fresh access token carrying the new value |
+| Memberships (#53, #54) | `User.email` was globally unique and `orgId`/`role` fixed at creation, so one person genuinely could not belong to two organisations — an accountant with their own KloguBizz account was flatly refused as "already registered". New `Membership {userId, orgId, role, status}` is now the authority; `User` keeps identity only. `protect` re-resolves the membership on **every** request, so a role change or removal takes effect within 15 minutes rather than at next login. Because the whole codebase already went through `req.orgId`/`tenantFilter(req)`, **20+ controllers needed no changes at all** — only the handful reading `user.orgId` directly. Inviting an already-active identity now **links instantly** with nothing to accept. `POST /auth/switch-org` re-issues a session for another membership; the switcher lives in the existing user dropdown |
+| The org-delete near-miss | `User` was in the flat delete-by-`orgId` cascade list, so deleting Org A would have deleted an identity that still had an active membership in Org B — someone's access to a *different* business, destroyed by a tenant deletion. Now an explicit two-step: capture member ids, delete everything else, then remove only the identities with **zero** memberships left anywhere |
+| Object storage (#45) | New `storageService` with three drivers. **`inline` is the default, deliberately**: this API runs on an ephemeral filesystem, so defaulting to local disk would lose every tenant's logo on redeploy — invisible until a customer noticed. `local` warns loudly in production; `s3` (also R2/B2/MinIO) hard-errors on missing credentials rather than failing at the moment a customer saves. Keys are content-addressed, so the existing immutable year-long cache policy stays correct by construction |
+| Resize, on every upload (#45) | Independent of driver, which is where most of the benefit actually lands: a 2000×2000 PNG went **424KB → 1.5KB** in the migration test. Per-kind ceilings, EXIF orientation baked in and then stripped (pdfkit does not honour the flag, so a phone photo printed sideways — and stripping also drops GPS the customer never meant to publish on every invoice), alpha preserved, SVG passed through un-rasterised. `sharp` failing to load degrades to a documented passthrough rather than breaking every upload, and system health reports which mode is live |
+| Half-migrated is a normal state | Every image now has both a storage key and the legacy inline field, and one reader (`resolveImage`) prefers the key and **falls back**. Deliberate: migration 007 cannot be atomic across thousands of documents, and an image must not be unreadable until a backfill finishes. It also covers an S3 blip — an older-but-present logo beats a blank one. Migration 007 is a **documented no-op** when no store is configured, because a migration that "moved" bytes onto an ephemeral disk while reporting success would destroy branding |
+| A bug class found three more times | Once the API stops returning an image's bytes, any client that echoes the containing object back on an unrelated save erases it with the empty string the response carried. This is what `logoDirty` was invented for in Phase 3, and it recurred in the tenant signature, the platform branding page, *and* server-side in `invoiceDefaults` (whose sub-document was written whole because the merge only flattened one level). The rule, now written down: a write-only image field needs dirty-tracking on the client, a dot-path merge on the server, **and** the containing object serialised with the bytes blanked — all three, or the image silently disappears |
+
+**Deliberately not verified:** the **S3 driver against a live bucket**. There are no
+object-storage credentials in this environment, so what is tested is the seam it
+plugs into (fully, via the local driver) and the SDK's own contract. A mocked S3
+would only have proved the mock worked. Configure a bucket, then run
+`npm run migrate` and check `/superadmin/system/health` reports `storage.driver: s3`.
+
+---
+
 ## Tier 1 — architectural, and blocking other things
 
-### 1. Refresh tokens + a session registry (#50, #51)
+### 1. Refresh tokens + a session registry (#50, #51) — ✅ **DONE (2026-08-03)**
 
-**Why not yet:** this changes session semantics for every user at once, and
+**Why it was deferred:** this changes session semantics for every user at once, and
 `sessionVersion` is a counter, not a registry — there is nowhere to record "this device,
-last seen here", so a device list cannot be built on it. `JWT_REFRESH_SECRET` has been in
-`env.js` since the beginning and is still read by nothing.
+last seen here", so a device list cannot be built on it. `JWT_REFRESH_SECRET` had been in
+`env.js` since the beginning and was still read by nothing.
 
-**How:** a `Session` model (`{userId, orgId, refreshTokenHash, userAgent, ip, lastSeenAt,
-revokedAt}`). Issue a short access token (~15 min) plus a rotating refresh token;
-`POST /auth/refresh` swaps one for the next and **detects reuse** — a replayed refresh
-token means it was stolen, so revoke the whole family. Replace the `sessionVersion` check
-in `protect` with a session lookup, keeping `sessionVersion` as the "revoke everything"
-lever. Frontend: the interceptor queues requests during a refresh instead of bouncing to
-`/login`, and `AuthService.scheduleExpiry` refreshes instead of logging out. This also
-unblocks the device list in Part 3.4 and lets the console show real active sessions.
+**What shipped:** a `Session` model (`{userId, orgId, family, refreshTokenHash, userAgent,
+ip, lastSeenAt, expiresAt, revokedAt, revokedReason, replacedBy}`). A 15-minute access
+token plus a 30-day rotating refresh token; `POST /auth/refresh` swaps one for the next and
+**detects reuse** — a replayed token revokes the whole family *and* bumps `sessionVersion`.
+`sessionVersion` is kept as the "revoke everything" lever, and every place that bumps it now
+revokes refresh tokens too. `GET`/`DELETE /auth/sessions` give the user their own device
+list. Frontend: silent refresh ~60s before expiry, and the interceptor retries a 401'd
+request once through it instead of bouncing to `/login`.
 
-**Watch for:** two tabs refreshing at once. Without a single-flight guard in the
-interceptor one wins and the other's token has already been rotated — which the reuse
-detector will then treat as theft and revoke the user's whole family of tokens.
+**The predicted trap was real:** two callers refreshing at once. Fixed with a single-flight
+`shareReplay(1)` guard — without it the second caller presents a token the first already
+rotated away, which the reuse detector correctly reads as theft and revokes the whole
+family over nothing. Also: **impersonation tokens decline the refresh entirely** (they are
+minted by a separate path with no session row, so the only refresh token in storage is the
+*operator's* — refreshing would silently swap the tab back to their identity while the UI
+still rendered the tenant).
 
-### 2. Memberships + org-switcher (#53, #54)
+### 2. Memberships + org-switcher (#53, #54) — ✅ **DONE (2026-08-03)**
 
-**Why not yet:** `User.email` is globally unique, so one person genuinely cannot belong to
-two organisations. Fixing it changes the identity model every other feature sits on, and
-requires migrating every existing account.
+**Why it was deferred:** `User.email` is globally unique, so one person genuinely could not
+belong to two organisations. Fixing it changes the identity model every other feature sits
+on, and requires migrating every existing account.
 
-**How:** a `Membership {userId, orgId, role, status}`; drop the global unique index on
-email and make it unique per membership instead. `User` keeps identity (name, password,
-MFA); role moves to the membership. The JWT gains an `activeOrgId` claim and `protect`
-resolves `req.orgId` from the membership rather than from `user.orgId`. Migration: one
-membership per existing user from their current `orgId` + `role`. Then
-`POST /auth/switch-org` re-issues a token for another membership, and the topbar gets a
-switcher.
+**What shipped:** `Membership {userId, orgId, role, status}`, unique on `{userId, orgId}`.
+`User` keeps identity (name, password, MFA, session state); role and status moved to the
+membership. `protect` resolves `req.orgId` **and** overrides `req.user.role` from the
+membership named by the token's `orgId` claim, re-checked every request.
+`POST /auth/switch-org` re-issues a session for another membership; the switcher is in the
+topbar user dropdown. Migration 006 backfills one membership per existing user from their
+old `orgId`+`role`.
 
-**Sequence this before anything else in Tier 2** — accountants serving several businesses
-are an entire customer segment that cannot use the product at all today.
+**What made it tractable:** the fan-out went almost entirely through `req.orgId` and
+`tenantFilter(req)` already, so **20+ controllers needed zero changes**. Only code reading
+`user.orgId`/`User.role` off a fetched document had to move — auth, the four
+superadmin tenant-user routes, impersonation's target resolution, seat counting, the team
+export, and the org-delete cascade.
 
-### 3. Object storage for images (#45's other half)
+**Watch for, if extending this:** the flat `/superadmin/users/:id/...` routes are now
+ambiguous (one identity, several orgs) and take an explicit `targetOrgId` — **not** `orgId`,
+because `server.js` strips a literal `orgId` from every request body unconditionally as a
+cross-tenant-injection guard. Any future endpoint that legitimately names a different org in
+its body needs the same workaround, or the value vanishes before validation sees it.
 
-**Why not yet:** needs S3/R2 credentials this deployment does not have. The base64 still
-sits in Mongo; what Phase 3 fixed was the part costing every request.
+### 3. Object storage for images (#45's other half) — ✅ **DONE (2026-08-03)**
 
-**How:** the asset endpoints (`/assets/org/:id/logo`) are already the seam. Put a
-`storageService` behind them with a local-disk driver and an S3 driver selected by env,
-move the bytes on write, keep the content-addressed URL contract identical, and add a
-resize step (sharp) so a 4 MB phone photo becomes a 200 KB logo. A migration reads each
-`brandingConfig.logoUrl`, uploads it, and replaces it with a key.
+**Why it was deferred:** needs S3/R2 credentials this deployment does not have.
+
+**What shipped:** `storageService` with `inline` | `local` | `s3` drivers behind the
+existing `/assets/...` seam, the content-addressed URL contract unchanged, plus a
+`sharp` resize step. **The default is `inline`, not `local`** — the original plan said
+local-disk-then-S3, but this API runs on Render's ephemeral filesystem, where that
+default would silently lose every uploaded logo on redeploy. Inline base64 is inelegant;
+it is not lossy. `assertSecureConfig` errors on `s3` without credentials and warns loudly
+on `local` in production, naming the consequence.
+
+**The resize is the part that pays off immediately**, and it runs on every upload
+regardless of driver — a 4MB phone photo becomes a few tens of KB *inside the document*
+even with no bucket. Migration 007 moves existing bytes out and resizes them on the way,
+and is a documented no-op when no store is configured.
+
+**Still open here:** the S3 driver has never run against a live bucket. Set the env vars,
+run `npm run migrate`, and confirm `/superadmin/system/health` shows `storage.driver: s3`.
 
 ## Tier 2 — features customers ask for
 
-### 4. Quotations → invoice (2.2 #11), proforma (#12), delivery challans (#13)
+### 4. Quotations → invoice (2.2 #11), proforma (#12), delivery challans (#13) — ✅ **DONE (2026-08-03)**
 
-**Why not yet:** each is a new document type with its own number series and lifecycle.
+**Why it was deferred:** each is a new document type with its own number series and
+lifecycle.
 
-**How:** the pattern is established twice already (`Invoice`, `CreditNote`). Generalise
-`invoiceNumberService`'s atomic FY-aware counter into a `documentNumberService`, then one
-model per type with `status: draft|sent|accepted|rejected|expired` and a
-`convertToInvoice` that copies the lines and links back to the original. Reuse
-`renderInvoicePdf` with a different title — the existing `invoiceTitleLabel` override
-already proves the renderer is document-agnostic.
+**What shipped:** one `SalesDocument` model with a `kind` discriminator, not three
+models — the plan suggested "one model per type", but structurally they are identical
+(buyer, priced lines, GST totals, a lifecycle ending in an invoice) and differ only in
+legal meaning and a little metadata. Three models would have meant three controllers and
+three places to forget when the tax engine changes. `invoiceNumberService` did not need
+generalising into a new service either: `nextDocumentNumber` was already series-driven, so
+three entries in its `SERIES` table were enough — `QT-`, `PI-`, `DC-`, each with its own
+FY-reset counter so a quotation can never consume an invoice number.
+
+Lifecycle is `draft → sent → accepted|rejected|expired → converted`, `convertToInvoice`
+links both ways, and `renderInvoicePdf` is reused with `invoiceTitleLabel` per kind — the
+renderer was indeed document-agnostic, as predicted.
+
+**The invariant the whole thing is built around: none of these is a tax invoice.** So
+they never reach a GST return, carry no settlement state, and move no stock. Each has a
+test:
+
+- **Not in GSTR-1.** A quotation there would declare turnover never supplied; a proforma
+  would double-count the eventual invoice.
+- **A delivery challan moves no stock.** It is the one that arguably could — goods
+  physically leave — but ownership does not transfer, and a return of unsold approval
+  goods would need a compensating movement nobody records. Stock moves when the *invoice*
+  is raised, which is when ownership actually changes.
+- **Conversion happens exactly once.** The document is *claimed* with a conditional
+  update (`status: { $ne: 'converted' }`) before any invoice is created, so five
+  concurrent requests produce one invoice and four 409s. Two clicks producing two real
+  tax invoices for one order would not be undoable — only reversible by credit note.
+- **Conversion consumes the invoice quota**, which is the hole Duplicate had (#17). A
+  refused conversion releases its claim, so a tenant at their limit is not left with a
+  document permanently locked as converted with nothing to show for it.
+
+Expiry follows the overdue-invoice precedent (#43): **derived at read time** so a
+quotation that lapsed at midnight reads as expired immediately, with an hourly sweep only
+so the stored status eventually agrees. An accepted or rejected quotation is never
+relabelled as expired — it has been *decided*, and the conversion-rate figure is computed
+from exactly those two.
+
+**The aggregation-cast trap recurred for the third time.** `tenantFilter` returns `orgId`
+as a string; Mongoose casts it for `find` but not inside a pipeline, so the pipeline
+matched nothing and the pipeline-value summary silently read as "this tenant has no
+quotations" — a wrong answer that looks like a correct one. Same class as the ITC register
+(Phase 5) and `stockService.recomputeBalance` (Phase 6a). Cast explicitly in every
+`$match`.
+
+**Also fixed:** a pre-existing flaky test (`a tenant can read its own audit trail`) that
+polled until the audit page was non-empty and then asserted on a *specific* entry —
+registration writes entries first, so it passed on an idle machine and failed under the
+heavier parallel load this work added. It now polls for the entry it actually asserts on.
 
 ### 5. Recurring invoices (2.2 #14)
 

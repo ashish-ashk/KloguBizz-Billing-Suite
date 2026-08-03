@@ -627,8 +627,8 @@ export interface InvoiceDocClient {
             <!-- The uploaded signature, above the rule and height-capped so an
                  over-tall image cannot push into the block above it — the same
                  bound the letterhead image needed. -->
-            @if (invoiceDefaults().signatureUrl) {
-              <img [src]="invoiceDefaults().signatureUrl" alt="Signature"
+            @if (signatureSrc()) {
+              <img [src]="signatureSrc()" alt="Signature"
                 style="display:block;margin:0 auto 2px;max-height:38px;max-width:180px;object-fit:contain;" />
             }
             <div style="border-top:1.5px solid;padding-top:9px;font-size:12px;min-width:180px;" [style.color]="accentColor()" [style.borderColor]="accentColor()">Authorised Signatory</div>
@@ -701,6 +701,17 @@ export class InvoiceDocumentComponent {
     branch?: string; upiId?: string; signatureUrl?: string; signatoryName?: string;
     termsAndConditions?: string;
   }>({});
+  /**
+   * The signature image, passed separately rather than read off
+   * `invoiceDefaults.signatureUrl` (#45).
+   *
+   * It can be either a data URI (a not-yet-saved upload on the Invoice Templates
+   * page) or a cacheable asset URL (a saved one), and an `<img src>` renders both
+   * identically. Keeping it out of `invoiceDefaults` means that object never has
+   * to be ambiguous about whether it carries image *data* or a *link* — which is
+   * the distinction the save path depends on getting right.
+   */
+  signatureSrc = input('');
   showAmountInWords = input(true);
   /** Overrides every template's default title word ("Invoice"/"Tax Invoice") — e.g. "Proforma Invoice", "Bill", "Receipt". Empty keeps each template's own default. */
   invoiceTitleLabel = input('');

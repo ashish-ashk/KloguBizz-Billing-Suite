@@ -30,7 +30,44 @@ const SERIES = {
     fyField: 'creditNoteSequenceFY',
     defaultPrefix: 'CN',
     prefixFrom: org => org.brandingConfig?.creditNotePrefix
+  },
+  /**
+   * The three pre-invoice documents (2.2 #11–#13).
+   *
+   * Each gets its own counter for the same reason a credit note does: a shared
+   * sequence would interleave quotations with tax invoices and leave visible
+   * gaps in the invoice series, which is exactly what an auditor reads as a
+   * missing document. None of these is a tax invoice, so GST does not *require*
+   * a series per type here — but a tenant who numbers a quotation the same as
+   * an invoice has a filing problem of their own making, and the cost of
+   * separate counters is one field each.
+   */
+  quotation: {
+    sequenceField: 'quotationSequence',
+    fyField: 'quotationSequenceFY',
+    defaultPrefix: 'QT',
+    prefixFrom: org => org.brandingConfig?.quotationPrefix
+  },
+  proforma: {
+    sequenceField: 'proformaSequence',
+    fyField: 'proformaSequenceFY',
+    defaultPrefix: 'PI',
+    prefixFrom: org => org.brandingConfig?.proformaPrefix
+  },
+  deliveryChallan: {
+    sequenceField: 'deliveryChallanSequence',
+    fyField: 'deliveryChallanSequenceFY',
+    defaultPrefix: 'DC',
+    prefixFrom: org => org.brandingConfig?.deliveryChallanPrefix
   }
+};
+
+/** Maps a `SalesDocument.kind` to its series name. Kept here so the model's
+ *  vocabulary and the counter's cannot drift apart. */
+const SERIES_FOR_KIND = {
+  quotation: 'quotation',
+  proforma: 'proforma',
+  'delivery-challan': 'deliveryChallan'
 };
 
 /**
@@ -120,12 +157,21 @@ async function nextCreditNoteNumber(orgId) {
   return nextDocumentNumber(orgId, 'creditNote');
 }
 
+/** Next number for a `SalesDocument` of the given kind (2.2 #11–#13). */
+async function nextSalesDocumentNumber(orgId, kind) {
+  const series = SERIES_FOR_KIND[kind];
+  if (!series) throw new Error(`Unknown sales-document kind: ${kind}`);
+  return nextDocumentNumber(orgId, series);
+}
+
 module.exports = {
   nextInvoiceNumber,
   nextCreditNoteNumber,
+  nextSalesDocumentNumber,
   nextDocumentNumber,
   currentFYLabel,
   formatDocumentNumber,
   resolvePadding,
-  SERIES
+  SERIES,
+  SERIES_FOR_KIND
 };

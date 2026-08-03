@@ -1,15 +1,17 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { User } = require('../models/User');
+const { Membership } = require('../models/Membership');
 const { Organisation } = require('../models/Organisation');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
-const { sendInviteEmail } = require('../services/emailService');
+const { sendInviteEmail, sendAddedToOrgEmail } = require('../services/emailService');
 const { assertUserQuota } = require('../services/planService');
 const { logAudit } = require('../services/auditService');
 const { pickFields } = require('../utils/pickFields');
 const { createToken, expiryFromNow, INVITE_TTL_MS } = require('../services/tokenService');
+const { revokeAllForUser } = require('../services/sessionService');
 const { env } = require('../config/env');
 
 // Roles a tenant admin is allowed to hand out. Deliberately excludes
@@ -36,33 +38,53 @@ async function assertNotProtectedOwner(req, targetUserId) {
   }
 }
 
+/** Shapes a (User, Membership) pair into the wire `OrgUser` shape — role and
+ *  status now live on the membership, not the user (#53, #54), but nothing
+ *  downstream needs to know memberships exist underneath the team list. */
+function shapeOrgUser(user, membership) {
+  return {
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    role: membership.role,
+    status: membership.status,
+    lastLoginAt: user.lastLoginAt,
+    createdAt: membership.createdAt || user.createdAt
+  };
+}
+
 const listUsers = asyncHandler(async (req, res) => {
-  const users = await User.find(tenantFilter(req)).select('-passwordHash').sort({ createdAt: -1 });
-  res.json(users);
+  const memberships = await Membership.find(tenantFilter(req)).sort({ createdAt: -1 }).lean();
+  const users = await User.find({ _id: { $in: memberships.map(m => m.userId) } }).select('-passwordHash').lean();
+  const byId = new Map(users.map(u => [String(u._id), u]));
+  res.json(memberships.map(m => byId.has(String(m.userId)) ? shapeOrgUser(byId.get(String(m.userId)), m) : null).filter(Boolean));
 });
 
 /**
- * Issues a fresh invite token and emails the link.
+ * Issues a fresh invite token for a brand-new identity and emails the link.
  *
  * Shared by invite and resend so the two can't drift. Only the hash is stored
  * (see services/tokenService.js) and any previous token for this user is
  * replaced, which is what makes resending implicitly revoke the old link.
+ *
+ * Only ever used for a `User` created solely by this invite — an already-active
+ * identity added to a further organisation has nothing to accept, see
+ * inviteUser below.
  */
-async function issueInvite(user, req) {
+async function issueInvite(user, membership, req, orgName) {
   const { token, hash } = createToken();
   user.inviteTokenHash = hash;
   user.inviteTokenExpires = expiryFromNow(INVITE_TTL_MS);
   user.invitedAt = new Date();
   await user.save();
 
-  const org = await Organisation.findById(user.orgId).select('name').lean();
   const inviteUrl = `${env.FRONTEND_URL}/accept-invite?token=${encodeURIComponent(token)}`;
   const result = await sendInviteEmail({
-    orgId: user.orgId,
+    orgId: membership.orgId,
     to: user.email,
     name: user.name,
     inviteUrl,
-    orgName: org?.name,
+    orgName,
     inviterName: req.user?.name,
     expiresAt: user.inviteTokenExpires
   });
@@ -73,27 +95,66 @@ async function issueInvite(user, req) {
   return { inviteUrl: result.skipped && !env.isProduction ? inviteUrl : undefined, delivered: !!result.sent };
 }
 
+/**
+ * Adds someone to the team.
+ *
+ * Three cases, because `User.email` is a single global identity but a person
+ * can now belong to more than one organisation (#53, #54):
+ *
+ *  1. Genuinely new email — create the identity and its first (pending)
+ *     membership together, exactly as before memberships existed.
+ *  2. An existing, already-active identity with no membership here yet — link
+ *     immediately. There is nothing to accept: the person can already sign
+ *     in, and the new organisation is simply there next time (or right away,
+ *     via the org-switcher). This is the fix for #53 — inviting an
+ *     accountant who already has their own KloguBizz account into a second
+ *     business used to be flatly refused as "already registered".
+ *  3. An existing identity that was invited elsewhere and never activated —
+ *     refused: there is no working password yet for that identity to sign in
+ *     with, so it cannot be an instant add. They have to finish their first
+ *     invite before being added to a second.
+ */
 const inviteUser = asyncHandler(async (req, res) => {
   const { name, email, role = 'viewer' } = req.body;
   if (!name || !email) throw httpError(400, 'name and email are required');
   await assertUserQuota(req.orgId);
 
-  const existing = await User.findOne({ email: String(email).toLowerCase() });
+  const normalisedEmail = String(email).toLowerCase();
+  const org = await Organisation.findById(req.orgId).select('name').lean();
+  const existing = await User.findOne({ email: normalisedEmail });
+
   if (existing) {
-    // Emails are globally unique, so say something useful rather than letting
-    // the raw duplicate-key error surface.
-    const sameOrg = String(existing.orgId) === String(req.orgId);
-    throw httpError(
-      409,
-      sameOrg
-        ? `${email} is already on your team.`
-        : 'That email address is already registered on KloguBizz.',
-      'EMAIL_IN_USE'
-    );
+    const membership = await Membership.findOne({ userId: existing._id, orgId: req.orgId });
+    if (membership) {
+      if (membership.status !== 'disabled') {
+        throw httpError(409, `${email} is already on your team.`, 'EMAIL_IN_USE');
+      }
+      // Was removed before — re-add rather than error. The identity and its
+      // history (audit entries, invoices they issued) are still valid.
+      membership.role = role;
+      membership.status = 'active';
+      await membership.save();
+      logAudit({ req, action: 'user.invited', entity: 'user', entityId: existing._id, meta: { email, role, reactivated: true } });
+      const result = await sendAddedToOrgEmail({ to: existing.email, name: existing.name, orgName: org?.name, inviterName: req.user?.name, orgId: req.orgId });
+      return res.status(201).json({ user: shapeOrgUser(existing, membership), delivered: !!result.sent });
+    }
+
+    if (existing.status !== 'active') {
+      throw httpError(
+        409,
+        'That email address has a pending invitation elsewhere that hasn’t been accepted yet.',
+        'EMAIL_IN_USE'
+      );
+    }
+
+    const newMembership = await Membership.create({ userId: existing._id, orgId: req.orgId, role, status: 'active' });
+    logAudit({ req, action: 'user.invited', entity: 'user', entityId: existing._id, meta: { email, role, linkedExisting: true } });
+    const result = await sendAddedToOrgEmail({ to: existing.email, name: existing.name, orgName: org?.name, inviterName: req.user?.name, orgId: req.orgId });
+    return res.status(201).json({ user: shapeOrgUser(existing, newMembership), delivered: !!result.sent });
   }
 
   const user = await User.create({
-    orgId: req.orgId,
+    orgId: req.orgId, // legacy "home org" only — see models/User.js
     name,
     email,
     role,
@@ -103,10 +164,11 @@ const inviteUser = asyncHandler(async (req, res) => {
     // a guessable value behind.
     passwordHash: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12)
   });
+  const membership = await Membership.create({ userId: user._id, orgId: req.orgId, role, status: 'invited' });
 
-  const { inviteUrl, delivered } = await issueInvite(user, req);
+  const { inviteUrl, delivered } = await issueInvite(user, membership, req, org?.name);
   logAudit({ req, action: 'user.invited', entity: 'user', entityId: user._id, meta: { email, role, delivered } });
-  res.status(201).json({ user: { ...user.toObject(), passwordHash: undefined }, inviteUrl, delivered });
+  res.status(201).json({ user: shapeOrgUser(user, membership), inviteUrl, delivered });
 });
 
 /**
@@ -117,14 +179,17 @@ const inviteUser = asyncHandler(async (req, res) => {
  * start again.
  */
 const resendInvite = asyncHandler(async (req, res) => {
-  const user = await User.findOne({ _id: req.params.id, ...tenantFilter(req) });
-  if (!user) throw httpError(404, 'User not found');
-  if (user.status !== 'invited') {
-    throw httpError(409, `${user.name} has already activated their account.`, 'ALREADY_ACTIVE');
+  const membership = await Membership.findOne({ userId: req.params.id, ...tenantFilter(req) });
+  if (!membership) throw httpError(404, 'User not found');
+  if (membership.status !== 'invited') {
+    throw httpError(409, 'That user has already activated their account.', 'ALREADY_ACTIVE');
   }
-  const { inviteUrl, delivered } = await issueInvite(user, req);
+  const user = await User.findById(membership.userId);
+  if (!user) throw httpError(404, 'User not found');
+  const org = await Organisation.findById(req.orgId).select('name').lean();
+  const { inviteUrl, delivered } = await issueInvite(user, membership, req, org?.name);
   logAudit({ req, action: 'user.invite_resent', entity: 'user', entityId: user._id, meta: { email: user.email, delivered } });
-  res.json({ user: { ...user.toObject(), passwordHash: undefined }, inviteUrl, delivered });
+  res.json({ user: shapeOrgUser(user, membership), inviteUrl, delivered });
 });
 
 /**
@@ -132,16 +197,21 @@ const resendInvite = asyncHandler(async (req, res) => {
  *
  * A hard delete rather than the soft-disable used for real users: nobody has
  * ever signed in to this record, it owns no data, and removing it frees both
- * the plan seat and the globally-unique email address for re-inviting.
+ * the plan seat and the globally-unique email address for re-inviting. An
+ * 'invited' membership only ever exists for a brand-new identity created
+ * solely by that invite (see inviteUser above), so it is always safe to
+ * remove the identity along with it.
  */
 const revokeInvite = asyncHandler(async (req, res) => {
-  const user = await User.findOne({ _id: req.params.id, ...tenantFilter(req) });
-  if (!user) throw httpError(404, 'User not found');
-  if (user.status !== 'invited') {
+  const membership = await Membership.findOne({ userId: req.params.id, ...tenantFilter(req) });
+  if (!membership) throw httpError(404, 'User not found');
+  if (membership.status !== 'invited') {
     throw httpError(409, 'That user has already activated their account — disable them instead.', 'ALREADY_ACTIVE');
   }
-  await user.deleteOne();
-  logAudit({ req, action: 'user.invite_revoked', entity: 'user', entityId: user._id, meta: { email: user.email } });
+  const user = await User.findById(membership.userId);
+  await membership.deleteOne();
+  if (user) await user.deleteOne();
+  logAudit({ req, action: 'user.invite_revoked', entity: 'user', entityId: membership.userId, meta: { email: user?.email } });
   res.status(204).end();
 });
 
@@ -157,6 +227,7 @@ const changePassword = asyncHandler(async (req, res) => {
   // Invalidate other active sessions in case the password was compromised.
   user.sessionVersion = (user.sessionVersion || 0) + 1;
   await user.save();
+  await revokeAllForUser(user._id, 'password_changed');
   logAudit({ req, action: 'user.password_changed', entity: 'user', entityId: user._id });
   res.json({ ok: true });
 });
@@ -172,34 +243,46 @@ const updateUser = asyncHandler(async (req, res) => {
   if (update.status !== undefined && !ASSIGNABLE_STATUSES.includes(update.status)) {
     throw httpError(400, `Status must be one of: ${ASSIGNABLE_STATUSES.join(', ')}`);
   }
-  const user = await User.findOneAndUpdate(
-    { _id: req.params.id, ...tenantFilter(req) },
-    update,
-    { new: true, runValidators: true }
-  ).select('-passwordHash');
+
+  // Role and status live on the membership now, not the user (#53, #54) — the
+  // same identity might hold a different role in another organisation.
+  const membership = await Membership.findOne({ userId: req.params.id, ...tenantFilter(req) });
+  if (!membership) throw httpError(404, 'User not found');
+  if (update.role !== undefined) membership.role = update.role;
+  if (update.status !== undefined) membership.status = update.status;
+  await membership.save();
+
+  const updateFields = {};
+  if (update.name !== undefined) updateFields.name = update.name; // identity-level, shared across every membership
+  const user = await User.findOneAndUpdate({ _id: req.params.id }, updateFields, { new: true, runValidators: true }).select('-passwordHash');
   if (!user) throw httpError(404, 'User not found');
-  // Disabling an account has to also cut its live sessions — the JWT stays
-  // valid for up to 12h otherwise, and protect() would keep honouring it
-  // until the next login bumped sessionVersion.
+
+  // Disabling an account has to also cut its live sessions — the access token
+  // stays valid otherwise until it expires, and a refresh token would keep
+  // minting fresh ones right past the change.
   if (update.status === 'disabled' || update.role !== undefined) {
     await User.updateOne({ _id: user._id }, { $inc: { sessionVersion: 1 } });
+    await revokeAllForUser(user._id, 'admin_revoked');
   }
   logAudit({ req, action: 'user.updated', entity: 'user', entityId: user._id, meta: { fields: Object.keys(update), role: update.role, status: update.status } });
-  res.json(user);
+  res.json(shapeOrgUser(user, membership));
 });
 
 const removeUser = asyncHandler(async (req, res) => {
   await assertNotProtectedOwner(req, req.params.id);
-  const user = await User.findOneAndUpdate(
-    { _id: req.params.id, ...tenantFilter(req) },
+  const membership = await Membership.findOneAndUpdate(
+    { userId: req.params.id, ...tenantFilter(req) },
     { status: 'disabled' },
     { new: true }
-  ).select('-passwordHash');
+  );
+  if (!membership) throw httpError(404, 'User not found');
+  const user = await User.findById(req.params.id).select('-passwordHash');
   if (!user) throw httpError(404, 'User not found');
   // Same reasoning as updateUser: revoke the removed user's live sessions.
   await User.updateOne({ _id: user._id }, { $inc: { sessionVersion: 1 } });
+  await revokeAllForUser(user._id, 'admin_revoked');
   logAudit({ req, action: 'user.removed', entity: 'user', entityId: user._id, meta: { email: user.email } });
-  res.json(user);
+  res.json(shapeOrgUser(user, membership));
 });
 
 module.exports = {

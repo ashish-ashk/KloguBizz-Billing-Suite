@@ -3,6 +3,7 @@ const { connectDatabase } = require('../config/database');
 const { env, assertSeedConfig } = require('../config/env');
 const { Organisation } = require('../models/Organisation');
 const { User } = require('../models/User');
+const { Membership } = require('../models/Membership');
 const { Client } = require('../models/Client');
 const { Invoice } = require('../models/Invoice');
 const { Payment } = require('../models/Payment');
@@ -64,6 +65,7 @@ async function seed() {
   await Promise.all([
     Organisation.deleteMany({}),
     User.deleteMany({}),
+    Membership.deleteMany({}),
     Client.deleteMany({}),
     Invoice.deleteMany({}),
     Payment.deleteMany({}),
@@ -174,7 +176,7 @@ async function seed() {
     { orgId: org._id, itemCode: 'ITM-007', name: 'UPS 1KVA', description: 'Line-interactive UPS with surge protection', type: 'goods', hsn: '8504', category: 'Hardware', unit: 'Nos', gstRate: 18, sellingPrice: 6800, mrp: 7500, purchasePrice: 5600, stockQty: 15, reorderLevel: 5, barcode: '8901234500073' }
   ]);
 
-  const [orgAdmin] = await User.create([
+  const [orgAdmin, orgAccountant, orgViewer, orgInvitee] = await User.create([
     { orgId: org._id, name: 'Arjun Mehta', email: 'admin@techsoft.local', passwordHash: await bcrypt.hash('Admin@123', 12), role: 'admin', status: 'active', lastLoginAt: new Date('2026-07-04') },
     { orgId: org._id, name: 'Sneha Kapoor', email: 'sneha@techsoft.local', passwordHash: await bcrypt.hash('Admin@123', 12), role: 'accountant', status: 'active', lastLoginAt: new Date('2026-07-02') },
     { orgId: org._id, name: 'Rohan Das', email: 'rohan@techsoft.local', passwordHash: await bcrypt.hash('Admin@123', 12), role: 'viewer', status: 'active', lastLoginAt: new Date('2026-06-28') },
@@ -183,6 +185,15 @@ async function seed() {
   ]);
   org.ownerId = orgAdmin._id;
   await org.save();
+
+  // Access is granted by Membership now, not User.orgId/User.role (#53, #54) —
+  // without these, none of the seeded tenant users could actually sign in.
+  await Membership.create([
+    { userId: orgAdmin._id, orgId: org._id, role: 'admin', status: 'active' },
+    { userId: orgAccountant._id, orgId: org._id, role: 'accountant', status: 'active' },
+    { userId: orgViewer._id, orgId: org._id, role: 'viewer', status: 'active' },
+    { userId: orgInvitee._id, orgId: org._id, role: 'accountant', status: 'invited' }
+  ]);
 
   const clients = await Client.create([
     { orgId: org._id, companyName: 'Reliance Tech Pvt Ltd', email: 'billing@reliancetech.in', phone: '+91 98200 12345', gstin: '27AABCU9603R1ZX', address: 'BKC, Mumbai, Maharashtra 400051', state: 'Maharashtra', stateCode: '27' },

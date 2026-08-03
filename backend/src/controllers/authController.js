@@ -3,12 +3,15 @@ const jwt = require('jsonwebtoken');
 const { env } = require('../config/env');
 const { Organisation } = require('../models/Organisation');
 const { User } = require('../models/User');
+const { Membership } = require('../models/Membership');
 const { Subscription } = require('../models/Subscription');
+const { resolveDefaultMembership, getActiveMembership, listMemberships } = require('../services/membershipService');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { logAudit } = require('../services/auditService');
 const { CURRENT_TERMS_VERSION } = require('../config/legal');
 const { createToken, hashToken, expiryFromNow, RESET_TTL_MS } = require('../services/tokenService');
+const sessionService = require('../services/sessionService');
 const { sendPasswordResetEmail } = require('../services/emailService');
 const { serialiseOrganisation } = require('../services/brandingAssetService');
 const { recordEvent, EVENT } = require('../services/usageEventService');
@@ -34,33 +37,49 @@ const VERIFY_TTL_MS = 48 * 60 * 60 * 1000;
  * the metadata the security console's login history and brute-force detection
  * read, so a failed login was recorded with no indication of where it came from.
  */
-function auditContext(req, user) {
+function auditContext(req, user, orgId) {
   return {
     id: req?.id,
     ip: req?.ip,
     headers: req?.headers,
     log: req?.log,
     user,
-    orgId: user?.orgId
+    // `user.orgId` is a legacy fallback (see models/User.js) — call sites that
+    // have already resolved a real membership pass its orgId explicitly so
+    // the entry is filed against the organisation actually being signed into,
+    // not wherever the identity happened to be created.
+    orgId: orgId !== undefined ? orgId : user?.orgId
   };
 }
 
-function signToken(user) {
+/**
+ * `orgId`/`role` are passed explicitly rather than read off `user` — since
+ * memberships (#53, #54) an identity's org and role are properties of one
+ * particular membership, not of the identity, and a user can have more than
+ * one. A platform account (`role: 'superadmin'`) has no membership at all and
+ * passes its own `role`/`orgId: null` straight through.
+ */
+function signToken(user, orgId, role) {
   return jwt.sign(
-    { sub: user._id, role: user.role, orgId: user.orgId, sv: user.sessionVersion || 0 },
+    { sub: user._id, role, orgId, sv: user.sessionVersion || 0 },
     env.JWT_SECRET,
-    { expiresIn: '12h' }
+    { expiresIn: sessionService.ACCESS_TOKEN_TTL }
   );
 }
 
-function authPayload(user, organisation) {
+function authPayload(user, organisation, orgId, role) {
   return {
-    token: signToken(user),
+    token: signToken(user, orgId, role),
+    // Seconds, not the JWT's raw `exp`, so the client doesn't need to decode
+    // the token just to know when to refresh.
+    expiresIn: sessionService.ACCESS_TOKEN_TTL_SECONDS,
     user: {
       id: user._id,
       name: user.name,
       email: user.email,
-      role: user.role,
+      // The role for *this* organisation/session, not necessarily user.role
+      // (which is meaningless once a membership exists — see models/User.js).
+      role,
       status: user.status
     },
     // The organisation's logo and letterhead are replaced with cacheable asset
@@ -70,6 +89,39 @@ function authPayload(user, organisation) {
     // services/brandingAssetService.js.
     organisation: serialiseOrganisation(organisation)
   };
+}
+
+/**
+ * Wraps `authPayload` with a refresh token (#50, #51).
+ *
+ * Only called where the frontend actually persists the session — login,
+ * invite acceptance, MFA verification, switching organisations. `register`
+ * deliberately does not call this: it never auto-authenticates, so a refresh
+ * token here would be an orphaned row nothing ever presents.
+ */
+async function authPayloadWithSession(user, organisation, orgId, role, req) {
+  const { refreshToken } = await sessionService.createSession({ user, req, orgId });
+  return { ...authPayload(user, organisation, orgId, role), refreshToken };
+}
+
+/**
+ * Resolves which organisation and role a plain sign-in (login/MFA) should
+ * land in, now that a user can hold more than one active membership (#53,
+ * #54). A platform account has no membership at all.
+ *
+ * Throws rather than returning an empty session when a non-platform identity
+ * has no active membership anywhere — a genuinely rare state (every
+ * membership since disabled or removed) that a half-formed session would only
+ * make more confusing to recover from.
+ */
+async function resolveSession(user) {
+  if (user.role === 'superadmin') return { orgId: null, role: 'superadmin', organisation: null };
+  const membership = await resolveDefaultMembership(user);
+  if (!membership) {
+    throw httpError(403, 'Your account has no active organisation to sign in to. Contact whoever manages your team.', 'NO_ACTIVE_MEMBERSHIP');
+  }
+  const organisation = await Organisation.findById(membership.orgId).select('-support');
+  return { orgId: String(membership.orgId), role: membership.role, organisation };
 }
 
 const register = asyncHandler(async (req, res) => {
@@ -94,7 +146,8 @@ const register = asyncHandler(async (req, res) => {
     trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 86400000)
   });
   const user = await User.create({
-    orgId: organisation._id,
+    orgId: organisation._id, // legacy "home org" only — see models/User.js
+    lastActiveOrgId: organisation._id,
     name,
     email,
     passwordHash: await bcrypt.hash(password, 12),
@@ -103,6 +156,9 @@ const register = asyncHandler(async (req, res) => {
     termsAcceptedAt: new Date(),
     termsVersion: CURRENT_TERMS_VERSION
   });
+  // The membership is what actually grants access (#53, #54) — `user.role`
+  // above is legacy fallback only.
+  await Membership.create({ userId: user._id, orgId: organisation._id, role: 'admin', status: 'active' });
 
   // The registering user is the org's canonical owner from day one.
   organisation.ownerId = user._id;
@@ -132,7 +188,7 @@ const register = asyncHandler(async (req, res) => {
   recordEvent({ orgId: organisation._id, userId: user._id, type: EVENT.signup, meta: { stateCode } });
 
   res.status(201).json({
-    ...authPayload(user, organisation),
+    ...authPayload(user, organisation, organisation._id, 'admin'),
     emailVerificationRequired: env.emailVerificationEnforced,
     emailVerificationSent: verification.delivered,
     verifyUrl: verification.skipped && !env.isProduction ? verification.verifyUrl : undefined
@@ -211,18 +267,23 @@ const login = asyncHandler(async (req, res) => {
     });
   }
 
+  // Resolved before anything is persisted: a non-platform identity with no
+  // active membership anywhere throws here (see resolveSession), and a login
+  // that fails should leave no trace of having half-succeeded.
+  const { orgId, role, organisation } = await resolveSession(user);
+
   user.lastLoginAt = new Date();
-  // Invalidate any tokens issued to this user before now — one active
-  // session per user; signing in elsewhere logs out other devices.
-  user.sessionVersion = (user.sessionVersion || 0) + 1;
+  if (orgId) user.lastActiveOrgId = orgId;
   await user.save();
-  const organisation = user.orgId ? await Organisation.findById(user.orgId).select('-support') : null;
   // `req` is passed so the audit entry carries the IP and user agent — the two
   // fields the security console's login history and brute-force detection are
   // built on, and which the trail did not record before Phase 4.
-  logAudit({ req: auditContext(req, user), action: 'auth.login', entity: 'user', entityId: user._id });
-  recordEvent({ req, orgId: user.orgId, userId: user._id, type: EVENT.login });
-  res.json(authPayload(user, organisation));
+  logAudit({ req: auditContext(req, user, orgId), action: 'auth.login', entity: 'user', entityId: user._id });
+  recordEvent({ req, orgId, userId: user._id, type: EVENT.login });
+  // A device/session registry (#50, #51) replaces the old "signing in anywhere
+  // logs out every other device" behaviour — each login now starts its own
+  // refresh-token chain rather than evicting the rest.
+  res.json(await authPayloadWithSession(user, organisation, orgId, role, req));
 });
 
 /**
@@ -236,21 +297,30 @@ const login = asyncHandler(async (req, res) => {
  * inspecting its own JWT is not a trustworthy source for "am I being impersonated".
  */
 const me = asyncHandler(async (req, res) => {
+  // `req.orgId` — resolved by `protect` from the *active membership*, not
+  // `req.user.orgId`, which is a legacy field that stops being accurate the
+  // moment an identity holds more than one membership (#53, #54).
   // `-support` excludes the internal account-management fields an operator writes
   // about this tenant (account manager, risk level, notes). They belong to the
   // console, not to the customer they describe.
-  const organisation = req.user.orgId
-    ? await Organisation.findById(req.user.orgId).select('-support')
+  const organisation = req.orgId
+    ? await Organisation.findById(req.orgId).select('-support')
     : null;
-  const [flags, notices] = await Promise.all([
+  const [flags, notices, memberships] = await Promise.all([
     resolveFlags(organisation),
-    noticesFor(organisation)
+    noticesFor(organisation),
+    // The org-switcher's data. A platform account has no memberships — it
+    // isn't a tenant identity — and impersonation shows the tenant's own
+    // memberships, not the operator's, which would be actively misleading
+    // inside a "view as" session.
+    (req.user.role === 'superadmin' || req.impersonation) ? [] : listMemberships(req.user._id)
   ]);
   res.json({
     user: req.user,
     organisation: serialiseOrganisation(organisation),
     flags,
     notices,
+    memberships,
     impersonation: req.impersonation || null
   });
 });
@@ -262,7 +332,14 @@ const me = asyncHandler(async (req, res) => {
 // frontend route existed either, so every invited teammate was permanently
 // locked out (their status stays 'invited', which protect() rejects).
 
-/** Looks up a pending invite by token, or throws a uniform error. */
+/**
+ * Looks up a pending invite by token, or throws a uniform error.
+ *
+ * Also resolves the membership the invite created (#53, #54) — a brand-new
+ * identity created solely by an invite has exactly one membership, the
+ * pending one, since an already-active identity added to a further org is
+ * linked immediately with nothing to accept (see userController.inviteUser).
+ */
 async function findInvitee(token) {
   if (!token) throw httpError(400, 'This invitation link is missing its token.', 'INVALID_INVITE');
   const user = await User.findOne({ inviteTokenHash: hashToken(token) });
@@ -274,7 +351,9 @@ async function findInvitee(token) {
   if (!user.inviteTokenExpires || user.inviteTokenExpires < new Date()) {
     throw httpError(410, 'This invitation has expired. Ask your administrator to send a new one.', 'INVITE_EXPIRED');
   }
-  return user;
+  const membership = await Membership.findOne({ userId: user._id, status: 'invited' });
+  if (!membership) throw invalid();
+  return { user, membership };
 }
 
 /**
@@ -283,27 +362,28 @@ async function findInvitee(token) {
  * presenting a bare password box.
  */
 const inviteDetails = asyncHandler(async (req, res) => {
-  const user = await findInvitee(req.params.token);
-  const organisation = user.orgId ? await Organisation.findById(user.orgId).select('name').lean() : null;
+  const { user, membership } = await findInvitee(req.params.token);
+  const organisation = await Organisation.findById(membership.orgId).select('name').lean();
   res.json({
     name: user.name,
     email: user.email,
-    role: user.role,
+    role: membership.role,
     orgName: organisation?.name || null,
     expiresAt: user.inviteTokenExpires
   });
 });
 
 /**
- * Redeems an invitation: sets the password, activates the account, and signs
- * the user straight in so they land in the app rather than back at a login form.
+ * Redeems an invitation: sets the password, activates the account and its
+ * membership, and signs the user straight in so they land in the app rather
+ * than back at a login form.
  */
 const acceptInvite = asyncHandler(async (req, res) => {
   const { token, password, acceptTerms } = req.body;
   if (acceptTerms !== true) {
     throw httpError(400, 'You must accept the Terms & Conditions and SLA to activate your account');
   }
-  const user = await findInvitee(token);
+  const { user, membership } = await findInvitee(token);
 
   user.passwordHash = await bcrypt.hash(password, 12);
   user.status = 'active';
@@ -312,14 +392,14 @@ const acceptInvite = asyncHandler(async (req, res) => {
   user.termsAcceptedAt = new Date();
   user.termsVersion = CURRENT_TERMS_VERSION;
   user.lastLoginAt = new Date();
-  // Same reasoning as login: issue this session a version so any token minted
-  // before now is dead.
-  user.sessionVersion = (user.sessionVersion || 0) + 1;
+  user.lastActiveOrgId = membership.orgId;
   await user.save();
+  membership.status = 'active';
+  await membership.save();
 
-  const organisation = user.orgId ? await Organisation.findById(user.orgId).select('-support') : null;
-  logAudit({ req: auditContext(req, user), action: 'user.invite_accepted', entity: 'user', entityId: user._id, meta: { email: user.email, role: user.role } });
-  res.json(authPayload(user, organisation));
+  const organisation = await Organisation.findById(membership.orgId).select('-support');
+  logAudit({ req: auditContext(req, user, membership.orgId), action: 'user.invite_accepted', entity: 'user', entityId: user._id, meta: { email: user.email, role: membership.role } });
+  res.json(await authPayloadWithSession(user, organisation, String(membership.orgId), membership.role, req));
 });
 
 // ── Password reset ───────────────────────────────
@@ -383,6 +463,10 @@ const resetPassword = asyncHandler(async (req, res) => {
   user.lastFailedLoginAt = undefined;
   user.sessionVersion = (user.sessionVersion || 0) + 1;
   await user.save();
+  // Kills every refresh-token chain too — bumping sessionVersion alone only
+  // stops existing access tokens; without this a device that still holds a
+  // refresh token could call /auth/refresh and mint a new one right past it.
+  await sessionService.revokeAllForUser(user._id, 'password_changed');
 
   logAudit({ req: auditContext(req, user), action: 'user.password_reset', entity: 'user', entityId: user._id });
   res.json({ ok: true, message: 'Your password has been reset. Please sign in with your new password.' });
@@ -425,21 +509,22 @@ const verifyMfa = asyncHandler(async (req, res) => {
   user.failedLoginAttempts = 0;
   user.lockedUntil = undefined;
   user.lastFailedLoginAt = undefined;
+
+  const { orgId, role, organisation } = await resolveSession(user);
   user.lastLoginAt = new Date();
-  user.sessionVersion = (user.sessionVersion || 0) + 1;
+  if (orgId) user.lastActiveOrgId = orgId;
   await user.save();
 
-  const organisation = user.orgId ? await Organisation.findById(user.orgId).select('-support') : null;
   logAudit({
-    req: auditContext(req, user),
+    req: auditContext(req, user, orgId),
     action: 'auth.login',
     entity: 'user',
     entityId: user._id,
     meta: { mfaMethod: result.method }
   });
-  recordEvent({ req, orgId: user.orgId, userId: user._id, type: EVENT.login });
+  recordEvent({ req, orgId, userId: user._id, type: EVENT.login });
   res.json({
-    ...authPayload(user, organisation),
+    ...(await authPayloadWithSession(user, organisation, orgId, role, req)),
     // A recovery code was just consumed. The user needs to know how many are left
     // before the last one goes and the account is locked for real.
     ...(result.method === 'backup-code'
@@ -503,9 +588,104 @@ const resendVerification = asyncHandler(async (req, res) => {
   });
 });
 
+// ── Refresh tokens & device sessions (#50, #51) ──
+
+/**
+ * Exchanges a refresh token for a new 15-minute access token, rotating the
+ * refresh token itself in the process. The frontend calls this shortly before
+ * the access token expires so a signed-in tab never has to bounce to /login on
+ * its own — see auth.service.ts's `scheduleExpiry`.
+ */
+const refresh = asyncHandler(async (req, res) => {
+  const { refreshToken } = req.body || {};
+  if (!refreshToken) throw httpError(400, 'refreshToken is required');
+  const { user, session, refreshToken: nextRefreshToken } = await sessionService.rotateSession({ refreshToken, req });
+
+  // The role for this session's pinned org is re-resolved fresh on every
+  // refresh, not carried over from the old access token — a role change or a
+  // removed membership then takes effect within 15 minutes (the next time
+  // this device refreshes) rather than only once the 30-day refresh token
+  // itself expires (#53, #54).
+  let role;
+  if (user.role === 'superadmin') {
+    role = 'superadmin';
+  } else {
+    const membership = await getActiveMembership(user._id, session.orgId);
+    if (!membership) throw httpError(401, 'You no longer have access to this organisation.', 'MEMBERSHIP_REVOKED');
+    role = membership.role;
+  }
+
+  res.json({
+    token: signToken(user, session.orgId, role),
+    expiresIn: sessionService.ACCESS_TOKEN_TTL_SECONDS,
+    refreshToken: nextRefreshToken
+  });
+});
+
+/**
+ * Ends one device's session. Deliberately does not require `protect`: the
+ * access token may already have expired by the time the tab is closed, and a
+ * logout that only works while still signed in is not useful. Idempotent —
+ * an unknown or already-revoked token is a no-op 200, not an error.
+ */
+const logout = asyncHandler(async (req, res) => {
+  await sessionService.revokeByToken(req.body?.refreshToken, 'logout');
+  res.json({ ok: true });
+});
+
+/** Lists the signed-in user's active devices/sessions. */
+const listSessions = asyncHandler(async (req, res) => {
+  const sessions = await sessionService.listActiveSessions(req.user._id);
+  res.json(sessions.map(s => ({
+    id: s._id,
+    userAgent: s.userAgent || null,
+    ip: s.ip || null,
+    createdAt: s.createdAt,
+    lastSeenAt: s.lastSeenAt,
+    expiresAt: s.expiresAt
+  })));
+});
+
+/** Signs out one of the user's own other devices, e.g. "I lost my phone". */
+const revokeSession = asyncHandler(async (req, res) => {
+  await sessionService.revokeOwnSession(req.user._id, req.params.id, 'user_revoked');
+  logAudit({ req, action: 'user.session_revoked', entity: 'user', entityId: req.user._id });
+  res.json({ ok: true });
+});
+
+// ── Org switching (#53, #54) ─────────────────────
+
+/**
+ * Re-issues a session for a different organisation the signed-in identity
+ * also belongs to.
+ *
+ * Treated as a fresh mini-login rather than mutating the current token: a
+ * device's session is conceptually "signed in as org X", and switching starts
+ * a new refresh-token family pinned to the new org rather than repurposing
+ * the old one — the same reasoning `rotateSession` already applies to a plain
+ * refresh, just for a deliberate org change instead of a time-based one.
+ */
+const switchOrg = asyncHandler(async (req, res) => {
+  const { targetOrgId: orgId } = req.body || {};
+  if (!orgId) throw httpError(400, 'targetOrgId is required');
+
+  const membership = await getActiveMembership(req.user._id, orgId);
+  if (!membership) throw httpError(403, 'You do not have access to that organisation.', 'MEMBERSHIP_REVOKED');
+
+  const user = await User.findById(req.user._id);
+  user.lastActiveOrgId = orgId;
+  await user.save();
+  const organisation = await Organisation.findById(orgId).select('-support');
+
+  logAudit({ req: auditContext(req, user, orgId), action: 'auth.org_switched', entity: 'user', entityId: user._id, meta: { orgId } });
+  res.json(await authPayloadWithSession(user, organisation, String(orgId), membership.role, req));
+});
+
 module.exports = {
   register, login, me, signToken, verifyMfa,
   inviteDetails, acceptInvite,
   forgotPassword, resetPassword,
-  verifyEmail, resendVerification, issueEmailVerification
+  verifyEmail, resendVerification, issueEmailVerification,
+  refresh, logout, listSessions, revokeSession,
+  switchOrg
 };

@@ -168,8 +168,8 @@ const DEFAULT_CONTENT: ContentToggles = {
             </div>
             <button type="button" (click)="signatureInput.click()"
               style="width:100%;border:2px dashed var(--border);border-radius:10px;padding:16px;text-align:center;background:var(--card);cursor:pointer;">
-              @if (defaults.signatureUrl) {
-                <img [src]="defaults.signatureUrl" alt="Signature" style="max-height:44px;max-width:100%;display:block;margin:0 auto 8px;" />
+              @if (signatureUrl()) {
+                <img [src]="signatureUrl()" alt="Signature" style="max-height:44px;max-width:100%;display:block;margin:0 auto 8px;" />
                 <div style="font-size:11px;color:var(--green);font-weight:600;display:flex;gap:4px;align-items:center;justify-content:center;">
                   <app-icon name="checkCircle" [size]="13" /> Uploaded — click to replace
                 </div>
@@ -179,7 +179,7 @@ const DEFAULT_CONTENT: ContentToggles = {
               }
             </button>
             <input #signatureInput type="file" accept="image/*" hidden (change)="onSignatureFile($event)" />
-            @if (defaults.signatureUrl) {
+            @if (signatureUrl()) {
               <button class="btn ghost sm" type="button" style="margin-top:8px;" (click)="removeSignature()">Remove signature</button>
             }
             <div class="field" style="margin-top:12px;">
@@ -371,7 +371,8 @@ const DEFAULT_CONTENT: ContentToggles = {
               [showAmountInWords]="content().showAmountInWords"
               [invoiceTitleLabel]="invoiceTitleLabel()"
               [headerImageUrl]="headerImageUrl()"
-              [invoiceDefaults]="defaults" />
+              [invoiceDefaults]="defaults"
+              [signatureSrc]="signatureUrl()" />
           </div>
         </div>
       </div>
@@ -414,6 +415,19 @@ export class InvoiceTemplatesComponent implements OnInit {
    */
   logoDirty = signal(false);
   headerImageDirty = signal(false);
+  /**
+   * The signature, held apart from `defaults` for the same reason the logo is
+   * held apart from `brandingConfig` (#45).
+   *
+   * The API returns `signatureAssetUrl`, never the bytes — so after a load this
+   * holds a *URL*. Sending that back on `signatureUrl` would store a URL as
+   * image data, and sending the empty string the response now carries would
+   * erase the signature on any unrelated save (changing the bank name, say).
+   * `signatureDirty` is what distinguishes "the user changed this" from "this is
+   * just what was loaded".
+   */
+  signatureUrl = signal('');
+  signatureDirty = signal(false);
   accentColor = signal('#4f46e5');
   invoiceTitleLabel = signal('');
   mode = signal<PickerMode>('preset');
@@ -453,6 +467,7 @@ export class InvoiceTemplatesComponent implements OnInit {
 
   dirty = computed(() =>
     this.defaultsDirty() ||
+    this.signatureDirty() ||
     this.logoUrl() !== this.savedLogoUrl() ||
     this.headerImageUrl() !== this.savedHeaderImageUrl() ||
     this.accentColor() !== this.savedAccentColor() ||
@@ -482,6 +497,10 @@ export class InvoiceTemplatesComponent implements OnInit {
 
     this.defaults = { ...(branding.invoiceDefaults || {}) };
     this.defaultsDirty.set(false);
+    // Same treatment as the logo: what comes back is an asset URL, so it is held
+    // separately and only written back when the user actually changes it.
+    this.signatureUrl.set(this.api.assetUrl(branding.invoiceDefaults?.signatureAssetUrl));
+    this.signatureDirty.set(false);
     this.logoUrl.set(logo); this.savedLogoUrl.set(logo);
     this.headerImageUrl.set(headerImage); this.savedHeaderImageUrl.set(headerImage);
     this.accentColor.set(accent); this.savedAccentColor.set(accent);
@@ -557,16 +576,18 @@ export class InvoiceTemplatesComponent implements OnInit {
     }
     const reader = new FileReader();
     reader.onload = () => {
-      this.defaults.signatureUrl = reader.result as string;
-      this.touchDefaults();
+      this.signatureUrl.set(reader.result as string);
+      this.signatureDirty.set(true);
     };
     reader.readAsDataURL(file);
   }
 
   removeSignature() {
     // An empty string clears it server-side; `undefined` would leave it untouched.
-    this.defaults.signatureUrl = '';
-    this.touchDefaults();
+    // `signatureDirty` is what makes the difference between the two — see the
+    // field's declaration.
+    this.signatureUrl.set('');
+    this.signatureDirty.set(true);
   }
 
   removeHeaderImage() {
@@ -579,6 +600,13 @@ export class InvoiceTemplatesComponent implements OnInit {
     this.headerImageUrl.set(this.savedHeaderImageUrl());
     this.logoDirty.set(false);
     this.headerImageDirty.set(false);
+    // Back to whatever the last response said, which for the signature is the
+    // asset URL rather than the bytes.
+    const savedDefaults = this.auth.organisation()?.brandingConfig?.invoiceDefaults;
+    this.defaults = { ...(savedDefaults || {}) };
+    this.defaultsDirty.set(false);
+    this.signatureUrl.set(this.api.assetUrl(savedDefaults?.signatureAssetUrl));
+    this.signatureDirty.set(false);
     this.accentColor.set(this.savedAccentColor());
     this.invoiceTitleLabel.set(this.savedInvoiceTitleLabel());
     this.mode.set(this.savedMode());
@@ -608,9 +636,25 @@ export class InvoiceTemplatesComponent implements OnInit {
       customInvoiceTemplate: this.customTemplate(),
       invoiceContent: this.content()
     };
-    // Only when touched, for the same reason as the images: the signature is base64
-    // image data, and sending a stale copy of the whole object back would rewrite it.
-    if (this.defaultsDirty()) brandingConfig['invoiceDefaults'] = this.defaults;
+    /**
+     * `invoiceDefaults` only when touched, and the signature only when *it* was
+     * touched — two separate conditions on purpose.
+     *
+     * `this.defaults` came from a response, so its `signatureUrl` is the empty
+     * string the API now sends (the bytes come back as an asset URL instead).
+     * Including that on an unrelated save — editing the bank details, say —
+     * would clear the signature, which is exactly the bug the logo had before
+     * `logoDirty` existed. The field is deleted rather than left empty so the
+     * server's dot-path merge leaves the stored image alone.
+     */
+    if (this.defaultsDirty() || this.signatureDirty()) {
+      const invoiceDefaults: Record<string, unknown> = { ...this.defaults };
+      delete invoiceDefaults['signatureAssetUrl'];
+      delete invoiceDefaults['hasSignature'];
+      if (this.signatureDirty()) invoiceDefaults['signatureUrl'] = this.signatureUrl();
+      else delete invoiceDefaults['signatureUrl'];
+      brandingConfig['invoiceDefaults'] = invoiceDefaults;
+    }
     // A data URI sets a new image; an empty string clears it. Either way this is
     // image data, never a URL.
     if (this.logoDirty()) brandingConfig['logoUrl'] = this.logoUrl();
@@ -631,6 +675,10 @@ export class InvoiceTemplatesComponent implements OnInit {
         this.headerImageDirty.set(false);
         this.defaultsDirty.set(false);
         this.defaults = { ...(saved.invoiceDefaults || this.defaults) };
+        // Switch the preview from the just-uploaded data URI to the cacheable
+        // asset URL the server minted, same as the logo above.
+        this.signatureUrl.set(this.api.assetUrl(saved.invoiceDefaults?.signatureAssetUrl));
+        this.signatureDirty.set(false);
         this.savedLogoUrl.set(logo);
         this.savedHeaderImageUrl.set(header);
         this.savedAccentColor.set(this.accentColor());

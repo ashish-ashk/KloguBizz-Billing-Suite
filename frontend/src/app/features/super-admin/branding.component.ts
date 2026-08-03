@@ -154,16 +154,35 @@ export class SuperBrandingComponent implements OnInit {
     supportEmail: '', websiteUrl: '', logoUrl: '', faviconUrl: ''
   };
 
+  /**
+   * Which images the operator actually changed in this session (#45).
+   *
+   * The API returns `logoAssetUrl`, never the bytes, so `branding.logoUrl` holds
+   * a *URL* after a load. Sending that back would store a URL as image data, and
+   * sending the empty string the response carries would erase the logo on any
+   * unrelated save (a colour change, say). Only a genuinely-changed image is
+   * included in the payload — the same rule the tenant-side uploader follows.
+   */
+  private dirtyImages = new Set<'logoUrl' | 'faviconUrl'>();
+
   constructor(private api: ApiService, private toast: ToastService) {}
 
   ngOnInit() {
     this.api.superSettings().subscribe({
       next: s => {
-        if (s['branding']) this.branding = { ...this.branding, ...s['branding'] };
+        if (s['branding']) this.applyLoaded(s['branding']);
         this.loading.set(false);
       },
       error: err => { this.loading.set(false); this.toast.httpError(err); }
     });
+  }
+
+  /** Points the previews at the cacheable asset URLs the API returns. */
+  private applyLoaded(loaded: Record<string, unknown>) {
+    this.branding = { ...this.branding, ...loaded };
+    this.branding.logoUrl = this.api.assetUrl(loaded['logoAssetUrl'] as string | undefined);
+    this.branding.faviconUrl = this.api.assetUrl(loaded['faviconAssetUrl'] as string | undefined);
+    this.dirtyImages.clear();
   }
 
   onFile(event: Event, key: 'logoUrl' | 'faviconUrl') {
@@ -171,7 +190,10 @@ export class SuperBrandingComponent implements OnInit {
     if (!file) return;
     if (file.size > 500 * 1024) { this.toast.error('Image must be under 500 KB.'); return; }
     const reader = new FileReader();
-    reader.onload = () => { this.branding[key] = reader.result as string; };
+    reader.onload = () => {
+      this.branding[key] = reader.result as string;
+      this.dirtyImages.add(key);
+    };
     reader.readAsDataURL(file);
   }
 
@@ -181,8 +203,23 @@ export class SuperBrandingComponent implements OnInit {
 
   save() {
     this.saving.set(true);
-    this.api.superSaveSetting('branding', this.branding).subscribe({
-      next: () => { this.saving.set(false); this.toast.success('Branding saved'); },
+    // Read-only fields the server derives, and any image the operator did not
+    // touch, are stripped rather than echoed back — see `dirtyImages`.
+    const payload: Record<string, unknown> = { ...this.branding };
+    delete payload['logoAssetUrl'];
+    delete payload['faviconAssetUrl'];
+    delete payload['hasLogo'];
+    delete payload['hasFavicon'];
+    for (const key of ['logoUrl', 'faviconUrl'] as const) {
+      if (!this.dirtyImages.has(key)) delete payload[key];
+    }
+
+    this.api.superSaveSetting('branding', payload).subscribe({
+      next: res => {
+        this.saving.set(false);
+        if (res?.value) this.applyLoaded(res.value as Record<string, unknown>);
+        this.toast.success('Branding saved');
+      },
       error: err => { this.saving.set(false); this.toast.httpError(err); }
     });
   }

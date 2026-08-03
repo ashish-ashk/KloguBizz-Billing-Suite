@@ -1,6 +1,6 @@
 const { Organisation } = require('../models/Organisation');
 const { Plan } = require('../models/Plan');
-const { User } = require('../models/User');
+const { Membership } = require('../models/Membership');
 const { Invoice } = require('../models/Invoice');
 const { httpError } = require('../utils/httpError');
 
@@ -32,8 +32,12 @@ async function getUsage(orgId) {
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
+  // Seats are counted by membership, not by `User.orgId` (#53, #54) — an
+  // identity can belong to more than one organisation, so its seat has to be
+  // charged to whichever org actually granted it, via Membership, not to
+  // whatever org it happened to be created in.
   const [users, invoicesThisMonth] = await Promise.all([
-    User.countDocuments({ orgId, status: { $ne: 'disabled' } }),
+    Membership.countDocuments({ orgId, status: { $ne: 'disabled' } }),
     Invoice.countDocuments({ orgId, createdAt: { $gte: monthStart } })
   ]);
   const overrides = org.limitOverrides || {};

@@ -7,7 +7,7 @@ import { ModalComponent } from '../../shared/ui';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
-import { DataRightsStatus, MfaSetup } from '../../core/models';
+import { DataRightsStatus, DeviceSession, MfaSetup } from '../../core/models';
 import { downloadBlob, fmtDate } from '../../core/format';
 
 /**
@@ -155,6 +155,34 @@ import { downloadBlob, fmtDate } from '../../core/format';
         </section>
       </div>
 
+      <!-- Active sessions (#50, #51) -->
+      <section class="card" style="margin-top:16px">
+        <div class="card-title">Active sessions</div>
+        <div class="card-sub" style="margin-bottom:14px">
+          Every device currently signed in to your account. Sessions expire on their own after
+          {{ 30 }} days, or end them here right away.
+        </div>
+        @if (sessions().length) {
+          <div style="display:grid;gap:8px">
+            @for (s of sessions(); track s.id) {
+              <div class="stat-block" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+                <div>
+                  <div class="sb-value" style="font-size:13px">{{ s.userAgent || 'Unknown device' }}</div>
+                  <div class="sb-label">
+                    {{ s.ip || 'Unknown location' }} · last active {{ fmtDate(s.lastSeenAt) }}
+                  </div>
+                </div>
+                <button class="btn secondary sm" type="button" [disabled]="revoking() === s.id" (click)="endSession(s)">
+                  @if (revoking() === s.id) { <span class="spinner"></span> } Sign out
+                </button>
+              </div>
+            }
+          </div>
+        } @else {
+          <div class="card-sub">No other active sessions.</div>
+        }
+      </section>
+
       <!-- MFA enrolment -->
       <app-modal [open]="!!setup()" title="Set up two-factor authentication" [width]="520" (close)="cancelSetup()">
         @if (setup(); as s) {
@@ -283,6 +311,10 @@ export class AccountSecurityComponent implements OnInit {
   mfaEnabled = signal(false);
   verified = signal(true);
 
+  // ── Active sessions (#50, #51) ──
+  sessions = signal<DeviceSession[]>([]);
+  revoking = signal<string | null>(null);
+
   code = '';
   password = '';
   confirmName = '';
@@ -294,6 +326,7 @@ export class AccountSecurityComponent implements OnInit {
 
   ngOnInit() {
     this.api.dataRights().subscribe({ next: r => this.rights.set(r), error: err => this.toast.httpError(err) });
+    this.api.listSessions().subscribe({ next: s => this.sessions.set(s), error: () => {} });
     // Forced, because this page is specifically about the fields the session carries —
     // reading a minute-old cached answer here would show a stale verification state
     // immediately after the user acted on it.
@@ -409,6 +442,20 @@ export class AccountSecurityComponent implements OnInit {
       () => this.toast.success('Recovery codes copied'),
       () => this.toast.info('Copy them manually — the clipboard was not available')
     );
+  }
+
+  // ── Active sessions ──────────────────────────
+
+  endSession(s: DeviceSession) {
+    this.revoking.set(s.id);
+    this.api.revokeSession(s.id).subscribe({
+      next: () => {
+        this.revoking.set(null);
+        this.sessions.update(list => list.filter(x => x.id !== s.id));
+        this.toast.success('That device has been signed out.');
+      },
+      error: err => { this.revoking.set(null); this.toast.httpError(err); }
+    });
   }
 
   // ── Data rights ──────────────────────────────

@@ -46,8 +46,11 @@ const invoiceDefaultsSchema = new mongoose.Schema({
   /** UPI id printed on the invoice. Stored as text, not a QR: a QR this product
    *  cannot verify scans is a payment instruction that might not work. */
   upiId: { type: String, default: '' },
-  /** Base64 signature image, same storage choice as the logo (see #45's note). */
+  /** Legacy inline signature image. Empty once the image lives in object
+   *  storage — `signatureKey` then holds it. See services/brandingAssetService.js. */
   signatureUrl: { type: String, default: '' },
+  /** Object-storage key for the signature image (#45). */
+  signatureKey: { type: String, default: '' },
   signatoryName: { type: String, default: '' },
   /** Default terms, overridable per invoice. */
   termsAndConditions: { type: String, default: '' },
@@ -55,11 +58,31 @@ const invoiceDefaultsSchema = new mongoose.Schema({
 }, { _id: false });
 
 const brandingSchema = new mongoose.Schema({
+  /**
+   * Images live in one of two places (#45), and exactly one of each pair is
+   * populated for a freshly-saved image:
+   *
+   *  - `*Key` — a content-addressed object-storage key, when an external store
+   *    is configured (`STORAGE_DRIVER=s3|local`).
+   *  - `*Url` — the legacy inline base64 data URI, used when no store is
+   *    configured and on documents that predate migration 007.
+   *
+   * Nothing reads these fields directly: `brandingAssetService.resolveImage`
+   * prefers the key and falls back to the data URI, so a partially-migrated
+   * database keeps working.
+   */
   logoUrl: String,
+  logoKey: { type: String, default: '' },
   headerImageUrl: String,
+  headerImageKey: { type: String, default: '' },
   primaryColor: { type: String, default: '#4f46e5' },
   invoicePrefix: { type: String, default: 'KLG' },
   creditNotePrefix: { type: String, default: 'CN' },
+  // Prefixes for the three pre-invoice documents (2.2 #11–#13). Distinct
+  // defaults so the number alone says what kind of document it is.
+  quotationPrefix: { type: String, default: 'QT' },
+  proformaPrefix: { type: String, default: 'PI' },
+  deliveryChallanPrefix: { type: String, default: 'DC' },
   // How many digits the per-financial-year counter is padded to. Was hardcoded
   // at 3, so the 1000th document of a year broke the visual format mid-series.
   invoiceNumberPadding: { type: Number, default: 3, min: 1, max: 10 },
@@ -228,7 +251,22 @@ const organisationSchema = new mongoose.Schema({
   // numbering series per document type, so a credit note must never draw from
   // the tax-invoice counter. Same FY-reset semantics as above.
   creditNoteSequence: { type: Number, default: 0 },
-  creditNoteSequenceFY: { type: String, default: null }
+  creditNoteSequenceFY: { type: String, default: null },
+  /**
+   * Counters for the three pre-invoice documents (2.2 #11–#13).
+   *
+   * Separate from the invoice counter so a quotation can never consume an
+   * invoice number — a gap in the tax-invoice series is what an auditor reads
+   * as a missing document. Same FY-reset semantics as above, and the same
+   * migration-safe handling of a null FY: an org that starts issuing
+   * quotations today gets 1, and one that somehow already has a count keeps it.
+   */
+  quotationSequence: { type: Number, default: 0 },
+  quotationSequenceFY: { type: String, default: null },
+  proformaSequence: { type: Number, default: 0 },
+  proformaSequenceFY: { type: String, default: null },
+  deliveryChallanSequence: { type: Number, default: 0 },
+  deliveryChallanSequenceFY: { type: String, default: null }
 }, { timestamps: true });
 
 organisationSchema.index({ adminEmail: 1 });

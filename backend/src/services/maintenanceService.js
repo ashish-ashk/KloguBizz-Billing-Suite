@@ -7,6 +7,7 @@ const { Payment } = require('../models/Payment');
 const { CreditNote } = require('../models/CreditNote');
 const { Subscription } = require('../models/Subscription');
 const { ReminderLog } = require('../models/ReminderLog');
+const { SalesDocument } = require('../models/SalesDocument');
 const { User } = require('../models/User');
 const { Organisation } = require('../models/Organisation');
 const { purgeCutoff } = require('../utils/softDelete');
@@ -78,16 +79,48 @@ async function sweepOverdueInvoices() {
  * and can be purged again on the next run. The other order leaves orphans nothing will
  * ever look for — the same reasoning as `saveMasters` writing before deleting.
  */
+/**
+ * Ages lapsed quotations into 'expired' (2.2 #11).
+ *
+ * Global, one write for every tenant, exactly like the overdue sweep above and
+ * for the same reasons. And exactly like it, **the stored value is not what the
+ * product reads**: `salesDocumentController.isExpired` derives expiry from
+ * `validUntil` at read time, so a quotation that lapsed at midnight shows as
+ * expired immediately rather than whenever this next runs. This sweep exists so
+ * the persisted status eventually agrees — for anyone querying the collection
+ * directly, and so the status filter on the list is not a special case.
+ *
+ * Only `draft` and `sent` are aged. An accepted or rejected quotation has been
+ * *decided*; relabelling that as merely lapsed would lose the decision, and the
+ * conversion-rate figure is computed from exactly those two.
+ */
+async function sweepExpiredQuotations() {
+  const result = await SalesDocument.updateMany(
+    {
+      kind: 'quotation',
+      status: { $in: ['draft', 'sent'] },
+      deletedAt: null,
+      // A comparison operator never matches a null or missing field, so this
+      // cannot sweep a quotation that simply has no expiry date — the trap the
+      // aggregation form of this query hit in Phase 3.
+      validUntil: { $lt: new Date() }
+    },
+    { $set: { status: 'expired' } }
+  );
+  return { expiredQuotations: result.modifiedCount ?? 0 };
+}
+
 async function purgeExpiredDeletions() {
   const cutoff = purgeCutoff();
-  const expired = { clients: 0, items: 0, invoices: 0, vendors: 0, purchases: 0, organisations: 0 };
+  const expired = { clients: 0, items: 0, invoices: 0, vendors: 0, purchases: 0, salesDocuments: 0, organisations: 0 };
 
   for (const [key, Model] of [
     ['clients', Client],
     ['items', Item],
     ['invoices', Invoice],
     ['vendors', Vendor],
-    ['purchases', Purchase]
+    ['purchases', Purchase],
+    ['salesDocuments', SalesDocument]
   ]) {
     const result = await Model.deleteMany({ deletedAt: { $ne: null, $lt: cutoff } });
     expired[key] = result.deletedCount ?? 0;
@@ -96,7 +129,7 @@ async function purgeExpiredDeletions() {
   // Tenants whose owner asked for erasure and whose grace window has passed.
   const doomed = await Organisation.find({ deletedAt: { $ne: null, $lt: cutoff } }).select('_id name').lean();
   for (const org of doomed) {
-    for (const Model of [User, Client, Item, Invoice, Payment, CreditNote, Vendor, Purchase, Subscription, ReminderLog]) {
+    for (const Model of [User, Client, Item, Invoice, Payment, CreditNote, Vendor, Purchase, Subscription, ReminderLog, SalesDocument]) {
       await Model.deleteMany({ orgId: org._id });
     }
     await Organisation.deleteOne({ _id: org._id });
@@ -117,10 +150,13 @@ async function runOnce() {
     const result = await sweepOverdueInvoices();
     if (result.updated) logger.info('overdue sweep', result);
 
+    const quotations = await sweepExpiredQuotations();
+    if (quotations.expiredQuotations) logger.info('quotation expiry sweep', quotations);
+
     const purged = await purgeExpiredDeletions();
     if (Object.values(purged).some(Boolean)) logger.info('recycle bin purge', purged);
 
-    return { ...result, purged };
+    return { ...result, ...quotations, purged };
   } catch (error) {
     logger.error('maintenance sweep failed', { err: error });
     return null;
@@ -152,6 +188,7 @@ function stopMaintenanceScheduler() {
 
 module.exports = {
   sweepOverdueInvoices,
+  sweepExpiredQuotations,
   purgeExpiredDeletions,
   startMaintenanceScheduler,
   stopMaintenanceScheduler

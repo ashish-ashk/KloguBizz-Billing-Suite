@@ -23,6 +23,10 @@ const ICONS: Record<string, string> = {
   box: `<rect x="3" y="3" width="7" height="7" rx="1.3"/><rect x="14" y="3" width="7" height="7" rx="1.3"/><rect x="3" y="14" width="7" height="7" rx="1.3"/><rect x="14" y="14" width="7" height="7" rx="1.3"/>`,
   palette: `<path d="M12 2a10 10 0 1 0 3.2 19.5 2.3 2.3 0 0 0 1.2-3.7 1.9 1.9 0 0 1 1.4-3.1H19a3 3 0 0 0 3-3c0-5.2-4.5-9.7-10-9.7Z"/><circle cx="7.3" cy="10.8" r="1.15"/><circle cx="10.6" cy="7.2" r="1.15"/><circle cx="15.2" cy="8.4" r="1.15"/><circle cx="16.6" cy="12.8" r="1.15"/>`,
   template: `<rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M3 9h18"/><path d="M9 21V9"/>`,
+  // A plain document, for the pre-invoice papers (quotations, proforma,
+  // challans). Deliberately distinct from `invoice`, which has the folded
+  // corner and the rupee-ish ruled lines — these are not tax invoices.
+  fileText: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/>`,
   shield: `<path d="M12 2 4.5 5v6c0 5 3.15 7.9 7.5 9 4.35-1.1 7.5-4 7.5-9V5L12 2Z"/>`,
   logout: `<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>`,
   sun: `<circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.6M12 18.9v2.6M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M2.5 12h2.6M18.9 12h2.6M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/>`,

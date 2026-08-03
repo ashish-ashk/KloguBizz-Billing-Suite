@@ -34,6 +34,9 @@ export const routes: Routes = [
       // Phase 5: the section-wise return, which is what can actually be filed.
       { path: 'gst-returns', loadComponent: () => import('./features/reports/gst-returns.component').then(m => m.GstReturnsComponent) },
       { path: 'purchases', loadComponent: () => import('./features/purchases/purchases.component').then(m => m.PurchasesComponent) },
+      // Quotations, proforma invoices and delivery challans — the paperwork
+      // before the invoice (2.2 #11–#13).
+      { path: 'sales-documents', loadComponent: () => import('./features/sales-documents/sales-documents.component').then(m => m.SalesDocumentsComponent) },
       { path: 'receivables', loadComponent: () => import('./features/reports/receivables.component').then(m => m.ReceivablesComponent) },
       { path: 'activity', loadComponent: () => import('./features/account/activity.component').then(m => m.ActivityComponent) },
       { path: 'security', loadComponent: () => import('./features/account/security.component').then(m => m.AccountSecurityComponent) },

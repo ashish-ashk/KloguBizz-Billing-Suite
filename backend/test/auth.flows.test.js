@@ -318,6 +318,117 @@ test('an invited user cannot use password reset to bypass the invite flow', mayb
   assert.equal(requested.body.resetUrl, undefined, 'no reset link for an unactivated invitee');
 }));
 
+// ── Refresh tokens & device sessions (#50, #51) ──
+
+async function loginFresh(owner) {
+  const res = await call('POST', '/auth/login', { body: { email: owner.email, password: owner.password } });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.ok(res.body.refreshToken, 'login should issue a refresh token');
+  assert.ok(res.body.expiresIn > 0);
+  return res.body;
+}
+
+test('signing in on a second device no longer evicts the first', maybe(async () => {
+  const owner = await registerOrg();
+  const deviceA = await loginFresh(owner);
+  const deviceB = await loginFresh(owner);
+
+  // Two logins within the same second can mint byte-identical access tokens
+  // (a JWT here carries no per-session claim, just second-granularity `iat`),
+  // so the refresh token — always a fresh 32 random bytes — is the reliable
+  // signal that these are genuinely two independent sessions.
+  assert.notEqual(deviceA.refreshToken, deviceB.refreshToken);
+  assert.equal((await call('GET', '/auth/me', { token: deviceA.token })).status, 200);
+  assert.equal((await call('GET', '/auth/me', { token: deviceB.token })).status, 200);
+}));
+
+test('/auth/refresh rotates the refresh token and the old one stops working', maybe(async () => {
+  const owner = await registerOrg();
+  const session = await loginFresh(owner);
+
+  const rotated = await call('POST', '/auth/refresh', { body: { refreshToken: session.refreshToken } });
+  assert.equal(rotated.status, 200, JSON.stringify(rotated.body));
+  assert.ok(rotated.body.token && rotated.body.refreshToken);
+  assert.notEqual(rotated.body.refreshToken, session.refreshToken);
+  // The new access token works.
+  assert.equal((await call('GET', '/auth/me', { token: rotated.body.token })).status, 200);
+
+  // The token just rotated away is now dead — refreshing with it again fails.
+  const replay = await call('POST', '/auth/refresh', { body: { refreshToken: session.refreshToken } });
+  assert.equal(replay.status, 401);
+}));
+
+test('replaying an already-rotated refresh token is treated as theft and kills the whole chain', maybe(async () => {
+  const owner = await registerOrg();
+  const session = await loginFresh(owner);
+  const accessTokenAtLogin = session.token;
+
+  const rotated = await call('POST', '/auth/refresh', { body: { refreshToken: session.refreshToken } });
+  assert.equal(rotated.status, 200);
+
+  // Someone presents the original (now-rotated-away) refresh token — the reuse
+  // signal. The whole family, including the token just legitimately rotated
+  // to, must die, and so must every access token issued to this user.
+  const reuse = await call('POST', '/auth/refresh', { body: { refreshToken: session.refreshToken } });
+  assert.equal(reuse.status, 401);
+  assert.equal(reuse.body.code, 'REFRESH_REUSE_DETECTED');
+
+  const usingRotated = await call('POST', '/auth/refresh', { body: { refreshToken: rotated.body.refreshToken } });
+  assert.equal(usingRotated.status, 401, 'the legitimately-rotated-to token should also have been revoked');
+
+  const meWithOldAccessToken = await call('GET', '/auth/me', { token: accessTokenAtLogin });
+  assert.equal(meWithOldAccessToken.status, 401, 'sessionVersion should have been bumped, killing live access tokens too');
+}));
+
+test('/auth/logout revokes the refresh token', maybe(async () => {
+  const owner = await registerOrg();
+  const session = await loginFresh(owner);
+
+  const out = await call('POST', '/auth/logout', { body: { refreshToken: session.refreshToken } });
+  assert.equal(out.status, 200);
+
+  const afterLogout = await call('POST', '/auth/refresh', { body: { refreshToken: session.refreshToken } });
+  assert.equal(afterLogout.status, 401);
+
+  // Idempotent: logging out twice, or a token that was never valid, is not an error.
+  assert.equal((await call('POST', '/auth/logout', { body: { refreshToken: session.refreshToken } })).status, 200);
+  assert.equal((await call('POST', '/auth/logout', { body: { refreshToken: 'not-a-real-token-at-all-000000' } })).status, 200);
+}));
+
+test('a user can list and revoke their own device sessions', maybe(async () => {
+  const owner = await registerOrg();
+  const deviceA = await loginFresh(owner);
+  const deviceB = await loginFresh(owner);
+
+  const list = await call('GET', '/auth/sessions', { token: deviceA.token });
+  assert.equal(list.status, 200);
+  assert.ok(list.body.length >= 2);
+
+  const target = list.body[0];
+  const revoked = await call('DELETE', `/auth/sessions/${target.id}`, { token: deviceA.token });
+  assert.equal(revoked.status, 200);
+
+  // Whichever refresh token that session held no longer works. We don't know
+  // from the list alone which of deviceA/deviceB it was, so just confirm the
+  // count dropped.
+  const after = await call('GET', '/auth/sessions', { token: deviceB.token });
+  assert.equal(after.body.length, list.body.length - 1);
+}));
+
+test('changing your password revokes every refresh token too, not just sessionVersion', maybe(async () => {
+  const owner = await registerOrg();
+  const session = await loginFresh(owner);
+
+  const changed = await call('POST', '/auth/change-password', {
+    token: session.token,
+    body: { currentPassword: owner.password, newPassword: 'ChangedNow@1' }
+  });
+  assert.equal(changed.status, 200);
+
+  const afterChange = await call('POST', '/auth/refresh', { body: { refreshToken: session.refreshToken } });
+  assert.equal(afterChange.status, 401, 'a refresh token must not survive a password change');
+}));
+
 // ── Suspension ───────────────────────────────────
 
 test('a suspended organisation cannot write, but can still read and export', maybe(async () => {

@@ -27,8 +27,10 @@ const publicBranding = asyncHandler(async (req, res) => {
     primaryColor: branding.primaryColor,
     secondaryColor: branding.secondaryColor,
     accentColor: branding.accentColor,
-    logoAssetUrl: platformAssetUrl('logo', branding.logoUrl),
-    faviconAssetUrl: platformAssetUrl('favicon', branding.faviconUrl),
+    // Either field may hold the image — an object-storage key once #45's
+    // migration has run, the legacy inline data URI before that.
+    logoAssetUrl: platformAssetUrl('logo', { key: branding.logoKey, dataUri: branding.logoUrl }),
+    faviconAssetUrl: platformAssetUrl('favicon', { key: branding.faviconKey, dataUri: branding.faviconUrl }),
     // Kept in the shape for compatibility, but deliberately empty — the bytes
     // now come from the asset endpoints above.
     logoUrl: '',

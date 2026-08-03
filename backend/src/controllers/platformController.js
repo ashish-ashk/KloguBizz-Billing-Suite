@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const { Organisation } = require('../models/Organisation');
 const { User } = require('../models/User');
+const { Membership } = require('../models/Membership');
 const { Invoice } = require('../models/Invoice');
 const { Payment } = require('../models/Payment');
 const { Client } = require('../models/Client');
@@ -23,10 +24,13 @@ const { resolveFlags, sanitiseFlagOverrides, FLAGS } = require('../services/feat
 const { issueImpersonationToken, IMPERSONATION_TTL_SECONDS } = require('../services/impersonationService');
 const { capabilitiesFor, resolvePlatformRole, ROLE_CAPABILITIES } = require('../middleware/platformRoleMiddleware');
 const { createToken, expiryFromNow, RESET_TTL_MS } = require('../services/tokenService');
+const { revokeAllForUser, revokeAllForOrg } = require('../services/sessionService');
 const { sendPasswordResetEmail } = require('../services/emailService');
 const { EVENT } = require('../services/usageEventService');
 const { invalidatePlatformNotice } = require('../services/noticeService');
 const requestMetrics = require('../utils/requestMetrics');
+const storageService = require('../services/storageService');
+const imageService = require('../services/imageService');
 const { env } = require('../config/env');
 
 /**
@@ -167,6 +171,17 @@ const systemHealth = asyncHandler(async (req, res) => {
   res.json({
     database,
     collectionCounts: { organisations: orgs, users, invoices, payments, usageEvents: events, auditLogs: audit },
+    /**
+     * Where uploaded images live, and whether they are being resized (#45).
+     *
+     * Both are worth stating out loud rather than assuming: `driver: 'local'` on
+     * an ephemeral filesystem silently loses every logo on redeploy, and
+     * `imageProcessing.available: false` (sharp failed to load) means uploads
+     * are being stored at whatever size they arrived. Neither is visible from
+     * anywhere else.
+     */
+    storage: storageService.describe(),
+    imageProcessing: imageService.describe(),
     requests: requestMetrics.snapshot(),
     process: {
       nodeVersion: process.version,
@@ -211,7 +226,7 @@ const tenantDetail = asyncHandler(async (req, res) => {
     recentAudit,
     recentEvents
   ] = await Promise.all([
-    User.find({ orgId }).select('-passwordHash').sort({ createdAt: 1 }).lean(),
+    tenantUsersFor(orgId),
     Subscription.find({ orgId }).sort({ createdAt: -1 }).limit(10).lean(),
     // Reuses the tenant's own quota logic, so the console can never disagree with
     // what the customer sees on their subscription page.
@@ -317,10 +332,36 @@ const tenantInvoices = asyncHandler(async (req, res) => {
   res.json(page);
 });
 
+/** Shapes a (User, Membership) pair into the `OrgUser` the frontend already
+ *  renders — role/status now come from the membership, not the user, but the
+ *  wire shape is unchanged so no frontend page needed to know memberships
+ *  exist underneath its team list. */
+function shapeOrgUser(user, membership) {
+  return {
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    role: membership.role,
+    status: membership.status,
+    lastLoginAt: user.lastLoginAt,
+    createdAt: membership.createdAt || user.createdAt
+  };
+}
+
+/** Every active-membership user for one org, shaped like the `OrgUser` the
+ *  frontend already renders. Shared by the tenant drill-down overview (which
+ *  needs the list inline, to find the owner among it) and the standalone
+ *  users-tab endpoint below. */
+async function tenantUsersFor(orgId) {
+  const memberships = await Membership.find({ orgId }).sort({ createdAt: 1 }).lean();
+  const users = await User.find({ _id: { $in: memberships.map(m => m.userId) } }).select('-passwordHash').lean();
+  const byId = new Map(users.map(u => [String(u._id), u]));
+  return memberships.map(m => byId.has(String(m.userId)) ? shapeOrgUser(byId.get(String(m.userId)), m) : null).filter(Boolean);
+}
+
 const tenantUsers = asyncHandler(async (req, res) => {
   const orgId = objectIdOrThrow(req.params.id, 'Organisation id');
-  const users = await User.find({ orgId }).select('-passwordHash').sort({ createdAt: 1 }).lean();
-  res.json(users);
+  res.json(await tenantUsersFor(orgId));
 });
 
 /**
@@ -378,7 +419,8 @@ const setTenantStatus = asyncHandler(async (req, res) => {
   // belt and braces rather than the enforcement itself, but it also means the
   // tenant sees the banner immediately instead of on their next navigation.
   if (status === 'suspended' || status === 'cancelled') {
-    await User.updateMany({ orgId: org._id }, { $inc: { sessionVersion: 1 } });
+    await bumpSessionVersionForOrg(org._id);
+    await revokeAllForOrg(org._id, 'admin_revoked');
   }
 
   logAudit({
@@ -507,12 +549,25 @@ const setTenantSupport = asyncHandler(async (req, res) => {
   res.json({ support: org.support });
 });
 
+/**
+ * Every user with an *active membership* in this org, not `User.orgId` — a
+ * membership can put someone in an org that isn't their identity's legacy
+ * "home" org (#53, #54), and a suspend/force-logout that missed them would be
+ * a suspension with a hole in it.
+ */
+async function bumpSessionVersionForOrg(orgId) {
+  const userIds = await Membership.find({ orgId, status: 'active' }).distinct('userId');
+  const result = await User.updateMany({ _id: { $in: userIds } }, { $inc: { sessionVersion: 1 } });
+  return result.modifiedCount ?? 0;
+}
+
 /** Revokes every session in the organisation. */
 const forceLogoutOrg = asyncHandler(async (req, res) => {
   const org = await findOrgOrThrow(req.params.id, { select: 'name' });
-  const result = await User.updateMany({ orgId: org._id }, { $inc: { sessionVersion: 1 } });
-  logAudit({ req, action: 'org.sessions_revoked', entity: 'organisation', entityId: org._id, orgId: org._id, meta: { users: result.modifiedCount ?? 0 } });
-  res.json({ ok: true, users: result.modifiedCount ?? 0 });
+  const modifiedCount = await bumpSessionVersionForOrg(org._id);
+  await revokeAllForOrg(org._id, 'admin_revoked');
+  logAudit({ req, action: 'org.sessions_revoked', entity: 'organisation', entityId: org._id, orgId: org._id, meta: { users: modifiedCount } });
+  res.json({ ok: true, users: modifiedCount });
 });
 
 /**
@@ -533,25 +588,30 @@ const impersonate = asyncHandler(async (req, res) => {
   // if every operator were careful.
   const readOnly = req.body?.readOnly !== false;
 
-  let target;
+  // Resolved via Membership, not User.orgId — a user can belong to more than
+  // one organisation now (#53, #54), so "part of this org" is a membership
+  // fact, not something the User document alone can answer.
+  let membership;
   if (req.body?.userId) {
-    target = await User.findOne({ _id: objectIdOrThrow(req.body.userId, 'userId'), orgId: org._id });
-    if (!target) throw httpError(404, 'That user is not part of this organisation');
+    const userId = objectIdOrThrow(req.body.userId, 'userId');
+    membership = await Membership.findOne({ userId, orgId: org._id, status: 'active' }).lean();
+    if (!membership) throw httpError(404, 'That user is not an active member of this organisation');
   } else {
     // Default to the owner, then any admin: the account with the widest view of
     // the tenant, which is what a support session usually needs.
-    target = (org.ownerId && await User.findOne({ _id: org.ownerId, orgId: org._id, status: 'active' }))
-      || await User.findOne({ orgId: org._id, role: 'admin', status: 'active' })
-      || await User.findOne({ orgId: org._id, status: 'active' });
-    if (!target) throw httpError(409, 'This organisation has no active user to view as.', 'NO_ACTIVE_USER');
+    membership = (org.ownerId && await Membership.findOne({ userId: org.ownerId, orgId: org._id, status: 'active' }).lean())
+      || await Membership.findOne({ orgId: org._id, role: 'admin', status: 'active' }).sort({ createdAt: 1 }).lean()
+      || await Membership.findOne({ orgId: org._id, status: 'active' }).sort({ createdAt: 1 }).lean();
+    if (!membership) throw httpError(409, 'This organisation has no active user to view as.', 'NO_ACTIVE_USER');
   }
 
-  if (target.status !== 'active') throw httpError(409, 'That user’s account is not active.', 'USER_INACTIVE');
+  const target = await User.findById(membership.userId);
+  if (!target || target.status !== 'active') throw httpError(409, 'That user’s account is not active.', 'USER_INACTIVE');
   if (target.role === 'superadmin') {
     throw httpError(403, 'A platform account cannot be impersonated.', 'IMPERSONATION_FORBIDDEN');
   }
 
-  const token = issueImpersonationToken({ targetUser: target, operator: req.user, readOnly });
+  const token = issueImpersonationToken({ targetUser: target, operator: req.user, readOnly, orgId: org._id, role: membership.role });
   const expiresAt = new Date(Date.now() + IMPERSONATION_TTL_SECONDS * 1000);
 
   logAudit({
@@ -567,7 +627,7 @@ const impersonate = asyncHandler(async (req, res) => {
     token,
     expiresAt,
     readOnly,
-    user: { id: target._id, name: target.name, email: target.email, role: target.role, status: target.status },
+    user: { id: target._id, name: target.name, email: target.email, role: membership.role, status: target.status },
     organisation: serialiseOrganisation(org),
     impersonation: { by: String(req.user._id), byName: req.user.name, readOnly, expiresAt }
   });
@@ -577,44 +637,70 @@ const impersonate = asyncHandler(async (req, res) => {
 
 const TENANT_ROLES = ['admin', 'accountant', 'viewer'];
 
-async function findTenantUserOrThrow(id) {
-  const user = await User.findById(objectIdOrThrow(id, 'User id'));
+/**
+ * Resolves a tenant user for a *specific* organisation.
+ *
+ * These routes (`/superadmin/users/:id/...`) are flat by id, which was
+ * unambiguous when one `User` belonged to exactly one org. Now that a user
+ * can hold more than one membership (#53, #54), `:id` alone cannot say which
+ * org's membership an operator means to act on — so every caller supplies
+ * `targetOrgId` (the tenant drill-down page always knows which organisation
+ * it's looking at — named "target", not "orgId", because server.js strips a
+ * literal `orgId` key from every request body unconditionally) and this
+ * resolves the membership for that pair specifically, which doubles as the
+ * authorization check: a mismatched org 404s rather than silently acting on
+ * whichever org the id's `User.orgId` happened to be.
+ */
+async function findTenantMembershipOrThrow(userId, orgId) {
+  const uid = objectIdOrThrow(userId, 'User id');
+  const user = await User.findById(uid);
   if (!user) throw httpError(404, 'User not found');
   // A platform account is not a tenant user and is not managed here. Allowing it
   // would make this the route by which one superadmin resets another's password.
+  // Checked *before* requiring `orgId` below: a platform account has none, and
+  // a caller probing this route with one shouldn't get a generic 400 instead
+  // of the refusal that actually applies.
   if (user.role === 'superadmin') {
     throw httpError(403, 'Platform accounts are not managed from the tenant console.', 'PLATFORM_USER');
   }
-  return user;
+  const oid = objectIdOrThrow(orgId, 'orgId');
+  const membership = await Membership.findOne({ userId: uid, orgId: oid });
+  if (!membership) throw httpError(404, 'User not found');
+  return { user, membership };
 }
 
 const updateTenantUser = asyncHandler(async (req, res) => {
-  const user = await findTenantUserOrThrow(req.params.id);
+  const { user, membership } = await findTenantMembershipOrThrow(req.params.id, req.body?.targetOrgId);
+  const orgId = membership.orgId;
   const { role, status } = req.body || {};
 
   if (role !== undefined) {
     if (!TENANT_ROLES.includes(role)) throw httpError(400, `role must be one of: ${TENANT_ROLES.join(', ')}`);
-    user.role = role;
+    membership.role = role;
   }
   if (status !== undefined) {
     if (!['active', 'disabled'].includes(status)) throw httpError(400, 'status must be active or disabled');
     // Disabling the owner would leave the tenant with no one who can transfer
     // ownership — an account nobody can administer, recoverable only from here.
     if (status === 'disabled') {
-      const org = await Organisation.findById(user.orgId).select('ownerId').lean();
+      const org = await Organisation.findById(orgId).select('ownerId').lean();
       if (org?.ownerId && String(org.ownerId) === String(user._id)) {
         throw httpError(409, 'This user owns the organisation. Transfer ownership before disabling them.', 'OWNER_PROTECTED');
       }
     }
-    user.status = status;
+    membership.status = status;
   }
+  await membership.save();
 
   // Any role or status change invalidates live sessions: a demoted user's existing
-  // JWT still carries the old role until it expires.
+  // JWT still carries the old role until it expires. Coarse-grained on purpose —
+  // it revokes every organisation's sessions for this identity, not only this
+  // one's, since there is no per-membership session tracking (only per-user).
   user.sessionVersion = (user.sessionVersion || 0) + 1;
   await user.save();
-  logAudit({ req, action: 'superadmin.user_updated', entity: 'user', entityId: user._id, orgId: user.orgId, meta: { role, status } });
-  res.json({ ...user.toObject(), passwordHash: undefined });
+  await revokeAllForUser(user._id, 'admin_revoked');
+  logAudit({ req, action: 'superadmin.user_updated', entity: 'user', entityId: user._id, orgId, meta: { role, status } });
+  res.json(shapeOrgUser(user, membership));
 });
 
 /**
@@ -633,13 +719,15 @@ const updateTenantUser = asyncHandler(async (req, res) => {
  * reset, and if the reason for the reset is a compromise it is actively harmful.
  */
 const resetTenantUserPassword = asyncHandler(async (req, res) => {
-  const user = await findTenantUserOrThrow(req.params.id);
+  const { user, membership } = await findTenantMembershipOrThrow(req.params.id, req.body?.targetOrgId);
+  const orgId = membership.orgId;
   const mode = req.body?.mode === 'temporary' ? 'temporary' : 'link';
-  if (user.status !== 'active') {
+  if (user.status !== 'active' || membership.status !== 'active') {
     throw httpError(409, 'That account is not active — an invited user should be re-invited instead.', 'USER_INACTIVE');
   }
 
   user.sessionVersion = (user.sessionVersion || 0) + 1;
+  await revokeAllForUser(user._id, 'password_changed');
   // A reset also clears a brute-force lockout: an operator resetting a password is
   // resolving exactly the situation the lockout exists for.
   user.failedLoginAttempts = 0;
@@ -652,7 +740,7 @@ const resetTenantUserPassword = asyncHandler(async (req, res) => {
     user.resetTokenHash = undefined;
     user.resetTokenExpires = undefined;
     await user.save();
-    logAudit({ req, action: 'superadmin.password_reset', entity: 'user', entityId: user._id, orgId: user.orgId, meta: { mode } });
+    logAudit({ req, action: 'superadmin.password_reset', entity: 'user', entityId: user._id, orgId, meta: { mode } });
     return res.json({ ok: true, mode, tempPassword, message: 'Share this with the user securely. It is shown once.' });
   }
 
@@ -663,7 +751,7 @@ const resetTenantUserPassword = asyncHandler(async (req, res) => {
 
   const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${encodeURIComponent(token)}`;
   const result = await sendPasswordResetEmail({ to: user.email, name: user.name, resetUrl });
-  logAudit({ req, action: 'superadmin.password_reset', entity: 'user', entityId: user._id, orgId: user.orgId, meta: { mode, delivered: !!result.sent } });
+  logAudit({ req, action: 'superadmin.password_reset', entity: 'user', entityId: user._id, orgId, meta: { mode, delivered: !!result.sent } });
 
   res.json({
     ok: true,
@@ -679,21 +767,22 @@ const resetTenantUserPassword = asyncHandler(async (req, res) => {
 });
 
 const unlockTenantUser = asyncHandler(async (req, res) => {
-  const user = await findTenantUserOrThrow(req.params.id);
+  const { user, membership } = await findTenantMembershipOrThrow(req.params.id, req.body?.targetOrgId);
   const wasLocked = Boolean(user.lockedUntil && user.lockedUntil > new Date());
   user.failedLoginAttempts = 0;
   user.lockedUntil = undefined;
   user.lastFailedLoginAt = undefined;
   await user.save();
-  logAudit({ req, action: 'superadmin.user_unlocked', entity: 'user', entityId: user._id, orgId: user.orgId, meta: { wasLocked } });
+  logAudit({ req, action: 'superadmin.user_unlocked', entity: 'user', entityId: user._id, orgId: membership.orgId, meta: { wasLocked } });
   res.json({ ok: true, wasLocked });
 });
 
 const forceLogoutUser = asyncHandler(async (req, res) => {
-  const user = await findTenantUserOrThrow(req.params.id);
+  const { user, membership } = await findTenantMembershipOrThrow(req.params.id, req.body?.targetOrgId);
   user.sessionVersion = (user.sessionVersion || 0) + 1;
   await user.save();
-  logAudit({ req, action: 'superadmin.user_sessions_revoked', entity: 'user', entityId: user._id, orgId: user.orgId });
+  await revokeAllForUser(user._id, 'admin_revoked');
+  logAudit({ req, action: 'superadmin.user_sessions_revoked', entity: 'user', entityId: user._id, orgId: membership.orgId });
   res.json({ ok: true });
 });
 
@@ -731,6 +820,7 @@ const setPlatformRole = asyncHandler(async (req, res) => {
   // A capability change has to invalidate the token that carries the old one.
   user.sessionVersion = (user.sessionVersion || 0) + 1;
   await user.save();
+  await revokeAllForUser(user._id, 'admin_revoked');
   logAudit({ req, action: 'platform.role_changed', entity: 'user', entityId: user._id, meta: { platformRole: role } });
   res.json({ id: user._id, name: user.name, email: user.email, platformRole: user.platformRole });
 });

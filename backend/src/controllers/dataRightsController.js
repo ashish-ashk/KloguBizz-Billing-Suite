@@ -1,11 +1,13 @@
 const bcrypt = require('bcryptjs');
 const { Organisation } = require('../models/Organisation');
 const { User } = require('../models/User');
+const { Membership } = require('../models/Membership');
 const { Client } = require('../models/Client');
 const { Item } = require('../models/Item');
 const { Invoice } = require('../models/Invoice');
 const { Payment } = require('../models/Payment');
 const { CreditNote } = require('../models/CreditNote');
+const { SalesDocument } = require('../models/SalesDocument');
 const { Vendor } = require('../models/Vendor');
 const { Purchase } = require('../models/Purchase');
 const { Subscription } = require('../models/Subscription');
@@ -37,6 +39,11 @@ const EXPORT_COLLECTIONS = [
   ['vendors', Vendor, 'orgId'],
   ['invoices', Invoice, 'orgId'],
   ['creditNotes', CreditNote, 'orgId'],
+  // Quotations, proforma invoices and delivery challans. Included because they
+  // are the tenant's own commercial record of what was offered and agreed — an
+  // export that omitted them would be incomplete in exactly the way a data
+  // portability request is meant to prevent.
+  ['salesDocuments', SalesDocument, 'orgId'],
   ['payments', Payment, 'orgId'],
   ['purchases', Purchase, 'orgId'],
   ['subscriptions', Subscription, 'orgId']
@@ -59,11 +66,17 @@ const exportTenantData = asyncHandler(async (req, res) => {
   const org = await Organisation.findById(req.orgId).select('-support').lean();
   if (!org) throw httpError(404, 'Organisation not found');
 
-  const users = await User.find({ orgId: req.orgId })
+  // Team membership, not `User.orgId` — an identity can belong to more than
+  // one organisation now (#53, #54), so this org's export must list exactly
+  // its own members, not wherever a member's account happened to be created.
+  const memberships = await Membership.find({ orgId: req.orgId }).lean();
+  const memberUsers = await User.find({ _id: { $in: memberships.map(m => m.userId) } })
     // Never exported: a password hash is a credential, and an export lands in a
     // download folder. The MFA secret is the same argument twice over.
     .select('-passwordHash -mfa -inviteTokenHash -resetTokenHash -emailVerifyTokenHash')
     .lean();
+  const membershipByUserId = new Map(memberships.map(m => [String(m.userId), m]));
+  const users = memberUsers.map(u => ({ ...u, role: membershipByUserId.get(String(u._id))?.role, status: membershipByUserId.get(String(u._id))?.status }));
 
   logAudit({ req, action: 'org.data_exported', entity: 'organisation', entityId: req.orgId });
   recordEvent({ req, type: EVENT.exportCsv, meta: { of: 'full-tenant-export' } });

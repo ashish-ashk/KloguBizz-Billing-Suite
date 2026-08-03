@@ -5,6 +5,7 @@ const { Organisation } = require('../models/Organisation');
 const { httpError } = require('../utils/httpError');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { recordActivity } = require('../services/usageEventService');
+const { getActiveMembership } = require('../services/membershipService');
 const { logAudit } = require('../services/auditService');
 const { isForbiddenWhileImpersonating } = require('../services/impersonationService');
 const { requireVerifiedEmail, requireSuperadminMfa } = require('./accountGuards');
@@ -40,7 +41,35 @@ const protect = asyncHandler(async (req, res, next) => {
   }
 
   req.user = user;
-  req.orgId = user.orgId ? String(user.orgId) : null;
+
+  /**
+   * Which organisation, and with what role (#53, #54).
+   *
+   * `user.orgId`/`user.role` are no longer authoritative once memberships
+   * exist — a user can belong to more than one organisation, so "their org"
+   * is a property of *this token*, not of the identity. `payload.orgId` names
+   * which membership the token was issued for (see authController.signToken);
+   * the membership itself is re-checked on every request rather than trusted
+   * from the token alone, so a role change or removal takes effect immediately
+   * rather than only once the 15-minute access token expires.
+   *
+   * A platform account has no membership at all — it isn't a tenant identity —
+   * so this only runs for ordinary users.
+   */
+  if (user.role === 'superadmin') {
+    req.orgId = null;
+  } else {
+    const membership = await getActiveMembership(user._id, payload.orgId);
+    if (!membership) {
+      throw httpError(401, 'You no longer have access to this organisation.', 'MEMBERSHIP_REVOKED');
+    }
+    // In-memory only — overrides the stale field on the loaded document so
+    // every downstream read of req.user.role sees the role for *this*
+    // organisation without every caller needing to know memberships exist.
+    req.user.role = membership.role;
+    req.orgId = String(membership.orgId);
+    req.membership = membership;
+  }
 
   /**
    * Impersonation ("view as tenant").

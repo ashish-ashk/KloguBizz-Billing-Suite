@@ -1,7 +1,7 @@
 const PDFDocument = require('pdfkit');
 const { resolveTemplate, ITALIC_VARIANTS } = require('./invoiceTemplates');
 const { calculateLine } = require('./gstService');
-const { parseDataUri } = require('./brandingAssetService');
+const { resolveImage } = require('./brandingAssetService');
 
 const DARK = '#1e1b4b';
 const MUTED = '#6b7280';
@@ -44,14 +44,37 @@ function numberToWords(amount) {
   return inWords(n).trim() + ' Rupees' + (paise ? ' and ' + inWords(paise).trim() + ' Paise' : '') + ' Only';
 }
 
-function logoBuffer(logoUrl) {
-  if (!logoUrl || !logoUrl.startsWith('data:image')) return null;
-  try {
-    const base64 = logoUrl.split(',')[1];
-    return base64 ? Buffer.from(base64, 'base64') : null;
-  } catch {
-    return null;
-  }
+/**
+ * Resolves the three branding images a document can carry, before rendering
+ * starts (#45).
+ *
+ * They used to be read straight off the organisation document as base64. Now
+ * they may live in object storage, which is an async read — and pdfkit's drawing
+ * API is synchronous, so the bytes have to be in hand *before* the first
+ * `doc.image()` call rather than awaited mid-layout. Fetching all three up front
+ * (in parallel) is also strictly fewer round trips than fetching each where it
+ * is drawn.
+ *
+ * Every failure resolves to `null` rather than throwing: a missing or corrupt
+ * image must not take down the whole invoice, which is behaviour the render path
+ * below already relies on.
+ */
+async function resolveBrandingImages(org) {
+  const branding = org?.brandingConfig || {};
+  const defaults = branding.invoiceDefaults || {};
+  const safe = source => resolveImage(source).catch(() => null);
+
+  const [logo, header, signature] = await Promise.all([
+    safe({ key: branding.logoKey, dataUri: branding.logoUrl }),
+    safe({ key: branding.headerImageKey, dataUri: branding.headerImageUrl }),
+    safe({ key: defaults.signatureKey, dataUri: defaults.signatureUrl })
+  ]);
+
+  return {
+    logo: logo?.buffer || null,
+    header: header?.buffer || null,
+    signature: signature?.buffer || null
+  };
 }
 
 /** Hex (#rgb or #rrggbb) -> "r, g, b" for building rgba() fill strings pdfkit doesn't accept directly (it wants fillOpacity instead). */
@@ -487,7 +510,11 @@ function drawHeader(doc, { template, org, invoice, brand, left, right, width, fo
  *                          ({ templateId }), applied when a tenant has never
  *                          picked a template of their own.
  */
-function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
+async function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
+  // Awaited before the synchronous pdfkit render begins — see
+  // resolveBrandingImages. Every caller already `await`ed this function, so
+  // making it async is transparent to them.
+  const images = await resolveBrandingImages(org);
   return new Promise((resolve, reject) => {
     const template = resolveTemplate(org?.brandingConfig, platformDefaults?.templateId);
     const content = org?.brandingConfig?.invoiceContent || {};
@@ -495,7 +522,7 @@ function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
     const showSignature = content.showSignature !== false;
     const showBankDetails = content.showBankDetails !== false;
     const showAmountInWords = content.showAmountInWords !== false;
-    const logo = showLogo ? logoBuffer(org?.brandingConfig?.logoUrl) : null;
+    const logo = showLogo ? images.logo : null;
     const font = template.font, fontBold = template.fontBold;
     const marginX = template.narrow ? 85 : 50;
 
@@ -573,7 +600,7 @@ function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
     // just duplicate that. Falls back to the normal drawHeader() on any
     // decode/dimension failure (corrupt data, zero-size image, etc.).
     let y;
-    const headerImage = logoBuffer(org?.brandingConfig?.headerImageUrl);
+    const headerImage = images.header;
     if (headerImage) {
       try {
         const img = doc.openImage(headerImage);
@@ -869,13 +896,9 @@ function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
        * box: an over-tall upload would otherwise push into the totals panel, the same
        * failure the letterhead image had before it was bounded.
        */
-      const signatureSource = org?.brandingConfig?.invoiceDefaults?.signatureUrl;
-      if (signatureSource) {
+      if (images.signature) {
         try {
-          const parsed = parseDataUri(signatureSource);
-          if (parsed) {
-            doc.image(parsed.buffer, right - 145, footY - 34, { fit: [145, 30], align: 'center' });
-          }
+          doc.image(images.signature, right - 145, footY - 34, { fit: [145, 30], align: 'center' });
         } catch {
           // A corrupt upload must not take the whole PDF down — the line and the name
           // below still print, which is what the document had before.

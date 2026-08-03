@@ -35,6 +35,25 @@ const acceptInviteSchema = z.object({
   acceptTerms: z.literal(true, { errorMap: () => ({ message: 'must be accepted to activate your account' }) })
 });
 
+const refreshTokenSchema = z.object({
+  refreshToken: opaqueToken
+});
+
+// Logout is deliberately lenient: an absent/garbage token is just "already
+// signed out" (see authController.logout), so this only bounds the payload
+// size rather than requiring a well-formed token.
+const logoutSchema = z.object({
+  refreshToken: z.string().max(200).optional()
+});
+
+// `targetOrgId`, not `orgId` — server.js strips `orgId` from every request
+// body unconditionally (it's the tenant-isolation boundary and must only ever
+// come from the authenticated token), so switching organisations needs its
+// own field name to say "the org I want to switch *to*".
+const switchOrgSchema = z.object({
+  targetOrgId: objectId
+});
+
 const forgotPasswordSchema = z.object({
   // Deliberately lenient: the endpoint responds identically whether or not the
   // address exists, so a strict format error here would leak more than it helps.
@@ -234,6 +253,77 @@ const creditNoteCreateSchema = z.object({
   notes: longText.optional().nullable()
 });
 
+// ── Quotations, proforma invoices, delivery challans (2.2 #11–#13) ──
+
+const CHALLAN_PURPOSES = [
+  'job-work', 'approval', 'supply-on-approval',
+  'liquid-gas', 'semi-knocked-down', 'exhibition', 'other'
+];
+
+const transportSchema = z.object({
+  vehicleNumber: shortText.optional().nullable(),
+  transporterName: shortText.optional().nullable(),
+  transporterGstin: gstin,
+  lrNumber: shortText.optional().nullable(),
+  dispatchedFrom: longText.optional().nullable(),
+  shipTo: longText.optional().nullable(),
+  distanceKm: nonNegativeNumber.optional().nullable()
+});
+
+/**
+ * The fields shared by all three kinds.
+ *
+ * `documentNumber` is deliberately absent: it comes from the org's atomic
+ * per-kind counter, and accepting one from the request would desync that
+ * counter and risk colliding with a number already issued — the same rule
+ * `invoiceCreateSchema` follows.
+ */
+const salesDocumentBase = {
+  clientId: objectId.optional().nullable(),
+  billTo: billToSchema.optional().nullable(),
+  date: isoDate.optional(),
+  /** Quotation-only; the controller nulls it for the other kinds. */
+  validUntil: isoDate.optional().nullable(),
+  items: z.array(lineItemSchema).min(1, 'at least one line item is required').max(500, 'cannot exceed 500 line items'),
+  discountPercent: percent.optional(),
+  placeOfSupply: stateCode.optional(),
+  taxTreatment: z.enum(TAX_TREATMENTS).optional(),
+  supplyType: z.enum(SUPPLY_TYPES).optional(),
+  reverseCharge: z.coerce.boolean().optional(),
+  challanPurpose: z.enum(CHALLAN_PURPOSES).optional(),
+  transport: transportSchema.optional().nullable(),
+  notes: longText.optional().nullable(),
+  terms: longText.optional().nullable(),
+  paymentTerms: shortText.optional().nullable()
+};
+
+const salesDocumentCreateSchema = z.object({
+  kind: z.enum(['quotation', 'proforma', 'delivery-challan']),
+  // Only these two are settable at creation — 'converted' in particular is the
+  // outcome of the convert endpoint and nothing else, or the link between the
+  // document and its invoice could be fabricated.
+  status: z.enum(['draft', 'sent']).optional(),
+  ...salesDocumentBase
+});
+
+const salesDocumentUpdateSchema = z.object({
+  ...salesDocumentBase,
+  // Optional on update: an edit that changes only the notes should not have to
+  // resend every line.
+  items: z.array(lineItemSchema).min(1, 'at least one line item is required').max(500).optional()
+});
+
+const salesDocumentStatusSchema = z.object({
+  status: z.enum(['draft', 'sent', 'accepted', 'rejected', 'expired'])
+});
+
+/** Conversion may override the invoice's own dates; everything else is carried
+ *  over from the document being converted. */
+const salesDocumentConvertSchema = z.object({
+  date: isoDate.optional(),
+  dueDate: isoDate.optional()
+});
+
 // ── Users ────────────────────────────────────────
 
 const userInviteSchema = z.object({
@@ -343,11 +433,14 @@ module.exports = {
   verifyEmailSchema, accountDeletionSchema,
   registerSchema, loginSchema, changePasswordSchema,
   acceptInviteSchema, forgotPasswordSchema, resetPasswordSchema,
+  refreshTokenSchema, logoutSchema, switchOrgSchema,
   clientCreateSchema, clientUpdateSchema,
   itemCreateSchema, itemUpdateSchema,
   invoiceCreateSchema, invoiceUpdateSchema, markPaidSchema,
   paymentCreateSchema,
   creditNoteCreateSchema,
+  salesDocumentCreateSchema, salesDocumentUpdateSchema,
+  salesDocumentStatusSchema, salesDocumentConvertSchema,
   userInviteSchema, userUpdateSchema,
   organisationUpdateSchema, transferOwnershipSchema,
   subscriptionStartSchema

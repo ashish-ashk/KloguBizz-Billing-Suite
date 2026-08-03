@@ -131,6 +131,9 @@ app.use('/api/v1/items', require('./src/routes/itemRoutes'));
 app.use('/api/v1/invoices', require('./src/routes/invoiceRoutes'));
 app.use('/api/v1/payments', require('./src/routes/paymentRoutes'));
 app.use('/api/v1/credit-notes', require('./src/routes/creditNoteRoutes'));
+// Quotations, proforma invoices and delivery challans — the pre-invoice
+// documents. None of them is a tax invoice; see models/SalesDocument.js.
+app.use('/api/v1/sales-documents', require('./src/routes/salesDocumentRoutes'));
 app.use('/api/v1/users', require('./src/routes/userRoutes'));
 app.use('/api/v1/subscriptions', require('./src/routes/subscriptionRoutes'));
 app.use('/api/v1/reports', require('./src/routes/reportRoutes'));

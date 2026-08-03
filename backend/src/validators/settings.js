@@ -44,6 +44,15 @@ const dataUriImage = z.union([
     .max(700 * 1024, 'image is too large — keep it under 500 KB')
 ]);
 
+/** A content-addressed object-storage key (#45), e.g.
+ *  `platform/logo/1a2b3c4d5e6f7890.png`. Accepted so a saved setting
+ *  round-trips through the console unchanged rather than being stripped as an
+ *  unknown field — the console never *sets* these, `saveSetting` does. */
+const storageKey = z.union([
+  z.literal(''),
+  z.string().trim().max(300).regex(/^[a-zA-Z0-9/_-]+\.[a-z0-9]+$/, 'is not a valid storage key')
+]);
+
 const brandingSchema = z.object({
   appName: shortText.optional(),
   tagline: shortText.optional(),
@@ -53,7 +62,9 @@ const brandingSchema = z.object({
   supportEmail: optionalEmail.optional(),
   websiteUrl: optionalUrl.optional(),
   logoUrl: dataUriImage.optional(),
-  faviconUrl: dataUriImage.optional()
+  faviconUrl: dataUriImage.optional(),
+  logoKey: storageKey.optional(),
+  faviconKey: storageKey.optional()
 });
 
 const emailSchema = z.object({

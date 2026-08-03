@@ -168,6 +168,39 @@ async function sendInviteEmail({ to, name, inviteUrl, orgName, inviterName, expi
   });
 }
 
+/**
+ * Notifies an *already-registered* identity that they've been added to a
+ * further organisation (#53, #54).
+ *
+ * Distinct from `sendInviteEmail`: there is no token and nothing to accept —
+ * the person can already sign in, and the new membership is simply there the
+ * next time they do (or immediately, via the org-switcher). This is purely
+ * informational, which is also why it's allowed to fail silently the same way
+ * every other notification here does.
+ */
+async function sendAddedToOrgEmail({ to, name, orgName, inviterName, orgId }) {
+  const who = inviterName ? `<strong>${escapeHtml(inviterName)}</strong> has added you` : 'You have been added';
+  const body = `
+    <p style="margin:0 0 12px;">Hello ${escapeHtml(name || 'there')},</p>
+    <p style="margin:0 0 12px;">
+      ${who} to <strong>${escapeHtml(orgName || 'an organisation')}</strong> on KloguBizz. You can switch
+      into it any time with your existing sign-in — nothing else to set up.
+    </p>`;
+  return sendEmail({
+    to,
+    orgId,
+    type: 'invite',
+    subject: `You've been added to ${orgName || 'an organisation'} on KloguBizz`,
+    html: layout({
+      title: 'New organisation added',
+      body,
+      ctaLabel: 'Open KloguBizz',
+      ctaUrl: env.FRONTEND_URL
+    }),
+    text: `Hello ${name || 'there'},\n\n${inviterName ? inviterName + ' has added you' : 'You have been added'} to ${orgName || 'an organisation'} on KloguBizz. Sign in and switch into it any time.`
+  });
+}
+
 async function sendPasswordResetEmail({ to, name, resetUrl, orgId }) {
   const body = `
     <p style="margin:0 0 12px;">Hello ${escapeHtml(name || 'there')},</p>
@@ -359,6 +392,7 @@ module.exports = {
   isSuppressed,
   recordEmail,
   sendInviteEmail,
+  sendAddedToOrgEmail,
   sendPasswordResetEmail,
   sendEmailVerification,
   sendReminderEmail,

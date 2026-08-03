@@ -22,6 +22,8 @@ const mongoose = require('mongoose');
 const app = require('../server');
 const { Plan } = require('../src/models/Plan');
 const { Organisation } = require('../src/models/Organisation');
+const { User } = require('../src/models/User');
+const { Membership } = require('../src/models/Membership');
 
 let server;
 let baseUrl;
@@ -158,8 +160,19 @@ test('a tenant admin cannot move a user into another organisation or overwrite t
   const users = await call('GET', '/users', { token: a.token });
   const member = users.body.find(u => u._id === memberId);
   assert.equal(member.name, 'Renamed', 'the allowed field should still apply');
-  assert.equal(String(member.orgId), String(a.org._id), 'orgId must not be reassignable');
-  assert.notEqual(member.sessionVersion, 999);
+
+  // Access is granted by Membership now (#53, #54), not a field on User, so
+  // "moved to another org" is checked against that: the membership the
+  // invite created must still point at org A, and org B must have gained
+  // nothing.
+  const membership = await Membership.findOne({ userId: memberId }).lean();
+  assert.equal(String(membership.orgId), String(a.org._id), 'the membership must not have been reassigned to another org');
+  const movedIntoB = await Membership.findOne({ userId: memberId, orgId: b.org._id }).lean();
+  assert.equal(movedIntoB, null, 'no membership should have been created in the other organisation');
+
+  const stored = await User.findById(memberId).lean();
+  assert.notEqual(stored.passwordHash, 'injected');
+  assert.notEqual(stored.sessionVersion, 999);
 }));
 
 test('a tenant admin cannot upgrade their own plan or rewrite the invoice counter', maybe(async () => {

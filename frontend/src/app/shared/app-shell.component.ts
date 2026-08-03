@@ -6,6 +6,7 @@ import { ThemeService } from '../core/theme.service';
 import { AvatarComponent, PillComponent, ToastsComponent, popScrollLock, pushScrollLock } from './ui';
 import { IconComponent } from './icons';
 import { CommandItem, QuickSearchComponent } from './quick-search.component';
+import { ToastService } from '../core/toast.service';
 
 const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
 
@@ -60,6 +61,7 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
             <a routerLink="/dashboard" routerLinkActive="active" title="Dashboard"><span class="nav-icon"><app-icon name="dashboard" /></span><span class="nav-label">Dashboard</span></a>
             <a routerLink="/invoices" routerLinkActive="active" title="Invoices"><span class="nav-icon"><app-icon name="invoice" /></span><span class="nav-label">Invoices</span></a>
             <a routerLink="/bill-generator" routerLinkActive="active" title="Bill Generator"><span class="nav-icon"><app-icon name="calculator" /></span><span class="nav-label">Bill Generator</span></a>
+            <a routerLink="/sales-documents" routerLinkActive="active" title="Quotes &amp; Challans"><span class="nav-icon"><app-icon name="fileText" /></span><span class="nav-label">Quotes &amp; Challans</span></a>
             <div class="nav-section">Management</div>
             <a routerLink="/clients" routerLinkActive="active" title="Clients"><span class="nav-icon"><app-icon name="users" /></span><span class="nav-label">Clients</span></a>
             <a routerLink="/items" routerLinkActive="active" title="Inventory"><span class="nav-icon"><app-icon name="box" /></span><span class="nav-label">Inventory</span></a>
@@ -143,6 +145,20 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
                       <div class="user-dropdown-email">{{ auth.user()?.email }}</div>
                     </div>
                   </div>
+                  @if (auth.hasMultipleOrgs()) {
+                    <!-- Org-switcher (#53, #54). Only rendered at all once an
+                         identity actually holds more than one membership —
+                         the common case never sees this section. -->
+                    <div class="user-dropdown-divider"></div>
+                    <div class="user-dropdown-label">Switch organisation</div>
+                    @for (m of auth.memberships(); track m.orgId) {
+                      <button type="button" class="user-dropdown-org" [disabled]="switchingOrg()"
+                        [class.active]="m.orgId === auth.organisation()?._id" (click)="switchOrg(m.orgId)">
+                        <span>{{ m.orgName }}</span>
+                        @if (m.orgId === auth.organisation()?._id) { <app-icon name="check" [size]="13" /> }
+                      </button>
+                    }
+                  }
                   <div class="user-dropdown-divider"></div>
                   <button type="button" (click)="auth.logout()"><app-icon name="logout" [size]="14" /> Sign Out</button>
                 </div>
@@ -205,6 +221,7 @@ export class AppShellComponent {
   @Input() subtitle = '';
   menuOpen = signal(false);
   userMenuOpen = signal(false);
+  switchingOrg = signal(false);
   collapsed = signal(localStorage.getItem(COLLAPSE_KEY) === '1');
   quickSearch = viewChild(QuickSearchComponent);
 
@@ -247,6 +264,8 @@ export class AppShellComponent {
       { label: 'Dashboard', route: '/dashboard', icon: 'dashboard' },
       { label: 'Invoices', route: '/invoices', icon: 'invoice' },
       { label: 'Bill Generator', route: '/bill-generator', icon: 'calculator' },
+      { label: 'Quotations', route: '/sales-documents', icon: 'fileText' },
+      { label: 'Delivery Challans', route: '/sales-documents', icon: 'fileText' },
       { label: 'Clients', route: '/clients', icon: 'users' },
       { label: 'Inventory', route: '/items', icon: 'box' },
       { label: 'Payments', route: '/payments', icon: 'creditCard' },
@@ -274,7 +293,8 @@ export class AppShellComponent {
     public auth: AuthService,
     public theme: ThemeService,
     public router: Router,
-    private api: ApiService
+    private api: ApiService,
+    private toast: ToastService
   ) {
     // Locks background scroll while the full-width mobile drawer is open —
     // otherwise the page behind it keeps scrolling under the fixed overlay.
@@ -321,6 +341,25 @@ export class AppShellComponent {
   toggleUserMenu(event: Event) {
     event.stopPropagation();
     this.userMenuOpen.update(v => !v);
+  }
+
+  /** Switches into another organisation this identity belongs to (#53, #54).
+   *  Navigates back to the dashboard afterward — whatever record the current
+   *  page was showing belongs to the org just left. */
+  switchOrg(targetOrgId: string) {
+    if (targetOrgId === this.auth.organisation()?._id) { this.userMenuOpen.set(false); return; }
+    this.switchingOrg.set(true);
+    this.auth.switchOrg(targetOrgId).subscribe({
+      next: () => {
+        this.switchingOrg.set(false);
+        this.userMenuOpen.set(false);
+        this.router.navigateByUrl('/dashboard');
+      },
+      error: err => {
+        this.switchingOrg.set(false);
+        this.toast.httpError(err);
+      }
+    });
   }
 
   @HostListener('document:click')

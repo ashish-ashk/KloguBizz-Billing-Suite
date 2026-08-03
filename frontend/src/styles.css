@@ -522,6 +522,20 @@ app-quick-search { display: contents; }
   transition: background-color 0.15s var(--ease);
 }
 .user-dropdown button:hover { background: var(--red-bg); }
+/* Org-switcher (#53, #54) — reuses .user-dropdown's button but is not a
+   destructive action, so it needs its own colour rather than the Sign Out
+   button's red. */
+.user-dropdown-label {
+  padding: 6px 10px 4px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--muted);
+}
+.user-dropdown-org {
+  color: var(--text) !important;
+  justify-content: space-between !important;
+}
+.user-dropdown-org:hover { background: var(--surface-alt) !important; }
+.user-dropdown-org.active { color: var(--brand) !important; font-weight: 700; }
+.user-dropdown-org:disabled { opacity: 0.6; cursor: default; }
 
 @media (min-width: 640px) {
   .topbar-user-info { display: block; }

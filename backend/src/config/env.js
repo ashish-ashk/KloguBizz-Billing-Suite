@@ -12,6 +12,11 @@ const DEV_DEFAULTS = {
   SUPER_ADMIN_PASSWORD: 'SuperAdmin@123'
 };
 
+// Duplicated from services/storageService.js rather than imported: that module
+// requires this one, so importing it back would be a cycle. Kept as a bare list
+// of names because that is all the config check below needs.
+const DRIVER_NAMES = ['inline', 'local', 's3'];
+
 // FRONTEND_URL accepts a comma-separated list so the app can be reached from
 // more than one origin (apex + www, a custom domain, a preview deployment)
 // without the CORS layer rejecting all but the first.
@@ -61,7 +66,23 @@ const env = {
   // Comma-separated IPs or CIDR blocks allowed to reach /api/v1/superadmin.
   // Empty (the default) means no restriction.
   SUPERADMIN_IP_ALLOWLIST: String(process.env.SUPERADMIN_IP_ALLOWLIST || '')
-    .split(',').map(v => v.trim()).filter(Boolean)
+    .split(',').map(v => v.trim()).filter(Boolean),
+
+  // ── Image storage (#45) ──
+  // 'inline' (default), 'local' or 's3'. See services/storageService.js for why
+  // inline is the default rather than local: this API runs on an ephemeral
+  // filesystem, where local disk loses every uploaded logo on redeploy.
+  STORAGE_DRIVER: String(process.env.STORAGE_DRIVER || 'inline').trim().toLowerCase(),
+  STORAGE_LOCAL_DIR: process.env.STORAGE_LOCAL_DIR || 'var/uploads',
+  S3_BUCKET: process.env.S3_BUCKET || '',
+  S3_REGION: process.env.S3_REGION || 'auto',
+  // Set for any S3-compatible store that is not AWS (Cloudflare R2, Backblaze
+  // B2, MinIO). Left empty for real S3, where the SDK derives the endpoint.
+  S3_ENDPOINT: process.env.S3_ENDPOINT || '',
+  // R2 and MinIO address buckets by path, not by virtual host.
+  S3_FORCE_PATH_STYLE: process.env.S3_FORCE_PATH_STYLE === 'true',
+  S3_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID || '',
+  S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY || ''
 };
 
 env.isProduction = env.NODE_ENV === 'production';
@@ -139,6 +160,34 @@ function assertSecureConfig({ exitOnError = true } = {}) {
     }
     if (!env.SENDGRID_API_KEY) {
       warnings.push('SENDGRID_API_KEY is not set. Invites and reminders will be skipped, not delivered.');
+    }
+
+    /**
+     * Image storage (#45).
+     *
+     * `local` in production is the dangerous one, and it fails *silently*: this
+     * API is deployed on an ephemeral filesystem, so every uploaded logo and
+     * letterhead is lost on the next redeploy and nobody finds out until a
+     * customer notices their invoices lost their branding. A hard error would
+     * be wrong — a VPS with a real volume is a legitimate deployment — so this
+     * is a loud warning that names the actual consequence.
+     */
+    if (env.STORAGE_DRIVER === 'local') {
+      warnings.push('STORAGE_DRIVER=local stores uploads on the local filesystem. If this platform has an ephemeral disk (Render, Heroku, most containers) every uploaded logo is LOST on the next deploy. Use s3 in production, or confirm a persistent volume is mounted at STORAGE_LOCAL_DIR.');
+    }
+    if (env.STORAGE_DRIVER === 's3') {
+      const missing = ['S3_BUCKET', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'].filter(key => !env[key]);
+      if (missing.length) {
+        // An error, not a warning: uploads would fail at the moment a customer
+        // tries to save their branding, which is the worst time to find out.
+        errors.push(`STORAGE_DRIVER=s3 but ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not set — every image upload would fail.`);
+      }
+    }
+    if (env.STORAGE_DRIVER === 'inline') {
+      warnings.push('STORAGE_DRIVER is not set, so images are stored as base64 inside MongoDB. This works and is safe, but it inflates documents; set STORAGE_DRIVER=s3 with a bucket for a production deployment.');
+    }
+    if (!DRIVER_NAMES.includes(env.STORAGE_DRIVER)) {
+      warnings.push(`STORAGE_DRIVER="${env.STORAGE_DRIVER}" is not recognised (expected one of: ${DRIVER_NAMES.join(', ')}). Falling back to inline storage.`);
     }
   }
 

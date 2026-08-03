@@ -44,6 +44,7 @@ import { downloadBlob } from '../../core/format';
             [showSignature]="org()?.brandingConfig?.invoiceContent?.showSignature !== false"
             [showBankDetails]="org()?.brandingConfig?.invoiceContent?.showBankDetails !== false"
             [invoiceDefaults]="org()?.brandingConfig?.invoiceDefaults || {}"
+            [signatureSrc]="signatureUrl()"
             [showAmountInWords]="org()?.brandingConfig?.invoiceContent?.showAmountInWords !== false"
             [invoiceTitleLabel]="org()?.brandingConfig?.invoiceTitleLabel || ''" />
         </div>
@@ -81,6 +82,7 @@ export class InvoicePrintComponent implements OnInit {
    */
   logoUrl() { return this.api.assetUrl(this.org()?.brandingConfig?.logoAssetUrl); }
   headerImageUrl() { return this.api.assetUrl(this.org()?.brandingConfig?.headerImageAssetUrl); }
+  signatureUrl() { return this.api.assetUrl(this.org()?.brandingConfig?.invoiceDefaults?.signatureAssetUrl); }
 
   client(): InvoiceDocClient | null {
     const inv = this.invoice();

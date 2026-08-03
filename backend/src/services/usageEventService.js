@@ -32,6 +32,11 @@ const EVENT = {
   gstReturnViewed: 'gst_return.viewed',
   eInvoiceGenerated: 'einvoice.generated',
   creditNote: 'credit_note.created',
+  /** A quotation, proforma or delivery challan (2.2 #11–#13). One event for all
+   *  three, with the kind in `meta` — the adoption matrix wants "do they use
+   *  pre-invoice documents at all", not three near-identical rows. */
+  salesDocumentCreated: 'sales_document.created',
+  salesDocumentConverted: 'sales_document.converted',
   clientCreated: 'client.created',
   itemCreated: 'item.created',
   itemBulkUpload: 'item.bulk_upload',

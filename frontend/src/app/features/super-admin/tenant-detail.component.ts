@@ -716,19 +716,19 @@ export class SuperTenantDetailComponent implements OnInit, OnDestroy {
   changeRole(user: OrgUser, role: string) {
     if (role === user.role) return;
     this.saving.set(true);
-    this.api.setTenantUser(user._id, { role })
+    this.api.setTenantUser(user._id, this.orgId, { role })
       .subscribe({ next: () => this.done(`${user.name} is now ${role}`), error: err => this.failed(err) });
   }
 
   disableUser(user: OrgUser) {
     this.saving.set(true);
-    this.api.setTenantUser(user._id, { status: 'disabled' })
+    this.api.setTenantUser(user._id, this.orgId, { status: 'disabled' })
       .subscribe({ next: () => this.done(`${user.name} disabled`), error: err => this.failed(err) });
   }
 
   unlock(user: OrgUser) {
     this.saving.set(true);
-    this.api.unlockTenantUser(user._id).subscribe({
+    this.api.unlockTenantUser(user._id, this.orgId).subscribe({
       next: res => this.done(res.wasLocked ? `${user.name} unlocked` : `${user.name} was not locked`),
       error: err => this.failed(err)
     });
@@ -736,7 +736,7 @@ export class SuperTenantDetailComponent implements OnInit, OnDestroy {
 
   forceLogoutUser(user: OrgUser) {
     this.saving.set(true);
-    this.api.forceLogoutTenantUser(user._id)
+    this.api.forceLogoutTenantUser(user._id, this.orgId)
       .subscribe({ next: () => this.done(`${user.name} signed out`), error: err => this.failed(err) });
   }
 
@@ -754,7 +754,7 @@ export class SuperTenantDetailComponent implements OnInit, OnDestroy {
     const user = this.resetTarget();
     if (!user) return;
     this.saving.set(true);
-    this.api.resetTenantUserPassword(user._id, mode).subscribe({
+    this.api.resetTenantUserPassword(user._id, this.orgId, mode).subscribe({
       next: res => {
         this.saving.set(false);
         this.resetResult.set({ message: res.message, tempPassword: res.tempPassword, resetUrl: res.resetUrl });

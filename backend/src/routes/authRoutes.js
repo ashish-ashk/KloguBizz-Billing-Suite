@@ -4,7 +4,9 @@ const {
   register, login, me, verifyMfa,
   inviteDetails, acceptInvite,
   forgotPassword, resetPassword,
-  verifyEmail, resendVerification
+  verifyEmail, resendVerification,
+  refresh, logout, listSessions, revokeSession,
+  switchOrg
 } = require('../controllers/authController');
 const { setupMfa, enableMfa, disableMfa, regenerateBackupCodes } = require('../controllers/mfaController');
 const { changePassword } = require('../controllers/userController');
@@ -13,7 +15,8 @@ const { validate } = require('../middleware/validate');
 const {
   registerSchema, loginSchema, changePasswordSchema,
   acceptInviteSchema, forgotPasswordSchema, resetPasswordSchema,
-  mfaEnableSchema, mfaVerifySchema, mfaDisableSchema, verifyEmailSchema
+  mfaEnableSchema, mfaVerifySchema, mfaDisableSchema, verifyEmailSchema,
+  refreshTokenSchema, logoutSchema, switchOrgSchema
 } = require('../validators/schemas');
 const { skipRateLimitInTests } = require('../middleware/rateLimitOptions');
 
@@ -70,6 +73,35 @@ router.post('/register', signupLimiter, validate(registerSchema), register);
 router.post('/login', credentialLimiter, validate(loginSchema), login);
 router.get('/me', protect, me);
 router.post('/change-password', protect, credentialLimiter, validate(changePasswordSchema), changePassword);
+
+/**
+ * Refresh tokens & device sessions (#50, #51).
+ *
+ * `/refresh` and `/logout` are deliberately unauthenticated by `protect` — the
+ * whole point of a refresh token is to work after the 15-minute access token
+ * has already expired, and a logout that only works while still signed in
+ * isn't one. Rate limiting still applies: failures count (a stolen or guessed
+ * refresh token is only 32 random bytes, but there's no reason to allow
+ * unlimited attempts), successes don't (a device silently refreshing every
+ * ~14 minutes for hours is normal use, not an attack).
+ */
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  skip: skipRateLimitInTests,
+  message: { message: 'Too many attempts. Please wait a few minutes and try again.', code: 'RATE_LIMITED' }
+});
+router.post('/refresh', refreshLimiter, validate(refreshTokenSchema), refresh);
+router.post('/logout', validate(logoutSchema), logout);
+router.get('/sessions', protect, listSessions);
+router.delete('/sessions/:id', protect, revokeSession);
+
+// Org switching (#53, #54) — requires an existing session (any organisation),
+// re-issued for a different one the identity also belongs to.
+router.post('/switch-org', protect, credentialLimiter, validate(switchOrgSchema), switchOrg);
 
 // Invitations — unauthenticated by design: the whole point is that the invitee
 // has no account to sign in with yet.

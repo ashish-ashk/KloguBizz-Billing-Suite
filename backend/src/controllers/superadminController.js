@@ -4,11 +4,13 @@ const { Organisation } = require('../models/Organisation');
 const { Plan } = require('../models/Plan');
 const { Reminder, AuditLog, Master, GlobalSetting } = require('../models/Settings');
 const { User } = require('../models/User');
+const { Membership } = require('../models/Membership');
 const { Client } = require('../models/Client');
 const { Item } = require('../models/Item');
 const { Invoice } = require('../models/Invoice');
 const { Payment } = require('../models/Payment');
 const { CreditNote } = require('../models/CreditNote');
+const { SalesDocument } = require('../models/SalesDocument');
 const { ReminderLog } = require('../models/ReminderLog');
 const { Subscription } = require('../models/Subscription');
 const { asyncHandler } = require('../utils/asyncHandler');
@@ -23,7 +25,7 @@ const { invalidateFeatureFlagCache } = require('../services/featureFlagService')
 const { invalidatePlatformNotice } = require('../services/noticeService');
 const { computeRecurringRevenue } = require('../services/metricsService');
 const { assertValidSetting } = require('../validators/settings');
-const { serialiseOrganisation } = require('../services/brandingAssetService');
+const { serialiseOrganisation, storeImage, platformAssetUrl } = require('../services/brandingAssetService');
 const { startSessionIfSupported, withTransaction } = require('../utils/transaction');
 const { logger } = require('../utils/logger');
 
@@ -112,18 +114,25 @@ const listOrganisations = asyncHandler(async (req, res) => {
 
   const orgIds = orgs.map(o => o._id);
   const ownerIds = orgs.map(o => o.ownerId).filter(Boolean);
-  const [userCounts, invoiceCounts, admins, owners, subs] = await Promise.all([
-    User.aggregate([{ $match: { orgId: { $in: orgIds } } }, { $group: { _id: '$orgId', count: { $sum: 1 } } }]),
+  // Seats and the admin contact are resolved via Membership, not `User.orgId`
+  // (#53, #54) — an identity's "home" org and its memberships can differ.
+  const [userCounts, invoiceCounts, adminMemberships, owners, subs] = await Promise.all([
+    Membership.aggregate([{ $match: { orgId: { $in: orgIds }, status: { $ne: 'disabled' } } }, { $group: { _id: '$orgId', count: { $sum: 1 } } }]),
     Invoice.aggregate([{ $match: { orgId: { $in: orgIds } } }, { $group: { _id: '$orgId', count: { $sum: 1 } } }]),
-    User.find({ orgId: { $in: orgIds }, role: 'admin' }).select('orgId name email').lean(),
+    Membership.find({ orgId: { $in: orgIds }, role: 'admin', status: 'active' }).select('orgId userId').lean(),
     User.find({ _id: { $in: ownerIds } }).select('name email').lean(),
     Subscription.find({ orgId: { $in: orgIds } }).sort({ createdAt: -1 }).lean()
   ]);
   const countMap = list => Object.fromEntries(list.map(e => [String(e._id), e.count]));
   const userMap = countMap(userCounts);
   const invoiceMap = countMap(invoiceCounts);
+  const adminUsers = await User.find({ _id: { $in: adminMemberships.map(m => m.userId) } }).select('name email').lean();
+  const adminUserMap = Object.fromEntries(adminUsers.map(u => [String(u._id), u]));
   const adminMap = {};
-  admins.forEach(a => { if (!adminMap[String(a.orgId)]) adminMap[String(a.orgId)] = a; });
+  adminMemberships.forEach(m => {
+    const key = String(m.orgId);
+    if (!adminMap[key] && adminUserMap[String(m.userId)]) adminMap[key] = adminUserMap[String(m.userId)];
+  });
   // Owner is resolved live from Organisation.ownerId (the source of truth used
   // by transferOwnership) rather than an arbitrary role:'admin' user, so this
   // can never drift after an ownership transfer.
@@ -162,6 +171,10 @@ const createOrganisation = asyncHandler(async (req, res) => {
     role: 'admin',
     status: 'active'
   });
+  // Without this the admin just created has no active membership anywhere
+  // and `protect` refuses every request with MEMBERSHIP_REVOKED the moment
+  // they try to sign in — a org created here would be otherwise unusable.
+  await Membership.create({ userId: admin._id, orgId: org._id, role: 'admin', status: 'active' });
   // The org has no owner concept until this point — the admin created here
   // becomes the canonical owner, mirroring the self-serve registration flow.
   org.ownerId = admin._id;
@@ -210,13 +223,19 @@ const updateOrganisation = asyncHandler(async (req, res) => {
  * one thing an audit trail must never do. Its retention is handled separately
  * (see the TTL on the model).
  */
+// `User` is deliberately not in this list (#53, #54): a user can belong to
+// more than one organisation, so a plain `deleteMany({orgId})` on it would
+// delete an identity that still has an active membership somewhere else —
+// deleting Org A would break someone's access to Org B. See the explicit,
+// two-step handling in deleteOrganisation below instead.
 const TENANT_COLLECTIONS = [
-  ['users', User],
+  ['memberships', Membership],
   ['clients', Client],
   ['items', Item],
   ['invoices', Invoice],
   ['payments', Payment],
   ['creditNotes', CreditNote],
+  ['salesDocuments', SalesDocument],
   ['reminderLogs', ReminderLog],
   ['subscriptions', Subscription]
 ];
@@ -237,12 +256,26 @@ const deleteOrganisation = asyncHandler(async (req, res) => {
   const deleted = {};
   const { atomic } = await withTransaction(async session => {
     const options = session ? { session } : {};
+    // Captured before the membership rows themselves are deleted below, so
+    // it's known afterward whose *only* tie to the platform this org was.
+    const memberUserIds = await Membership.find({ orgId: org._id }, null, options).distinct('userId');
+
     // Sequential, not Promise.all: inside a transaction the operations share one
     // session, and concurrent use of a single session is not supported.
     for (const [name, Model] of TENANT_COLLECTIONS) {
       const result = await Model.deleteMany({ orgId: org._id }, options);
       deleted[name] = result.deletedCount ?? 0;
     }
+
+    // A user is only removed if this org's membership (just deleted above) was
+    // their last one anywhere — otherwise deleting Org A would delete an
+    // identity that still needs to sign in to Org B (#53, #54).
+    const stillLinkedIds = await Membership.find({ userId: { $in: memberUserIds } }, null, options).distinct('userId');
+    const stillLinked = new Set(stillLinkedIds.map(String));
+    const orphanedUserIds = memberUserIds.filter(id => !stillLinked.has(String(id)));
+    const usersResult = await User.deleteMany({ _id: { $in: orphanedUserIds } }, options);
+    deleted.users = usersResult.deletedCount ?? 0;
+
     await Organisation.deleteOne({ _id: org._id }, options);
   });
 
@@ -380,16 +413,69 @@ const updateReminder = asyncHandler(async (req, res) => {
 
 // ---- Global key/value settings (branding, email, template default...) ----
 
+/**
+ * The console gets asset URLs for the platform images, never their bytes (#45) —
+ * the same treatment `serialiseOrganisation` gives a tenant's.
+ *
+ * Without this the branding page would receive a `logoKey` it cannot render and
+ * an empty `logoUrl`, then send that empty string back on the next save and
+ * erase the logo. `hasLogo`/`hasFavicon` let it show "uploaded" without the
+ * image having to travel.
+ */
+function serialisePlatformBranding(value) {
+  const branding = { ...(value || {}) };
+  const logo = { key: branding.logoKey || '', dataUri: branding.logoUrl || '' };
+  const favicon = { key: branding.faviconKey || '', dataUri: branding.faviconUrl || '' };
+  branding.logoAssetUrl = platformAssetUrl('logo', logo);
+  branding.faviconAssetUrl = platformAssetUrl('favicon', favicon);
+  branding.hasLogo = Boolean(logo.key || logo.dataUri);
+  branding.hasFavicon = Boolean(favicon.key || favicon.dataUri);
+  branding.logoUrl = '';
+  branding.faviconUrl = '';
+  delete branding.logoKey;
+  delete branding.faviconKey;
+  return branding;
+}
+
 const getSettings = asyncHandler(async (req, res) => {
   const settings = await GlobalSetting.find();
-  res.json(Object.fromEntries(settings.map(s => [s.key, s.value])));
+  res.json(Object.fromEntries(settings.map(s => [
+    s.key,
+    s.key === 'branding' ? serialisePlatformBranding(s.value) : s.value
+  ])));
 });
+
+/**
+ * Platform branding images, routed through resize-and-store like a tenant's
+ * (#45).
+ *
+ * The platform logo and favicon are read on the **unauthenticated** login page
+ * by `publicController`, so an unresized upload here is paid for by every
+ * visitor who has never signed in — the worst place in the product to carry a
+ * multi-megabyte base64 string.
+ */
+const PLATFORM_IMAGE_FIELDS = [
+  { kind: 'logo', field: 'logoUrl', key: 'logoKey' },
+  { kind: 'favicon', field: 'faviconUrl', key: 'faviconKey' }
+];
+
+async function placePlatformImages(value) {
+  for (const { kind, field, key } of PLATFORM_IMAGE_FIELDS) {
+    if (!(field in value)) continue;
+    const placed = await storeImage({ scope: 'platform', kind, dataUri: value[field] });
+    if (!placed) { delete value[field]; continue; }
+    value[field] = placed.dataUri;
+    value[key] = placed.key;
+  }
+  return value;
+}
 
 const saveSetting = asyncHandler(async (req, res) => {
   // Validated and sanitised before it is stored. `branding` in particular is
   // served to every unauthenticated visitor by publicController, so one bad
   // payload used to break the login page platform-wide with nothing rejected.
   const value = assertValidSetting(req.params.key, req.body);
+  if (req.params.key === 'branding') await placePlatformImages(value);
   const setting = await GlobalSetting.findOneAndUpdate(
     { key: req.params.key },
     { value },
@@ -403,7 +489,13 @@ const saveSetting = asyncHandler(async (req, res) => {
   if (req.params.key === 'featureFlags') invalidateFeatureFlagCache();
   if (req.params.key === 'platformNotice') invalidatePlatformNotice();
   logAudit({ req, action: 'settings.saved', entity: 'setting', entityId: req.params.key });
-  res.json({ key: setting.key, value: setting.value });
+  // Serialised on the way out too, so a save and a load hand the console the
+  // same shape — otherwise the page would hold base64 after a save and asset
+  // URLs after a reload, and only one of those round-trips safely.
+  res.json({
+    key: setting.key,
+    value: setting.key === 'branding' ? serialisePlatformBranding(setting.value) : setting.value
+  });
 });
 
 /**

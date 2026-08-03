@@ -6,12 +6,13 @@ import { environment } from '../../environments/environment';
 import { CacheService } from './cache.service';
 import {
   AttentionLists, AuditEntry, AuditFilters, Client, CreditNote, CreditNoteReason, CreditSummary,
-  DataRightsStatus, EInvoiceCheck, EInvoiceState, EInvoiceWorklist,
+  DataRightsStatus, DeviceSession, EInvoiceCheck, EInvoiceState, EInvoiceWorklist,
   FeatureAdoption, FeatureFlags, Gstr1Report, Gstr3bReport, GstSummary, ImpersonationSession,
   Invoice, InvoiceItem, InvoiceStats, ItcRegister, Item, ItemBulkUploadResult, ListParams,
   LoginHistoryFilters, Master, MastersResponse, MetricsSeries, MfaSetup,
   Organisation, OrgSummary, OrgSupportContext, OrgUser, Page, Payment, Plan, PlanUsage,
-  PlatformMe, PlatformSummary, PlatformUser, PublicBranding, Purchase, Reminder, SecurityAlerts,
+  PlatformMe, PlatformSummary, PlatformUser, PublicBranding, Purchase, Reminder,
+  SalesDocument, SalesDocumentKind, SalesDocumentStatus, SalesDocumentSummary, SecurityAlerts,
   Subscription, SuperOverview, SystemHealth, TenantDetail, TenantNotice, Vendor,
   ArAgeing, CollectionMetrics, CustomerStatement, LowStockReport, SalesBreakdown,
   StockMovement, TenantActivityEntry
@@ -28,6 +29,7 @@ const NS = {
   invoices: 'invoices',
   payments: 'payments',
   creditNotes: 'credit-notes',
+  salesDocuments: 'sales-documents',
   users: 'users',
   organisation: 'organisation',
   subscription: 'subscription',
@@ -205,6 +207,56 @@ export class ApiService {
     return this.http.get(`${this.api}/credit-notes/export.csv`, { params: this.params(params), responseType: 'blob' });
   }
 
+  // ── Quotations, proforma, delivery challans (2.2 #11–#13) ──
+  salesDocuments(params: ListParams = {}) {
+    return this.list<SalesDocument>(NS.salesDocuments, '/sales-documents', params);
+  }
+  salesDocument(id: string) { return this.http.get<SalesDocument>(`${this.api}/sales-documents/${id}`); }
+  salesDocumentSummary(kind: SalesDocumentKind) {
+    return this.cache.through(
+      `${NS.salesDocuments}:summary:${kind}`,
+      () => this.http.get<SalesDocumentSummary>(`${this.api}/sales-documents/summary`, { params: { kind } })
+    );
+  }
+  createSalesDocument(payload: Partial<SalesDocument> & { kind: SalesDocumentKind }) {
+    return this.afterWrite(
+      this.http.post<SalesDocument>(`${this.api}/sales-documents`, payload),
+      NS.salesDocuments
+    );
+  }
+  updateSalesDocument(id: string, payload: Partial<SalesDocument>) {
+    return this.afterWrite(
+      this.http.put<SalesDocument>(`${this.api}/sales-documents/${id}`, payload),
+      NS.salesDocuments
+    );
+  }
+  setSalesDocumentStatus(id: string, status: SalesDocumentStatus) {
+    return this.afterWrite(
+      this.http.put<SalesDocument>(`${this.api}/sales-documents/${id}/status`, { status }),
+      NS.salesDocuments
+    );
+  }
+  /** Raises a real tax invoice. Invalidates invoices and reports too, because it
+   *  genuinely created one — and the invoice quota has now been consumed. */
+  convertSalesDocument(id: string, payload: { date?: string; dueDate?: string } = {}) {
+    return this.afterWrite(
+      this.http.post<{ document: SalesDocument; invoice: Invoice }>(`${this.api}/sales-documents/${id}/convert`, payload),
+      NS.salesDocuments, NS.invoices, NS.reports, NS.items
+    );
+  }
+  deleteSalesDocument(id: string) {
+    return this.afterWrite(this.http.delete<SalesDocument>(`${this.api}/sales-documents/${id}`), NS.salesDocuments);
+  }
+  restoreSalesDocument(id: string) {
+    return this.afterWrite(this.http.post<SalesDocument>(`${this.api}/sales-documents/${id}/restore`, {}), NS.salesDocuments);
+  }
+  downloadSalesDocumentPdf(id: string) {
+    return this.http.get(`${this.api}/sales-documents/${id}/pdf`, { responseType: 'blob' });
+  }
+  exportSalesDocumentsCsv(params: ListParams = {}) {
+    return this.http.get(`${this.api}/sales-documents/export.csv`, { params: this.params(params), responseType: 'blob' });
+  }
+
   // ── Payments ─────────────────────────────────
   payments(params: ListParams = {}) { return this.list<Payment>(NS.payments, '/payments', params); }
   createPayment(payload: Partial<Payment> & { invoiceId: string }) {
@@ -361,6 +413,12 @@ export class ApiService {
   }
   mfaDisable(payload: { password: string; code: string }) {
     return this.http.post<{ ok: boolean; message: string }>(`${this.api}/auth/mfa/disable`, payload);
+  }
+
+  // ── Device sessions (#50, #51) ──────────────────
+  listSessions() { return this.http.get<DeviceSession[]>(`${this.api}/auth/sessions`); }
+  revokeSession(id: string) {
+    return this.http.delete<{ ok: boolean }>(`${this.api}/auth/sessions/${id}`);
   }
   mfaRegenerateBackupCodes(code: string) {
     return this.http.post<{ ok: boolean; backupCodes: string[]; message: string }>(`${this.api}/auth/mfa/backup-codes`, { code });
@@ -600,7 +658,10 @@ export class ApiService {
     return this.cache.through(`${NS.superadmin}:settings`, () => this.http.get<Record<string, any>>(`${this.api}/superadmin/settings`));
   }
   superSaveSetting(key: string, value: unknown) {
-    return this.afterWrite(this.http.put(`${this.api}/superadmin/settings/${key}`, value), NS.superadmin);
+    return this.afterWrite(
+      this.http.put<{ key: string; value: unknown }>(`${this.api}/superadmin/settings/${key}`, value),
+      NS.superadmin
+    );
   }
   /** Filterable and paginated. Was an unfiltered list capped at 200 rows, which
    *  made the trail unusable past the first 200 events. */
@@ -721,29 +782,36 @@ export class ApiService {
     return this.http.post<ImpersonationSession>(`${this.api}/superadmin/organisations/${id}/impersonate`, payload);
   }
 
-  // Tenant user actions
-  setTenantUser(id: string, payload: { role?: string; status?: string }) {
-    return this.afterWrite(this.http.put<OrgUser>(`${this.api}/superadmin/users/${id}`, payload), NS.superadmin);
+  // Tenant user actions.
+  //
+  // `targetOrgId` (not `orgId`) — the backend strips a literal `orgId` key from
+  // every request body unconditionally (it's the tenant-isolation boundary and
+  // must only ever come from the token), so these routes — flat by user id,
+  // ambiguous now that one identity can hold more than one membership (#53,
+  // #54) — need their own field name to say which org's membership this
+  // targets. The tenant drill-down page always knows which org it's viewing.
+  setTenantUser(id: string, targetOrgId: string, payload: { role?: string; status?: string }) {
+    return this.afterWrite(this.http.put<OrgUser>(`${this.api}/superadmin/users/${id}`, { ...payload, targetOrgId }), NS.superadmin);
   }
   /** `link` emails the normal reset link and the operator never sees a password;
    *  `temporary` returns one once, for when the address no longer receives mail.
    *  Both revoke every session. */
-  resetTenantUserPassword(id: string, mode: 'link' | 'temporary' = 'link') {
+  resetTenantUserPassword(id: string, targetOrgId: string, mode: 'link' | 'temporary' = 'link') {
     return this.afterWrite(
       this.http.post<{ ok: boolean; mode: string; tempPassword?: string; resetUrl?: string; delivered?: boolean; message: string }>(
-        `${this.api}/superadmin/users/${id}/reset-password`, { mode }
+        `${this.api}/superadmin/users/${id}/reset-password`, { mode, targetOrgId }
       ),
       NS.superadmin
     );
   }
-  unlockTenantUser(id: string) {
+  unlockTenantUser(id: string, targetOrgId: string) {
     return this.afterWrite(
-      this.http.post<{ ok: boolean; wasLocked: boolean }>(`${this.api}/superadmin/users/${id}/unlock`, {}),
+      this.http.post<{ ok: boolean; wasLocked: boolean }>(`${this.api}/superadmin/users/${id}/unlock`, { targetOrgId }),
       NS.superadmin
     );
   }
-  forceLogoutTenantUser(id: string) {
-    return this.afterWrite(this.http.post<{ ok: boolean }>(`${this.api}/superadmin/users/${id}/force-logout`, {}), NS.superadmin);
+  forceLogoutTenantUser(id: string, targetOrgId: string) {
+    return this.afterWrite(this.http.post<{ ok: boolean }>(`${this.api}/superadmin/users/${id}/force-logout`, { targetOrgId }), NS.superadmin);
   }
 
   // Platform accounts

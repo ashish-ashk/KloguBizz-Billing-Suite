@@ -185,6 +185,21 @@ const invoiceSchema = new mongoose.Schema({
     ifsc: String
   },
   /**
+   * The quotation, proforma or delivery challan this invoice was raised from
+   * (2.2 #11–#13), when it was raised by conversion rather than from scratch.
+   *
+   * Stored on the invoice as well as on the source document because both
+   * directions get asked: the quotation list wants "what did this become", and a
+   * customer querying a price wants "what was this agreed against" — which is
+   * asked *from the invoice*, and searching every quotation for a back-reference
+   * to answer it would be absurd.
+   */
+  sourceDocument: {
+    kind: { type: String, enum: ['quotation', 'proforma', 'delivery-challan'] },
+    documentId: { type: mongoose.Schema.Types.ObjectId, ref: 'SalesDocument' },
+    documentNumber: String
+  },
+  /**
    * Soft delete (#37).
    *
    * Only ever set on a **draft**: an issued invoice is not deletable at all, soft or

@@ -1,6 +1,15 @@
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
+  /**
+   * `orgId`/`role` are superseded by `Membership` (#53, #54) and kept only as
+   * the org a brand-new identity was created in — read by nothing at request
+   * time once a Membership row exists (`protect` resolves the active org's
+   * role from `Membership`, not from these). Migration 006 backfills one
+   * Membership per existing user from exactly these two fields. A platform
+   * account (`role: 'superadmin'`) never has a Membership and keeps using
+   * `role` directly — it isn't a tenant identity.
+   */
   orgId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organisation', index: true },
   name: { type: String, required: true, trim: true },
   email: { type: String, required: true, lowercase: true, trim: true },
@@ -10,6 +19,10 @@ const userSchema = new mongoose.Schema({
     enum: ['superadmin', 'admin', 'accountant', 'viewer'],
     default: 'viewer'
   },
+  /** Which organisation to sign into by default when more than one active
+   *  Membership exists — the most recently used one, so a login lands where
+   *  the person was last working rather than an arbitrary membership. */
+  lastActiveOrgId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organisation' },
   status: { type: String, enum: ['active', 'invited', 'disabled'], default: 'active' },
   /**
    * Which part of the platform console a superadmin may use.

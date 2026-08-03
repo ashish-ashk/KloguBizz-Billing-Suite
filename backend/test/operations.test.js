@@ -547,12 +547,20 @@ test('a tenant can read its own audit trail, and only its own', maybe(async () =
   await createClient(tenantA.token, { companyName: 'Visible To A' });
   await createClient(tenantB.token, { companyName: 'Visible To B' });
 
-  // Fire-and-forget writes, so poll rather than assume.
+  /**
+   * Fire-and-forget writes, so poll rather than assume — and poll for the
+   * **specific** entry this test asserts on, not merely for a non-empty page.
+   *
+   * Registering also writes audit entries, so the page becomes non-empty before
+   * `client.created` has necessarily landed. Breaking on the first row that
+   * appears therefore passed on an idle machine and failed under a loaded
+   * parallel run, which is the least useful kind of test failure.
+   */
   let page;
-  const deadline = Date.now() + 3000;
+  const deadline = Date.now() + 5000;
   do {
     page = await call('GET', '/reports/activity?limit=50', { token: tenantA.token });
-    if (page.body?.data?.length) break;
+    if (page.body?.data?.some(entry => entry.action === 'client.created')) break;
     await new Promise(resolve => { setTimeout(resolve, 50); });
   } while (Date.now() < deadline);
 

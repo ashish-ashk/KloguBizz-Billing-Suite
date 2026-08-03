@@ -4,3 +4,7 @@ node_modules/
 npm-debug.log*
 coverage/
 dist/
+# Uploaded images under STORAGE_DRIVER=local (see services/storageService.js).
+# Customer data, and content-addressed, so it is neither shareable nor
+# reproducible from the repo.
+var/

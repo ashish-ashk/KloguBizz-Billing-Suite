@@ -1,16 +1,32 @@
 import { Injectable, computed, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { EMPTY, tap } from 'rxjs';
+import { EMPTY, Observable, catchError, finalize, map, of, shareReplay, tap } from 'rxjs';
 import { environment } from '../../environments/environment';
-import { AuthUser, FeatureFlags, ImpersonationContext, ImpersonationSession, Organisation, TenantNotice } from './models';
+import { AuthUser, FeatureFlags, ImpersonationContext, ImpersonationSession, Organisation, OrgMembership, TenantNotice } from './models';
 import { CacheService } from './cache.service';
 import { ToastService } from './toast.service';
 
 interface AuthResponse {
   token: string;
+  /** Seconds the access token is valid for. Not read directly — `scheduleExpiry`
+   *  decodes the token's own `exp` claim instead — but present on every real
+   *  auth response. Absent from the impersonation and stashed-operator-session
+   *  payloads `startImpersonation`/`endImpersonation` pass to `store`, which
+   *  carry their own differently-lived tokens. */
+  expiresIn?: number;
+  /** Present on login, invite-acceptance and MFA verification. Absent on
+   *  register, which never auto-authenticates and so never starts a device
+   *  session — see services/sessionService.js on the backend. */
+  refreshToken?: string;
   user: AuthUser;
   organisation: Organisation | null;
+}
+
+interface RefreshResponse {
+  token: string;
+  expiresIn: number;
+  refreshToken: string;
 }
 
 /** How long a session refresh stays fresh — see `refreshSession`. */
@@ -26,12 +42,14 @@ interface SessionResponse {
   organisation: Organisation | null;
   flags: FeatureFlags;
   notices: TenantNotice[];
+  memberships: OrgMembership[];
   impersonation: ImpersonationContext | null;
 }
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly tokenKey = 'klogubizz_token';
+  private readonly refreshTokenKey = 'klogubizz_refresh';
   private readonly userKey = 'klogubizz_user';
   private readonly orgKey = 'klogubizz_org';
   /**
@@ -50,6 +68,11 @@ export class AuthService {
   readonly flags = signal<FeatureFlags>({});
   /** Operator-authored banners: this tenant's own, plus any platform-wide notice. */
   readonly notices = signal<TenantNotice[]>([]);
+  /** Every organisation this identity can act in (#53, #54) — empty for a
+   *  platform account or while impersonating, since neither is a tenant
+   *  identity with memberships of its own. Drives the org-switcher. */
+  readonly memberships = signal<OrgMembership[]>([]);
+  readonly hasMultipleOrgs = computed(() => this.memberships().length > 1);
   /**
    * Set while a superadmin is viewing a tenant's account. Read from localStorage on
    * construction so the banner is present on the very first paint after a reload —
@@ -75,6 +98,14 @@ export class AuthService {
 
   /** When the session was last reconciled with the server. */
   private lastSessionRefresh = 0;
+
+  /** In-flight `/auth/refresh` call, shared by every concurrent caller.
+   *  The proactive expiry timer and the interceptor's reactive 401 handler can
+   *  both want a new access token at once; without sharing, the second caller
+   *  would present a refresh token the first has already rotated away, which
+   *  the server can only read as theft (see sessionService.js's reuse check)
+   *  and would revoke the whole device's session over nothing. */
+  private refreshing$: Observable<boolean> | null = null;
 
   constructor(
     private http: HttpClient,
@@ -160,6 +191,7 @@ export class AuthService {
         if (res.organisation) this.setOrganisation(res.organisation);
         this.flags.set(res.flags || {});
         this.notices.set(res.notices || []);
+        this.memberships.set(res.memberships || []);
         this.setImpersonation(res.impersonation ? { ...this.impersonation(), ...res.impersonation } : null);
       })
     );
@@ -168,6 +200,74 @@ export class AuthService {
   /** Whether a named feature is on for this tenant. Unknown keys are off. */
   hasFeature(key: string): boolean {
     return this.flags()[key] === true;
+  }
+
+  /**
+   * Exchanges the stored refresh token for a new 15-minute access token.
+   *
+   * Called proactively (shortly before the current token's own expiry, from
+   * `scheduleExpiry` below) and reactively (by the auth interceptor, if a
+   * request 401s before the proactive timer got to it). Resolves `false`
+   * without throwing on any failure — the caller decides what to do next; the
+   * proactive path does nothing further (there's no request to retry) and the
+   * interceptor retries the request that triggered it.
+   *
+   * `forceLogout` fires from here on a genuine failure (expired/invalid/reused
+   * refresh token) rather than at each call site, so both callers get the same
+   * "you were signed out" handling with no duplicated logic.
+   */
+  refreshAccessToken(): Observable<boolean> {
+    if (this.refreshing$) return this.refreshing$;
+
+    /**
+     * Impersonation tokens are minted by a separate path
+     * (`impersonationService.issueImpersonationToken`) that never creates a
+     * device session, so there is no refresh token for *this* identity — only
+     * the stashed operator's, still sitting in storage underneath. Attempting
+     * a refresh here would silently swap the tab back to the operator's own
+     * access token while the UI still renders the impersonated tenant, which
+     * is worse than just letting the 30-minute window run out. Declining lets
+     * the existing expiry/401 handling end the session cleanly instead.
+     */
+    if (this.isImpersonating()) return of(false);
+
+    const refreshToken = localStorage.getItem(this.refreshTokenKey);
+    if (!refreshToken) return of(false);
+
+    this.refreshing$ = this.http.post<RefreshResponse>(`${environment.apiUrl}/auth/refresh`, { refreshToken }).pipe(
+      map(res => {
+        localStorage.setItem(this.tokenKey, res.token);
+        localStorage.setItem(this.refreshTokenKey, res.refreshToken);
+        this.scheduleExpiry();
+        return true;
+      }),
+      catchError(() => {
+        this.forceLogout('Your session has expired. Please sign in again.');
+        return of(false);
+      }),
+      shareReplay(1),
+      finalize(() => { this.refreshing$ = null; })
+    );
+    return this.refreshing$;
+  }
+
+  // ── Org switching (#53, #54) ─────────────────
+
+  /**
+   * Switches into another organisation this identity belongs to.
+   *
+   * Treated as a fresh sign-in for the new org rather than a patch to the
+   * current session — the backend mints a whole new access + refresh token
+   * pair for it (see authController.switchOrg), so `store` is exactly the
+   * right call here, same as after login.
+   */
+  switchOrg(targetOrgId: string) {
+    return this.http.post<AuthResponse>(`${environment.apiUrl}/auth/switch-org`, { targetOrgId }).pipe(
+      tap(res => {
+        this.cache.clear(); // holds the *other* org's data
+        this.store(res);
+      })
+    );
   }
 
   // ── Impersonation ────────────────────────────
@@ -237,8 +337,15 @@ export class AuthService {
     this.setOrganisation({ ...org, status });
   }
 
-  /** User-initiated sign-out (the sidebar/topbar "Sign Out" buttons). */
+  /** User-initiated sign-out (the sidebar/topbar "Sign Out" buttons). Revokes
+   *  the refresh token server-side — best-effort; the local session clears
+   *  either way, so a network hiccup doesn't trap the user in a signed-in UI
+   *  they just asked to leave. */
   logout() {
+    const refreshToken = localStorage.getItem(this.refreshTokenKey);
+    if (refreshToken) {
+      this.http.post(`${environment.apiUrl}/auth/logout`, { refreshToken }).subscribe({ error: () => {} });
+    }
     this.clearSession();
     this.router.navigateByUrl('/login');
   }
@@ -256,6 +363,7 @@ export class AuthService {
   private clearSession() {
     if (this.expiryTimer) { clearTimeout(this.expiryTimer); this.expiryTimer = null; }
     localStorage.removeItem(this.tokenKey);
+    localStorage.removeItem(this.refreshTokenKey);
     localStorage.removeItem(this.userKey);
     localStorage.removeItem(this.orgKey);
     // The stashed operator session goes too. Leaving it behind would mean the next
@@ -268,6 +376,7 @@ export class AuthService {
     this.impersonation.set(null);
     this.flags.set({});
     this.notices.set([]);
+    this.memberships.set([]);
     // Responses are cached in memory for a short TTL to stop every navigation
     // refetching everything. On sign-out that cache must go: on a shared machine
     // the next person to sign in would otherwise be served the previous
@@ -277,6 +386,7 @@ export class AuthService {
 
   private store(res: AuthResponse) {
     localStorage.setItem(this.tokenKey, res.token);
+    if (res.refreshToken) localStorage.setItem(this.refreshTokenKey, res.refreshToken);
     localStorage.setItem(this.userKey, JSON.stringify(res.user));
     if (res.organisation) localStorage.setItem(this.orgKey, JSON.stringify(res.organisation));
     this.user.set(res.user);
@@ -306,20 +416,36 @@ export class AuthService {
     }
   }
 
-  /** (Re)schedules the proactive expiry logout for whatever token is
+  /** How long before the access token's own `exp` to renew it. Refreshing
+   *  early rather than exactly at expiry means a request that goes out right
+   *  as the timer fires still has a token good for another 15 minutes. */
+  private readonly REFRESH_MARGIN_MS = 60_000;
+
+  /** (Re)schedules the proactive silent refresh for whatever token is
    *  currently stored — called on service construction (covers a page
-   *  reload/reopen with an already-issued token) and right after login. */
+   *  reload/reopen with an already-issued token) and right after login/refresh.
+   *  With refresh tokens (#50, #51) an access token nearing expiry is renewed
+   *  in the background instead of ending the session — a 15-minute access
+   *  token would otherwise mean a live tab gets signed out every 15 minutes. */
   private scheduleExpiry() {
     if (this.expiryTimer) { clearTimeout(this.expiryTimer); this.expiryTimer = null; }
     const token = this.token;
     if (!token) return;
     const expiryMs = this.decodeExpiryMs(token);
     if (!expiryMs) return;
-    const delay = expiryMs - Date.now();
-    const message = 'Your session has expired. Please sign in again.';
-    if (delay <= 0) { this.forceLogout(message); return; }
+    const delay = expiryMs - Date.now() - this.REFRESH_MARGIN_MS;
+    // Impersonation tokens decline the silent refresh (see refreshAccessToken)
+    // since there is no device session behind them to refresh — so the
+    // 30-minute window has to be allowed to actually end the session here,
+    // the same clean way an ordinary expiry did before refresh tokens existed.
+    const renew = () => {
+      if (this.isImpersonating()) { this.forceLogout('Your read-only support session has ended.'); return; }
+      this.refreshAccessToken().subscribe();
+    };
+    if (delay <= 0) { renew(); return; }
     // setTimeout's delay param is a 32-bit signed int (~24.8 days max) —
-    // the 12h token lifetime is comfortably inside that, but clamp defensively.
-    this.expiryTimer = setTimeout(() => this.forceLogout(message), Math.min(delay, 2 ** 31 - 1));
+    // comfortably larger than the 15-minute access token lifetime, but clamped
+    // defensively in case that ever changes.
+    this.expiryTimer = setTimeout(renew, Math.min(delay, 2 ** 31 - 1));
   }
 }
