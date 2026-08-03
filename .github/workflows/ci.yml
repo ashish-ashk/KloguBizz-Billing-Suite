@@ -115,11 +115,11 @@ jobs:
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
-    # Advisory rather than blocking: a transitive high-severity advisory with no
-    # available fix would otherwise stop every unrelated change from merging.
-    continue-on-error: true
 
     strategy:
+      # One package having an advisory says nothing about the other; cancelling
+      # the sibling would just hide half the report.
+      fail-fast: false
       matrix:
         package: [backend, frontend]
 
@@ -132,4 +132,27 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm audit --audit-level=high
+
+      # This one blocks. `critical` is the level where the right response is to
+      # stop and fix rather than to file a note, so there is no value in letting
+      # it merge.
+      - name: Audit (blocking — critical)
+        run: npm audit --audit-level=critical
+
+      # This one reports. The frontend's remaining high-severity advisories are
+      # the @angular/* 18.x tree: the fix is Angular >= 20, and the newest 19.x
+      # (19.2.25) is still inside the vulnerable range, so there is nothing to
+      # bump to inside the current major. Failing here would block every
+      # unrelated change on a migration that has to be scheduled deliberately.
+      #
+      # The step is `continue-on-error` rather than the whole job, so the
+      # critical gate above keeps its teeth.
+      - name: Audit (advisory — high)
+        id: audit_high
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+      - name: Annotate advisory result
+        if: steps.audit_high.outcome == 'failure'
+        run: |
+          echo "::warning title=High-severity advisories in ${{ matrix.package }}::npm audit reports high-severity advisories. See the 'Audit (advisory — high)' step for the report."
