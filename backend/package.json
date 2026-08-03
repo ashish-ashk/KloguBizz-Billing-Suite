@@ -31,7 +31,7 @@
     "pdfkit": "^0.19.1",
     "razorpay": "^2.9.4",
     "sharp": "^0.35.3",
-    "zod": "^3.23.8"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "eslint": "^9.12.0",
