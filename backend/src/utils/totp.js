@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { env } = require('../config/env');
+const secretBox = require('./secretBox');
 
 /**
  * TOTP (RFC 6238), implemented directly on `node:crypto`.
@@ -161,31 +161,23 @@ function otpauthUri({ secret, account, issuer = 'KloguBizz' }) {
  * reset tokens hashed rather than stored, except that a secret has to be *recovered*
  * to verify a code, so it is encrypted rather than hashed.
  *
- * The key is `MFA_ENCRYPTION_KEY` when set, otherwise derived from `JWT_SECRET` so
- * the feature works without extra configuration. That fallback has a real
- * consequence and it is documented rather than hidden: rotating `JWT_SECRET`
- * invalidates every enrolled authenticator, and users have to re-enrol.
+ * The mechanism moved to `utils/secretBox.js` when tenant payment-gateway
+ * credentials needed the same treatment. The `'mfa'` namespace is load-bearing:
+ * it reproduces the original key derivation exactly, so every authenticator
+ * already enrolled keeps working. Changing it would silently invalidate all of
+ * them on the next deploy.
  */
-function encryptionKey() {
-  const source = env.MFA_ENCRYPTION_KEY || env.JWT_SECRET;
-  return crypto.createHash('sha256').update(`mfa:${source}`).digest();
-}
-
 function encryptSecret(plain) {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', encryptionKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
-  // iv:tag:ciphertext, all base64 — self-describing, so a rotation can tell an old
-  // value from a new one without a version field.
-  return [iv.toString('base64'), cipher.getAuthTag().toString('base64'), encrypted.toString('base64')].join(':');
+  return secretBox.encrypt(plain, 'mfa');
 }
 
 function decryptSecret(stored) {
-  const [ivPart, tagPart, dataPart] = String(stored || '').split(':');
-  if (!ivPart || !tagPart || !dataPart) throw new Error('Stored MFA secret is malformed');
-  const decipher = crypto.createDecipheriv('aes-256-gcm', encryptionKey(), Buffer.from(ivPart, 'base64'));
-  decipher.setAuthTag(Buffer.from(tagPart, 'base64'));
-  return Buffer.concat([decipher.update(Buffer.from(dataPart, 'base64')), decipher.final()]).toString('utf8');
+  try {
+    return secretBox.decrypt(stored, 'mfa');
+  } catch (error) {
+    // Preserve the original, more specific message — callers surface it.
+    throw new Error(error.message === 'Stored secret is malformed' ? 'Stored MFA secret is malformed' : error.message);
+  }
 }
 
 // ── Backup codes ─────────────────────────────────

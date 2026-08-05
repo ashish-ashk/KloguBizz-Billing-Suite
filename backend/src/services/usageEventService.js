@@ -41,6 +41,10 @@ const EVENT = {
    *  themselves record `invoice.created` as normal, so recurring revenue is not
    *  invisible to the volume metrics. */
   recurringInvoiceCreated: 'recurring_invoice.created',
+  /** A payment link was issued (2.3 #21). The payment it collects records
+   *  `payment.recorded` as normal, so online collection is not invisible to the
+   *  revenue figures. */
+  paymentLinkCreated: 'payment_link.created',
   clientCreated: 'client.created',
   itemCreated: 'item.created',
   itemBulkUpload: 'item.bulk_upload',

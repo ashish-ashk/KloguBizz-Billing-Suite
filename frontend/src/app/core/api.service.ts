@@ -12,6 +12,7 @@ import {
   LoginHistoryFilters, Master, MastersResponse, MetricsSeries, MfaSetup,
   Organisation, OrgSummary, OrgSupportContext, OrgUser, Page, Payment, Plan, PlanUsage,
   PlatformMe, PlatformSummary, PlatformUser, PublicBranding, Purchase, Reminder,
+  GatewaySettings, PaymentLink,
   RecurrenceFrequency, RecurringInvoice, RecurringInvoiceRun,
   SalesDocument, SalesDocumentKind, SalesDocumentStatus, SalesDocumentSummary, SecurityAlerts,
   Subscription, SuperOverview, SystemHealth, TenantDetail, TenantNotice, Vendor,
@@ -32,6 +33,7 @@ const NS = {
   creditNotes: 'credit-notes',
   salesDocuments: 'sales-documents',
   recurring: 'recurring-invoices',
+  paymentLinks: 'payment-links',
   users: 'users',
   organisation: 'organisation',
   subscription: 'subscription',
@@ -297,6 +299,45 @@ export class ApiService {
   }
   restoreRecurringInvoice(id: string) {
     return this.afterWrite(this.http.post<RecurringInvoice>(`${this.api}/recurring-invoices/${id}/restore`, {}), NS.recurring);
+  }
+
+  // ── Payment links (2.3 #21) ──
+  paymentLinks(params: ListParams = {}) {
+    return this.list<PaymentLink>(NS.paymentLinks, '/payment-links', params);
+  }
+  /**
+   * Creates a link. **The URL is returned once and never again** — the token is
+   * stored only as a hash, so a lost link means creating a new one. Capture it
+   * from this response or it is gone.
+   */
+  createPaymentLink(invoiceId: string) {
+    return this.afterWrite(
+      this.http.post<{ link: PaymentLink; url: string }>(`${this.api}/payment-links`, { invoiceId }),
+      NS.paymentLinks
+    );
+  }
+  /** Creates a link and emails it in one step — the common case. */
+  sendPaymentLink(invoiceId: string, to?: string) {
+    return this.afterWrite(
+      this.http.post<{ link: PaymentLink; url?: string; delivered: boolean; to: string; message: string }>(
+        `${this.api}/payment-links/send/${invoiceId}`, to ? { to } : {}
+      ),
+      NS.paymentLinks
+    );
+  }
+  cancelPaymentLink(id: string) {
+    return this.afterWrite(this.http.post<PaymentLink>(`${this.api}/payment-links/${id}/cancel`, {}), NS.paymentLinks);
+  }
+  gatewaySettings() {
+    return this.http.get<GatewaySettings>(`${this.api}/payment-links/gateway`);
+  }
+  /** An omitted secret means "leave the stored one alone" — the console never
+   *  receives it, so sending an empty string would wipe it. */
+  saveGatewaySettings(payload: {
+    keyId?: string; keySecret?: string; webhookSecret?: string;
+    enabled?: boolean; linkValidityDays?: number;
+  }) {
+    return this.http.put<GatewaySettings>(`${this.api}/payment-links/gateway`, payload);
   }
 
   // ── Payments ─────────────────────────────────

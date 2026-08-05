@@ -137,6 +137,13 @@ app.use('/api/v1/sales-documents', require('./src/routes/salesDocumentRoutes'));
 // Standing instructions that raise an invoice on a schedule. What they produce
 // are ordinary tax invoices; see models/RecurringInvoice.js.
 app.use('/api/v1/recurring-invoices', require('./src/routes/recurringInvoiceRoutes'));
+// Payment links: the tenant-facing half (authenticated) and the hosted pay page
+// (deliberately not — see publicPayRoutes.js).
+app.use('/api/v1/payment-links', require('./src/routes/paymentLinkRoutes'));
+app.use('/api/v1/pay', require('./src/routes/publicPayRoutes'));
+// A tenant's own Razorpay webhook, verified against *their* secret rather than
+// the platform's. Reconciliation for when the browser callback never arrives.
+app.use('/api/v1/webhooks/tenant-gateway', require('./src/routes/tenantGatewayWebhookRoutes'));
 app.use('/api/v1/users', require('./src/routes/userRoutes'));
 app.use('/api/v1/subscriptions', require('./src/routes/subscriptionRoutes'));
 app.use('/api/v1/reports', require('./src/routes/reportRoutes'));

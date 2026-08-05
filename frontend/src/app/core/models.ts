@@ -738,6 +738,49 @@ export interface SalesDocument {
   createdAt?: string;
 }
 
+// ── Payment links (2.3 #21) ──
+
+export type PaymentLinkStatus = 'active' | 'paid' | 'expired' | 'cancelled';
+
+/**
+ * A shareable link that lets a customer pay one invoice online.
+ *
+ * The token is **never** in this object — it exists in the URL the create call
+ * returns once, and nowhere else. A lost link means creating a new one, which is
+ * correct: a link is a bearer credential.
+ */
+export interface PaymentLink {
+  _id: string;
+  invoiceId: string | Invoice;
+  reference: string;
+  amount: number;
+  currency: string;
+  status: PaymentLinkStatus;
+  expiresAt: string;
+  provider: string;
+  providerPaymentId?: string;
+  paidAt?: string;
+  settledBy?: 'callback' | 'webhook' | 'manual';
+  attempts: number;
+  lastError?: string;
+  isPayable: boolean;
+  createdBy?: string;
+  createdAt: string;
+}
+
+/** What the console may see about the tenant's gateway — which key is
+ *  configured, never the secret. */
+export interface GatewaySettings {
+  provider: string;
+  enabled: boolean;
+  configured: boolean;
+  keyId: string;
+  hasWebhookSecret: boolean;
+  linkValidityDays: number;
+  connectedAt: string | null;
+  connectedBy: string;
+}
+
 // ── Recurring invoices (2.2 #14) ──
 
 export type RecurrenceFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';

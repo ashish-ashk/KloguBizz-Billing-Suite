@@ -376,6 +376,28 @@ const recurringInvoiceStatusSchema = z.object({
   status: z.enum(['active', 'paused', 'cancelled'])
 });
 
+// ── Payment links (2.3 #21) ──────────────────────
+
+const paymentLinkCreateSchema = z.object({
+  invoiceId: objectId
+});
+
+/**
+ * The tenant's own gateway credentials.
+ *
+ * The secrets are **optional on purpose**: the console never receives them back,
+ * so an empty value has to mean "leave the stored one alone" rather than "clear
+ * it" — otherwise a save that only changed the key id would wipe the secret. The
+ * same write-only-field rule the branding images follow.
+ */
+const gatewaySettingsSchema = z.object({
+  keyId: z.string().trim().max(200).optional(),
+  keySecret: z.string().trim().max(400).optional(),
+  webhookSecret: z.string().trim().max(400).optional(),
+  enabled: z.coerce.boolean().optional(),
+  linkValidityDays: z.coerce.number().int().min(1).max(90).optional()
+});
+
 // ── Users ────────────────────────────────────────
 
 const userInviteSchema = z.object({
@@ -494,6 +516,7 @@ module.exports = {
   salesDocumentCreateSchema, salesDocumentUpdateSchema,
   salesDocumentStatusSchema, salesDocumentConvertSchema,
   recurringInvoiceCreateSchema, recurringInvoiceUpdateSchema, recurringInvoiceStatusSchema,
+  paymentLinkCreateSchema, gatewaySettingsSchema,
   userInviteSchema, userUpdateSchema,
   organisationUpdateSchema, transferOwnershipSchema,
   subscriptionStartSchema

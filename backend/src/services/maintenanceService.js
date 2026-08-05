@@ -9,11 +9,13 @@ const { Subscription } = require('../models/Subscription');
 const { ReminderLog } = require('../models/ReminderLog');
 const { SalesDocument } = require('../models/SalesDocument');
 const { RecurringInvoice, RecurringInvoiceRun } = require('../models/RecurringInvoice');
+const { PaymentLink } = require('../models/PaymentLink');
 const { User } = require('../models/User');
 const { Organisation } = require('../models/Organisation');
 const { purgeCutoff } = require('../utils/softDelete');
 const { logger } = require('../utils/logger');
 const { runRecurringSweep } = require('./recurringInvoiceService');
+const { sweepExpiredLinks } = require('./paymentLinkService');
 
 /**
  * Background housekeeping.
@@ -137,7 +139,8 @@ async function purgeExpiredDeletions() {
   for (const org of doomed) {
     for (const Model of [
       User, Client, Item, Invoice, Payment, CreditNote, Vendor, Purchase,
-      Subscription, ReminderLog, SalesDocument, RecurringInvoice, RecurringInvoiceRun
+      Subscription, ReminderLog, SalesDocument, RecurringInvoice, RecurringInvoiceRun,
+      PaymentLink
     ]) {
       await Model.deleteMany({ orgId: org._id });
     }
@@ -182,10 +185,15 @@ async function runOnce() {
       });
     }
 
+    // A payment link that outlives its validity must read as expired in the
+    // tenant's list too, not only on the public page (which derives it).
+    const paymentLinks = await sweepExpiredLinks();
+    if (paymentLinks.expiredPaymentLinks) logger.info('payment link expiry sweep', paymentLinks);
+
     const purged = await purgeExpiredDeletions();
     if (Object.values(purged).some(Boolean)) logger.info('recycle bin purge', purged);
 
-    return { ...result, ...quotations, recurring, purged };
+    return { ...result, ...quotations, ...paymentLinks, recurring, purged };
   } catch (error) {
     logger.error('maintenance sweep failed', { err: error });
     return null;
@@ -218,6 +226,7 @@ function stopMaintenanceScheduler() {
 module.exports = {
   sweepOverdueInvoices,
   sweepExpiredQuotations,
+  sweepExpiredLinks,
   purgeExpiredDeletions,
   startMaintenanceScheduler,
   stopMaintenanceScheduler

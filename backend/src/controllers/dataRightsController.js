@@ -9,6 +9,7 @@ const { Payment } = require('../models/Payment');
 const { CreditNote } = require('../models/CreditNote');
 const { SalesDocument } = require('../models/SalesDocument');
 const { RecurringInvoice } = require('../models/RecurringInvoice');
+const { PaymentLink } = require('../models/PaymentLink');
 const { Vendor } = require('../models/Vendor');
 const { Purchase } = require('../models/Purchase');
 const { Subscription } = require('../models/Subscription');
@@ -46,6 +47,7 @@ const EXPORT_COLLECTIONS = [
   // portability request is meant to prevent.
   ['salesDocuments', SalesDocument, 'orgId'],
   ['recurringInvoices', RecurringInvoice, 'orgId'],
+  ['paymentLinks', PaymentLink, 'orgId'],
   ['payments', Payment, 'orgId'],
   ['purchases', Purchase, 'orgId'],
   ['subscriptions', Subscription, 'orgId']

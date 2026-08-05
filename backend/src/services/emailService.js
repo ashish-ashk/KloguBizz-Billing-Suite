@@ -178,6 +178,47 @@ async function sendInviteEmail({ to, name, inviteUrl, orgName, inviterName, expi
  * informational, which is also why it's allowed to fail silently the same way
  * every other notification here does.
  */
+/**
+ * A request to pay an invoice online (2.3 #21).
+ *
+ * The amount and the invoice number are in the subject as well as the body,
+ * because this is the one email whose *point* is visible before it is opened —
+ * and because a payment request that looks like a phishing attempt does not get
+ * paid. The business's own name leads, `replyTo` is the tenant's address, and the
+ * expiry is stated so an ignored link is not a mystery later.
+ */
+async function sendPaymentLinkEmail({ to, orgId, orgName, clientName, invoiceNumber, amount, payUrl, expiresAt, replyTo }) {
+  const formatted = `INR ${Number(amount || 0).toLocaleString('en-IN')}`;
+  const expiry = expiresAt
+    ? new Date(expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+    : null;
+  const body = `
+    <p style="margin:0 0 12px;">Hello ${escapeHtml(clientName || 'there')},</p>
+    <p style="margin:0 0 12px;">
+      ${escapeHtml(orgName || 'Your supplier')} has requested payment of
+      <strong>${escapeHtml(formatted)}</strong> for invoice
+      <strong>${escapeHtml(invoiceNumber || '')}</strong>.
+    </p>
+    <p style="margin:0;">You can pay securely online using the button below.</p>`;
+  return sendEmail({
+    to,
+    orgId,
+    replyTo,
+    type: 'payment-link',
+    subject: `${formatted} due — invoice ${invoiceNumber} from ${orgName || 'your supplier'}`,
+    html: layout({
+      title: 'Payment request',
+      body,
+      ctaLabel: `Pay ${formatted}`,
+      ctaUrl: payUrl,
+      footer: expiry
+        ? `This payment link expires on ${expiry}. If you have already paid by another method, you can ignore this email.`
+        : 'If you have already paid by another method, you can ignore this email.'
+    }),
+    text: `Hello ${clientName || 'there'},\n\n${orgName || 'Your supplier'} has requested payment of ${formatted} for invoice ${invoiceNumber}.\n\nPay securely here: ${payUrl}\n${expiry ? `\nThis link expires on ${expiry}.\n` : ''}`
+  });
+}
+
 async function sendAddedToOrgEmail({ to, name, orgName, inviterName, orgId }) {
   const who = inviterName ? `<strong>${escapeHtml(inviterName)}</strong> has added you` : 'You have been added';
   const body = `
@@ -393,6 +434,7 @@ module.exports = {
   recordEmail,
   sendInviteEmail,
   sendAddedToOrgEmail,
+  sendPaymentLinkEmail,
   sendPasswordResetEmail,
   sendEmailVerification,
   sendReminderEmail,

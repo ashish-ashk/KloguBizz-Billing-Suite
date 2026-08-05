@@ -99,6 +99,51 @@ const brandingSchema = new mongoose.Schema({
   invoiceDefaults: { type: invoiceDefaultsSchema, default: () => ({}) }
 }, { _id: false });
 
+/**
+ * The tenant's *own* payment gateway, for collecting from their customers
+ * (2.3 #21).
+ *
+ * Distinct from the platform's Razorpay keys in `env`, which are how tenants pay
+ * **us**. These are how a tenant's customer pays **them**, so the money never
+ * touches a platform account — which is both the simplest arrangement and the one
+ * that avoids us becoming a payment aggregator, a regulated activity in India.
+ *
+ * The alternative is Razorpay Route, where funds land in the platform account and
+ * are split to sub-merchants. That is a better experience (one onboarding, we can
+ * take a cut) and a much larger commitment: it makes us the merchant of record and
+ * needs its own compliance. Per-tenant keys are deliberately the first
+ * implementation, and the seam is narrow enough that Route can be added as a
+ * second `provider` later without touching the payment-link flow.
+ *
+ * **The secrets are encrypted at rest** (`utils/secretBox.js`, namespace
+ * `gateway`) for exactly the reason the MFA secret is: a readable key secret in
+ * the database is the ability to charge that tenant's customers, for anyone who
+ * can read a backup. `keyId` is *not* encrypted — it is public by design, appears
+ * in the browser, and is what the checkout script needs.
+ */
+const paymentGatewaySchema = new mongoose.Schema({
+  provider: { type: String, enum: ['razorpay'], default: 'razorpay' },
+  /** Public. Sent to the browser to open checkout. */
+  keyId: { type: String, default: '' },
+  /** Encrypted. Never returned by any API — the console gets `••••1234`. */
+  keySecret: { type: String, default: '' },
+  /**
+   * Encrypted. The tenant's own webhook secret, distinct from the platform's:
+   * a webhook for a tenant's collection is signed with the tenant's secret, and
+   * verifying it against ours would fail — or worse, succeed for the wrong
+   * tenant if the two were ever shared.
+   */
+  webhookSecret: { type: String, default: '' },
+  /** Off until the tenant explicitly turns it on, so a half-entered key pair
+   *  cannot start producing links that fail at checkout. */
+  enabled: { type: Boolean, default: false },
+  connectedAt: Date,
+  connectedBy: String,
+  /** How long a generated link stays payable. A link that works forever is a
+   *  standing charge against card details long after the invoice was settled. */
+  linkValidityDays: { type: Number, default: 14, min: 1, max: 90 }
+}, { _id: false });
+
 // Custom palette a tenant admin builds from scratch in the Appearance page.
 const customThemeSchema = new mongoose.Schema({
   primary: String,
@@ -240,6 +285,7 @@ const organisationSchema = new mongoose.Schema({
   deletionReason: String,
   brandingConfig: { type: brandingSchema, default: () => ({}) },
   themeConfig: { type: themeConfigSchema, default: () => ({}) },
+  paymentGateway: { type: paymentGatewaySchema, default: () => ({}) },
   invoiceSequence: { type: Number, default: 0 },
   // Which financial year (Apr–Mar, labelled by its starting calendar year,
   // e.g. '2026' for FY2026-27) `invoiceSequence` currently counts against.

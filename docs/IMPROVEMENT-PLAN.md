@@ -892,16 +892,64 @@ return contained. Both that test and the new one now assert against `report.sect
 *and* prove the positive case (a converted/generated invoice **does** appear), so the test
 can no longer pass by the return simply being broken.
 
-### 6. Payment links, hosted pay page, customer portal (2.3 #21, #23)
+### 6. Payment links and the hosted pay page (2.3 #21, #23) — ✅ **DONE (2026-08-03)**
 
-**Why not yet:** Razorpay is wired only for *our* subscriptions, never for
-tenant → customer collection. That needs per-tenant gateway credentials (Razorpay Route,
-or per-tenant keys), which is a commercial decision as much as a technical one.
+**Why it was deferred:** Razorpay was wired only for *our* subscriptions, never for
+tenant → customer collection. That needs per-tenant gateway credentials, which is a
+commercial decision as much as a technical one.
 
-**How:** store per-tenant credentials encrypted — `utils/totp.js`'s AES-256-GCM helper is
-the pattern to copy. Add a public `/pay/:token` route with a signed, expiring token, and
-reconcile through a webhook that calls the existing `createPayment` path so settlement
-logic stays in exactly one place.
+**The commercial decision, made explicitly:** **per-tenant keys**, not Razorpay Route.
+Funds go straight from the customer to the tenant's own merchant account and never touch
+a platform account — which is both simpler and avoids us becoming a payment aggregator, a
+regulated activity in India. Route is the better *experience* (one onboarding, we could
+take a cut) and a far larger commitment: it makes us the merchant of record with its own
+compliance burden. The seam is a `provider` field, so Route can be added later without
+touching the link flow.
+
+**What shipped:** `PaymentLink`, a `tenantGatewayService` (kept deliberately separate from
+the platform's `razorpayService` — different secrets, different party, and sharing one
+module means one bug can charge the wrong one), a `paymentLinkService` that owns creation
+and settlement, an unauthenticated `/api/v1/pay/:token` trio, a tenant webhook at
+`/webhooks/tenant-gateway`, and a hosted pay page at `/pay/:token`.
+
+The plan said to copy `utils/totp.js`'s AES-256-GCM helper. It was **extracted** into
+`utils/secretBox.js` instead, with a `namespace` parameter — the `'mfa'` namespace
+reproduces the original key derivation *exactly*, verified by a test that decrypts a value
+encrypted by the old inline code, because changing it would have invalidated every
+enrolled authenticator on the next deploy. The namespace also domain-separates the keys,
+so an exposed gateway credential cannot decrypt an MFA secret.
+
+**The four things this feature had to get right, each with a test:**
+
+- **Signature verification.** Without it, anyone who can POST to the confirm endpoint can
+  mark any invoice paid. Verified with a real HMAC against a known key, and a valid
+  signature for a *different* order is refused (`ORDER_MISMATCH`) so one cannot be
+  replayed against another invoice.
+- **Idempotent settlement.** The browser callback and the webhook both report the same
+  charge and they race. `providerPaymentId` is uniquely indexed and claimed *before* the
+  `Payment` row is written, so three concurrent settlements record money once.
+- **The amount never comes from the payer.** There is no field for it. It is read from
+  `invoice.balanceDue` when the order is created, re-checked against what the gateway says
+  it captured, and capped at the balance — an over-capture cannot inflate collections.
+- **The public allowlist.** `/pay/:token` is the only place in the product an anonymous
+  caller reaches tenant data, so `publicView` is a hand-built allowlist rather than a
+  filtered document: the risk is not what was removed today but what a field added next
+  month would silently expose. A test asserts a second customer's name is unreachable.
+
+**Also deliberate:** a link expires (a link that works forever is a standing charge
+against card details long after the invoice was settled some other way); a suspended
+tenant cannot keep collecting through a link issued before the suspension; an invoice paid
+by bank transfer while the page was open *reconciles* rather than charging; and the
+gateway's own instrument (`upi`, `card`) is recorded without validating it against the
+tenant's `paymentMethod` masters — that validation exists to stop a user typing free text,
+and rejecting a real payment because "upi" is not in a dropdown would lose money that has
+already moved.
+
+**Not verified:** the actual network calls to Razorpay. There are no credentials in this
+environment, and a mocked gateway would only prove the mock works. Everything this
+codebase owns — signature maths, idempotency, the allowlist, the settlement path — is
+tested. Before going live: connect a real test-mode key pair, make one payment end to end,
+and confirm the webhook arrives (Razorpay's dashboard shows delivery attempts).
 
 ### 7. Inventory depth (2.5 #40–#44)
 

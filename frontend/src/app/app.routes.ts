@@ -9,6 +9,15 @@ export const routes: Routes = [
   // link fell through to the wildcard below and invited users could never
   // activate their account.
   { path: 'accept-invite', loadComponent: () => import('./features/auth/accept-invite.component').then(m => m.AcceptInviteComponent) },
+  /**
+   * The hosted pay page (2.3 #21) — **outside the auth guard on purpose**.
+   *
+   * The person paying an invoice is the tenant's customer. They have no account
+   * here and never will; putting this behind a login would defeat the feature
+   * entirely. The token in the URL is the credential — see publicPayRoutes.js on
+   * the server for what compensates for that.
+   */
+  { path: 'pay/:token', loadComponent: () => import('./features/pay/pay.component').then(m => m.PayComponent) },
   { path: 'forgot-password', loadComponent: () => import('./features/auth/forgot-password.component').then(m => m.ForgotPasswordComponent) },
   { path: 'reset-password', loadComponent: () => import('./features/auth/reset-password.component').then(m => m.ResetPasswordComponent) },
   // Confirming an address has to work without a session: the link arrives by email and
