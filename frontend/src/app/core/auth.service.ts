@@ -29,6 +29,29 @@ interface RefreshResponse {
   refreshToken: string;
 }
 
+/**
+ * `/auth/login` returns one of two shapes, and the difference matters.
+ *
+ * With MFA enabled the server issues **no token** — deliberately, so there is no
+ * window in which a half-authenticated session exists and no route that has to
+ * remember to check a "needs MFA" flag. `token` and `mfaRequired` are therefore
+ * mutually exclusive, and a caller must branch rather than assume a session.
+ */
+type LoginResponse = Partial<AuthResponse> & {
+  mfaRequired?: boolean;
+  /** Short-lived challenge token, issued only after a correct password. */
+  mfaToken?: string;
+  expiresInSeconds?: number;
+  message?: string;
+};
+
+/** `/auth/mfa/verify`. Reports a consumed recovery code so the user knows how
+ *  many are left before the last one goes. */
+type MfaVerifyResponse = Partial<AuthResponse> & {
+  usedBackupCode?: boolean;
+  remainingBackupCodes?: number;
+};
+
 /** How long a session refresh stays fresh — see `refreshSession`. */
 const SESSION_REFRESH_INTERVAL_MS = 60 * 1000;
 
@@ -120,9 +143,34 @@ export class AuthService {
     return localStorage.getItem(this.tokenKey);
   }
 
+  /**
+   * Signs in — or asks for a second factor.
+   *
+   * `/auth/login` has **two** possible successful responses, and conflating them
+   * was a real bug: when the account has MFA enabled the server deliberately
+   * issues no token at all and returns `{ mfaRequired: true, mfaToken }`, so that
+   * there is never a window in which a half-authenticated session exists. This
+   * used to `store(res)` unconditionally, which wrote `"undefined"` into
+   * localStorage and bricked the next page load.
+   *
+   * A session is stored only when one was actually issued. The caller branches on
+   * `mfaRequired` and calls `verifyMfa` with the challenge token.
+   */
   login(email: string, password: string) {
-    return this.http.post<AuthResponse>(`${environment.apiUrl}/auth/login`, { email, password })
-      .pipe(tap(res => this.store(res)));
+    return this.http.post<LoginResponse>(`${environment.apiUrl}/auth/login`, { email, password })
+      .pipe(tap(res => { if (res.token) this.store(res as AuthResponse); }));
+  }
+
+  /**
+   * Completes a sign-in that was challenged for a second factor.
+   *
+   * `code` is either a six-digit TOTP code or one of the single-use recovery
+   * codes — the server accepts both at this endpoint, which is what makes a lost
+   * phone recoverable without a support request.
+   */
+  verifyMfa(mfaToken: string, code: string) {
+    return this.http.post<MfaVerifyResponse>(`${environment.apiUrl}/auth/mfa/verify`, { mfaToken, code })
+      .pipe(tap(res => { if (res.token) this.store(res as AuthResponse); }));
   }
 
   /** Creates the organisation + admin account. Does NOT auto-authenticate —
@@ -405,13 +453,31 @@ export class AuthService {
     this.cache.clear();
   }
 
+  /**
+   * Persists a real session.
+   *
+   * **Never call this with anything that is not a completed sign-in.** It used to
+   * be called with the MFA *challenge* response — which carries no token and no
+   * user — and `localStorage.setItem(key, undefined)` stores the literal string
+   * `"undefined"`, which then crashed the app on its next load (see `readJson`).
+   * The guard below makes that impossible rather than merely unlikely: a payload
+   * with no token is refused outright.
+   */
   private store(res: AuthResponse) {
+    if (!res?.token) {
+      // A caller mistake, not a user-facing condition — loudly in the console,
+      // silently to the user, and above all nothing written.
+      console.error('AuthService.store called without a token; refusing to write a partial session.', res);
+      return;
+    }
     localStorage.setItem(this.tokenKey, res.token);
     if (res.refreshToken) localStorage.setItem(this.refreshTokenKey, res.refreshToken);
-    localStorage.setItem(this.userKey, JSON.stringify(res.user));
+    // Guarded for the same reason: JSON.stringify(undefined) is undefined, not a
+    // string, and setItem coerces it to "undefined".
+    if (res.user) localStorage.setItem(this.userKey, JSON.stringify(res.user));
     if (res.organisation) localStorage.setItem(this.orgKey, JSON.stringify(res.organisation));
-    this.user.set(res.user);
-    this.organisation.set(res.organisation);
+    this.user.set(res.user ?? null);
+    this.organisation.set(res.organisation ?? null);
     // A new identity invalidates the throttle: without this, switching into (or out
     // of) an impersonation session would keep showing the previous identity's flags
     // and notices for up to a minute.
@@ -419,9 +485,41 @@ export class AuthService {
     this.scheduleExpiry();
   }
 
+  /**
+   * Reads a stored JSON value, and **cannot throw**.
+   *
+   * This is called from field initializers, which run while `AuthService` is
+   * being constructed — during Angular's `runInitializers`. A throw there is not
+   * an error the app can show: the injector never finishes, nothing bootstraps,
+   * and the user gets a blank white page with no route and no error boundary.
+   * There is no recovery from inside the app, only clearing site data by hand.
+   *
+   * It happened for real. A bug elsewhere wrote the literal string `"undefined"`
+   * into localStorage; `raw ? JSON.parse(raw) : null` treats that as truthy, and
+   * `JSON.parse("undefined")` throws. One bad write bricked the whole
+   * application until storage was cleared manually.
+   *
+   * So a corrupt value is *deleted* and treated as absent. The worst outcome of
+   * that is being asked to sign in again — which is exactly what a client with
+   * unreadable session state should do anyway.
+   */
   private readJson<T>(key: string): T | null {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) as T : null;
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(key);
+    } catch {
+      // Storage can throw outright in a private window or with cookies blocked.
+      return null;
+    }
+    // `'undefined'` and `'null'` are what `setItem` produces when handed those
+    // values, and neither is valid JSON.
+    if (!raw || raw === 'undefined' || raw === 'null') return null;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      try { localStorage.removeItem(key); } catch { /* nothing more we can do */ }
+      return null;
+    }
   }
 
   /** Reads the JWT's `exp` claim (seconds since epoch) without pulling in a

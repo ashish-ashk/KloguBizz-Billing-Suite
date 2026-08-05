@@ -29,6 +29,7 @@ process.env.SENDGRID_WEBHOOK_SECRET = 'test_sendgrid_webhook_secret';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
 const app = require('../server');
 const { Plan } = require('../src/models/Plan');
@@ -730,6 +731,64 @@ test('login issues no session until the second factor is presented', maybe(async
   const replay = await call('POST', '/auth/mfa/verify', { body: { mfaToken: again.body.mfaToken, code } });
   assert.equal(replay.status, 401);
   assert.match(replay.body.message, /already been used/);
+}));
+
+/**
+ * The platform-account path, which is the one that actually broke in production.
+ *
+ * A superadmin has no membership and no organisation, so `resolveSession` takes a
+ * different branch from every other MFA test above — and MFA is *mandatory* on
+ * these accounts, meaning if this branch returns a payload the client cannot use,
+ * the console is unreachable with no way to undo the enrolment from the UI.
+ *
+ * The assertions are deliberately about the payload's *shape* rather than just its
+ * status: the frontend reads `user.role` to choose where to land and writes
+ * `user`/`token` to localStorage, and a missing field there is what turned a
+ * successful sign-in into a blank page.
+ */
+test('a platform account can complete an MFA sign-in and gets a usable session', maybe(async () => {
+  const password = 'Platform@123';
+  const email = `operator${(counter += 1)}@platform.test`;
+  // Created directly: there is no self-serve route to a platform account, by design.
+  await User.create({
+    name: 'Operator',
+    email,
+    passwordHash: await bcrypt.hash(password, 12),
+    role: 'superadmin',
+    platformRole: 'owner',
+    status: 'active'
+  });
+
+  const first = await call('POST', '/auth/login', { body: { email, password } });
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  const setup = await call('POST', '/auth/mfa/setup', { token: first.body.token });
+  assert.equal(setup.status, 200, JSON.stringify(setup.body));
+  const enable = await call('POST', '/auth/mfa/enable', {
+    token: first.body.token,
+    body: { code: totp.codeForCounter(setup.body.secret, totp.currentCounter()) }
+  });
+  assert.equal(enable.status, 200, JSON.stringify(enable.body));
+
+  // Sign out and back in — the step that was broken.
+  const login = await call('POST', '/auth/login', { body: { email, password } });
+  assert.equal(login.body.mfaRequired, true);
+  assert.equal(login.body.token, undefined);
+
+  const verify = await call('POST', '/auth/mfa/verify', {
+    body: { mfaToken: login.body.mfaToken, code: totp.codeForCounter(setup.body.secret, totp.currentCounter() + 1) }
+  });
+  assert.equal(verify.status, 200, JSON.stringify(verify.body));
+  assert.ok(verify.body.token, 'a session is issued');
+  assert.ok(verify.body.refreshToken, 'and it can be renewed — without this the tab dies at 15 minutes');
+  // Both read by the client immediately after sign-in. `undefined` here is what
+  // produced the literal string "undefined" in localStorage and the blank page.
+  assert.equal(verify.body.user.role, 'superadmin');
+  assert.ok(verify.body.user.id);
+
+  // And the console is genuinely reachable — the MFA gate is satisfied, not merely bypassed.
+  const console_ = await call('GET', '/superadmin/me', { token: verify.body.token });
+  assert.equal(console_.status, 200, JSON.stringify(console_.body));
+  assert.equal(console_.body.platformRole, 'owner');
 }));
 
 test('a backup code works once and is then consumed', maybe(async () => {

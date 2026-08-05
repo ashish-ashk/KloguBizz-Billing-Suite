@@ -712,6 +712,46 @@ would only have proved the mock worked. Configure a bucket, then run
 
 ---
 
+## STATUS — the MFA sign-in path, which was missing (2026-08-05)
+
+Reported from production, in two parts: the platform console said two-factor
+authentication was **"Not available yet"** while the server was refusing every console
+route until it was set up; and after enrolling, signing back in produced a spinner, then
+a blank page and `SyntaxError: "undefined" is not valid JSON` in the console.
+
+**This was a self-inflicted lockout, and worth writing down as a class of mistake.** The
+enrolment dead end was fixed first (a stale Phase-4 placeholder that outlived the feature
+by two phases — see `shared/mfa-enrolment.component.ts`), and that fix was verified end
+to end: enrolment worked. What was never checked was the path enrolment *makes
+mandatory*. Turning 2FA on was the first action in the product's history that made the
+sign-in page reachable-but-unusable, and the button that did it shipped without anyone
+walking through the consequence. **Enabling a gate and testing the gate are different
+tests.** A feature that changes a *later* step needs that later step exercised, not just
+the step you built.
+
+Three defects, chained:
+
+| Defect | Why it happened | Fix |
+|---|---|---|
+| No second-factor step existed on the login page | The backend has always been right — `/auth/login` returns `{mfaRequired, mfaToken}` and **no token**, so no half-authenticated session can exist (that property has a test, and it passed throughout). Nothing in the frontend ever called `/auth/mfa/verify`. The endpoint was reachable, tested, and unused | A step-two form on `login.component.ts`, accepting a six-digit code **or a recovery code**, with "I lost my phone" and "Start over". The presence of `mfaToken()` *is* the step flag — no separate boolean to fall out of sync |
+| `login()` stored the challenge as if it were a session | `.pipe(tap(res => this.store(res)))` fired on both response shapes. `localStorage.setItem(key, undefined)` stores the literal string `"undefined"` | `LoginResponse` is now a distinct type from `AuthResponse`; `store()` **refuses** a payload with no token rather than trusting its callers |
+| A corrupt localStorage value bricked the app permanently | `readJson` called `JSON.parse` unguarded during bootstrap, so `"undefined"` threw before anything rendered — white screen, and a reload could not fix it because the bad value was still there. **This is the defect that turned a failed login into an unusable application**, and it would have done the same for any corrupt value from any cause | `readJson` treats `"undefined"`/`"null"` as absent, and **deletes** anything unparseable so the next load is clean. It self-heals anyone already stuck |
+
+**Verified against a real server**, not just typechecked: a new test covers the
+**platform-account** path specifically — the one that broke — because a superadmin has no
+membership and no organisation and so takes a different `resolveSession` branch from every
+other MFA test. It asserts the *shape* the client actually reads (`user.role`, `user.id`,
+`refreshToken`), since a missing field there is what produced the blank page, and finishes
+by reaching `/superadmin/me` to prove the MFA gate is satisfied rather than bypassed.
+**306 backend tests pass**, clean `eslint` on both packages, clean production `ng build`.
+
+**Unresolved, and stated rather than buried:** one full-suite run showed a single failure
+that five subsequent consecutive runs did not reproduce, and the run's output no longer
+identified which test it was. It is a timing flake somewhere in the suite, not a
+regression from this change (the runs bracket it), but it is real and it is unidentified.
+
+---
+
 ## Tier 1 — architectural, and blocking other things
 
 ### 1. Refresh tokens + a session registry (#50, #51) — ✅ **DONE (2026-08-03)**

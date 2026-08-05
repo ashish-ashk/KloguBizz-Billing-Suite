@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
 import { ApiService } from '../../core/api.service';
+import { ToastService } from '../../core/toast.service';
 import { PublicBranding } from '../../core/models';
 import { IconComponent } from '../../shared/icons';
 import { AuthPreviewCardComponent } from '../../shared/auth-preview-card.component';
@@ -40,6 +41,45 @@ import { LegalContentComponent } from '../../shared/legal-content.component';
             </div>
           }
 
+          @if (mfaToken()) {
+            <!--
+              Step two. The server issues no token at all until the code is
+              presented (see authController.login), so this is not an optional
+              extra screen: without it, an account with 2FA enabled simply cannot
+              sign in. That was the state this page shipped in.
+            -->
+            <form class="form" (ngSubmit)="submitCode()">
+              <div class="info-box" style="display:flex;gap:8px;align-items:flex-start;">
+                <app-icon name="lock" [size]="15" style="flex-shrink:0;margin-top:1px" />
+                <span>{{ mfaMessage() }}</span>
+              </div>
+              <div class="field">
+                <label for="mfaCode">{{ useBackupCode() ? 'Recovery code' : 'Six-digit code' }}</label>
+                <input id="mfaCode" name="mfaCode" class="mono" [(ngModel)]="code"
+                  [attr.inputmode]="useBackupCode() ? 'text' : 'numeric'"
+                  [attr.maxlength]="useBackupCode() ? 32 : 6"
+                  [placeholder]="useBackupCode() ? 'xxxx-xxxx' : '000000'"
+                  autocomplete="one-time-code" autofocus required />
+              </div>
+              @if (error()) {
+                <div class="info-box danger">{{ error() }}</div>
+              }
+              <button class="btn primary lg block" type="submit" [disabled]="loading() || !code.trim()">
+                @if (loading()) { <span class="spinner"></span> Verifying… } @else { Verify <app-icon name="chevronRight" [size]="15" /> }
+              </button>
+            </form>
+
+            <p style="margin-top:14px;text-align:center;font-size:12.5px;">
+              <button type="button" class="link-btn" style="font-size:12.5px;" (click)="toggleBackupCode()">
+                {{ useBackupCode() ? 'Use a code from my app instead' : 'I lost my phone — use a recovery code' }}
+              </button>
+            </p>
+            <p style="margin-top:8px;text-align:center;font-size:12.5px;">
+              <button type="button" class="link-btn" style="font-size:12.5px;" (click)="cancelMfa()">
+                Start over
+              </button>
+            </p>
+          } @else {
           <form class="form" (ngSubmit)="submit()">
             <div class="field">
               <label for="email">Email address</label>
@@ -95,6 +135,7 @@ import { LegalContentComponent } from '../../shared/legal-content.component';
               Super admin: superadmin&#64;klogubizz.local / SuperAdmin&#64;123
             </div>
           }
+          }
         </div>
       </section>
       <section class="auth-art"
@@ -137,6 +178,14 @@ export class LoginComponent implements OnInit {
   justRegistered = signal(false);
   branding = signal<PublicBranding | null>(null);
 
+  // ── Second factor ────────────────────────────
+  /** Non-empty once the password was accepted and a code is owed. Its presence
+   *  *is* the step-two flag — there is no separate boolean to fall out of sync. */
+  mfaToken = signal('');
+  mfaMessage = signal('');
+  useBackupCode = signal(false);
+  code = '';
+
   /**
    * The platform logo, as a cacheable asset URL.
    *
@@ -148,7 +197,13 @@ export class LoginComponent implements OnInit {
 
   legalOpen = signal<'terms' | 'sla' | null>(null);
 
-  constructor(private auth: AuthService, private api: ApiService, private router: Router, private route: ActivatedRoute) {}
+  constructor(
+    private auth: AuthService,
+    private api: ApiService,
+    private router: Router,
+    private route: ActivatedRoute,
+    private toast: ToastService
+  ) {}
 
   ngOnInit() {
     this.api.publicBranding().subscribe({ next: b => this.branding.set(b), error: () => {} });
@@ -167,11 +222,76 @@ export class LoginComponent implements OnInit {
     this.error.set('');
     this.loading.set(true);
     this.auth.login(this.email.trim(), this.password).subscribe({
-      next: res => this.router.navigateByUrl(res.user.role === 'superadmin' ? '/super-admin' : '/dashboard'),
+      next: res => {
+        this.loading.set(false);
+        // A correct password on an account with 2FA returns a challenge, not a
+        // session: no token, no user. Reading `res.user.role` here would throw,
+        // which is exactly what left the page spinning forever.
+        if (res.mfaRequired && res.mfaToken) {
+          this.mfaToken.set(res.mfaToken);
+          this.mfaMessage.set(res.message || 'Enter the six-digit code from your authenticator app.');
+          this.password = '';
+          return;
+        }
+        this.land(res.user?.role);
+      },
       error: err => {
         this.loading.set(false);
         this.error.set(err?.error?.message || 'Invalid email or password.');
       }
     });
+  }
+
+  submitCode() {
+    const code = this.code.trim();
+    if (!code) return;
+    this.error.set('');
+    this.loading.set(true);
+    this.auth.verifyMfa(this.mfaToken(), code).subscribe({
+      next: res => {
+        this.loading.set(false);
+        if (res.usedBackupCode) {
+          const left = res.remainingBackupCodes ?? 0;
+          // Said on the way in, not buried in the security page: a recovery code
+          // is single-use, and running out with no phone means no way back in.
+          this.toast.info(left
+            ? `Recovery code used — ${left} left. Generate a new set from Security.`
+            : 'That was your last recovery code. Generate a new set from Security now.');
+        }
+        this.land(res.user?.role);
+      },
+      error: err => {
+        this.loading.set(false);
+        const code = err?.error?.code;
+        // A lockout or an expired challenge cannot be retried from this screen,
+        // so drop back to the password form rather than leaving the user typing
+        // codes at a token the server will keep refusing.
+        if (code === 'ACCOUNT_LOCKED' || err?.status === 400) {
+          this.cancelMfa();
+          this.error.set(err?.error?.message || 'That sign-in attempt expired. Please sign in again.');
+          return;
+        }
+        this.error.set(err?.error?.message || 'That code is not right. Try the next one your app shows.');
+        this.code = '';
+      }
+    });
+  }
+
+  toggleBackupCode() {
+    this.useBackupCode.set(!this.useBackupCode());
+    this.code = '';
+    this.error.set('');
+  }
+
+  cancelMfa() {
+    this.mfaToken.set('');
+    this.mfaMessage.set('');
+    this.useBackupCode.set(false);
+    this.code = '';
+    this.error.set('');
+  }
+
+  private land(role?: string) {
+    this.router.navigateByUrl(role === 'superadmin' ? '/super-admin' : '/dashboard');
   }
 }
