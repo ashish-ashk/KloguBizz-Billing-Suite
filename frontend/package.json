@@ -8,7 +8,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --check \"src/**/*.{ts,html,css}\"",
-    "format:write": "prettier --write \"src/**/*.{ts,html,css}\""
+    "format:write": "prettier --write \"src/**/*.{ts,html,css}\"",
+    "check": "npm run lint && ng build --configuration production"
   },
   "private": true,
   "dependencies": {
@@ -37,11 +38,9 @@
   },
   "overrides": {
     "vite": "5.4.17",
-
     "brace-expansion@1": "^1.1.18",
     "brace-expansion@2": "^2.1.4",
     "brace-expansion@5": "^5.0.9",
-
     "fast-uri": "^3.1.5",
     "http-proxy-middleware@3": "^3.0.7",
     "picomatch@4": "^4.0.5",
@@ -51,7 +50,6 @@
     "webpack": "^5.109.2",
     "@babel/core": "^7.29.7",
     "ajv@8": "^8.20.0",
-
     "tar": "^7.5.22",
     "serialize-javascript": "^7.0.7",
     "tmp": "^0.2.7"
