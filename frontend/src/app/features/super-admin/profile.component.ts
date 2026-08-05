@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AvatarComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { IconComponent } from '../../shared/icons';
+import { MfaEnrolmentComponent } from '../../shared/mfa-enrolment.component';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
@@ -20,7 +21,10 @@ const ROLE_NOTES: Record<string, string> = {
 @Component({
   selector: 'app-super-profile',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AvatarComponent, SkeletonRowsComponent, IconComponent],
+  imports: [
+    CommonModule, FormsModule, RouterLink, AvatarComponent, SkeletonRowsComponent, IconComponent,
+    MfaEnrolmentComponent
+  ],
   template: `
     <div class="page-head">
       <div>
@@ -75,22 +79,18 @@ const ROLE_NOTES: Record<string, string> = {
           </div>
         </section>
 
-        <section class="card">
-          <div class="card-title">Two-factor authentication</div>
-          <!--
-            This was a switch bound to a local boolean with no backend behind it: it
-            turned green and protected nothing. A security control that looks enabled
-            and is not is worse than one that is visibly absent, so it now says what
-            is true. TOTP is #7 in the improvement plan and still open.
-          -->
-          <div class="info-box warn" style="margin-top:12px;display:flex;gap:8px;align-items:flex-start">
-            <app-icon name="alertTriangle" [size]="15" style="flex-shrink:0;margin-top:1px" />
-            <span>
-              Not available yet. This account is protected by a password alone —
-              use a long, unique one, and keep the number of platform accounts small.
-            </span>
-          </div>
-        </section>
+        <!--
+          The real enrolment UI, shared with the tenant security page.
+
+          This card previously said "Not available yet" — text written in Phase 4,
+          before MFA existed, and left behind when Phase 5 shipped it. Since the
+          server requires MFA on platform accounts and blocks the console with
+          MFA_ENROLMENT_REQUIRED, that stale text made this a dead end: the operator
+          was told to set up 2FA and sent to the one page that claimed it did not
+          exist. The required flag is set here, so the component hides "Turn off"
+          rather than offering a button the API will refuse.
+        -->
+        <app-mfa-enrolment [required]="true" (enrolled)="onEnrolled()" />
       </div>
 
       <div style="display:grid;gap:16px;">
@@ -179,16 +179,41 @@ export class SuperProfileComponent implements OnInit {
   ngOnInit() {
     this.name = this.auth.user()?.name || '';
     this.email = this.auth.user()?.email || '';
-    this.api.platformMe().subscribe({ next: me => this.me.set(me), error: () => {} });
+    this.loadMe();
     this.loadUsers();
+  }
+
+  /** Extracted so `onEnrolled` can re-run it — this request is one of the ones
+   *  refused with MFA_ENROLMENT_REQUIRED before enrolment. */
+  loadMe() {
+    this.api.platformMe().subscribe({ next: me => this.me.set(me), error: () => {} });
   }
 
   loadUsers() {
     this.loadingUsers.set(true);
     this.api.platformUsers().subscribe({
       next: users => { this.users.set(users); this.loadingUsers.set(false); },
-      error: err => { this.loadingUsers.set(false); this.toast.httpError(err); }
+      // Deliberately quiet when the block is MFA: the enrolment card above is
+      // already telling the operator exactly what to do, and a second toast
+      // saying the request was refused only adds noise to the page they were
+      // sent to in order to fix it.
+      error: err => {
+        this.loadingUsers.set(false);
+        if (err?.error?.code !== 'MFA_ENROLMENT_REQUIRED') this.toast.httpError(err);
+      }
     });
+  }
+
+  /**
+   * Enrolment just succeeded, so the requests that were refused with
+   * `MFA_ENROLMENT_REQUIRED` can now go through.
+   *
+   * Without this the operator enrols and then sits on a page whose panels are
+   * still empty, with no indication that a reload would fix it.
+   */
+  onEnrolled() {
+    this.loadMe();
+    this.loadUsers();
   }
 
   isSelf(user: PlatformUser): boolean {

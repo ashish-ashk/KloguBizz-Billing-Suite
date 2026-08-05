@@ -203,6 +203,27 @@ export class AuthService {
   }
 
   /**
+   * A platform account was refused because it has not enrolled in MFA (#7).
+   *
+   * Sends the operator to the page that can actually fix it. Debounced, because a
+   * single page load fires several console requests and every one of them comes
+   * back with the same 403 — without the guard that is half a dozen navigations
+   * and half a dozen identical toasts.
+   *
+   * Deliberately *not* a `forceLogout`: the session is valid, the account simply
+   * has one more step to complete, and signing them out would take away the
+   * session they need in order to enrol.
+   */
+  private mfaRedirectAt = 0;
+  requireMfaEnrolment() {
+    const target = this.isSuperAdmin() ? '/super-admin/profile' : '/security';
+    if (Date.now() - this.mfaRedirectAt < 3000) return;
+    this.mfaRedirectAt = Date.now();
+    this.toast.info('Two-factor authentication is required on platform accounts. Set it up here to continue.');
+    this.router.navigateByUrl(target);
+  }
+
+  /**
    * Exchanges the stored refresh token for a new 15-minute access token.
    *
    * Called proactively (shortly before the current token's own expiry, from

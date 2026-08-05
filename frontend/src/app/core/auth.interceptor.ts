@@ -41,6 +41,22 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
         auth.forceLogout(message);
       }
 
+      /**
+       * A platform account that has not enrolled in MFA (#7).
+       *
+       * The server refuses every console route with this until enrolment, and
+       * deliberately leaves the enrolment endpoints open — so the *only* thing
+       * missing was sending the operator to the page that fixes it. Without this
+       * they get a bare "two-factor is required" toast on whatever screen they
+       * were on, with nothing to click.
+       *
+       * Navigation is guarded so a burst of refused requests on one page load
+       * produces one redirect rather than fighting the router.
+       */
+      if (err.status === 403 && err.error?.code === 'MFA_ENROLMENT_REQUIRED') {
+        auth.requireMfaEnrolment();
+      }
+
       // The organisation was suspended or cancelled while this session was open.
       // The cached organisation still says 'active' (it was stored at login), so
       // sync it — otherwise the read-only banner never appears and the user just
