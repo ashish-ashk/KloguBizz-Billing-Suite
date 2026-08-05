@@ -324,6 +324,58 @@ const salesDocumentConvertSchema = z.object({
   dueDate: isoDate.optional()
 });
 
+// ── Recurring invoices (2.2 #14) ─────────────────
+
+const FREQUENCIES = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly'];
+
+/**
+ * The template plus the recurrence.
+ *
+ * `nextRunAt`, `occurrences` and everything in the outcome block are absent on
+ * purpose: they are results the sweep writes, and accepting them from a request
+ * would let a client rewind a schedule's counter or point it at an arbitrary
+ * date — which, for a job that raises tax invoices, is the one input that must
+ * never come from outside.
+ */
+const recurringInvoiceBase = {
+  title: shortText.min(2, 'must be at least 2 characters'),
+  clientId: objectId.optional().nullable(),
+  billTo: billToSchema.optional().nullable(),
+  items: z.array(lineItemSchema).min(1, 'at least one line item is required').max(500, 'cannot exceed 500 line items'),
+  discountPercent: percent.optional(),
+  placeOfSupply: stateCode.optional(),
+  taxTreatment: z.enum(TAX_TREATMENTS).optional(),
+  supplyType: z.enum(SUPPLY_TYPES).optional(),
+  reverseCharge: z.coerce.boolean().optional(),
+  notes: longText.optional().nullable(),
+  paymentTerms: shortText.optional().nullable(),
+  dueInDays: z.coerce.number().int().min(0).max(365).optional(),
+  frequency: z.enum(FREQUENCIES),
+  interval: z.coerce.number().int().min(1).max(60).optional(),
+  startDate: isoDate.optional(),
+  endsOn: isoDate.optional().nullable(),
+  endAfterCount: z.coerce.number().int().min(1).max(1000).optional().nullable(),
+  autoSend: z.coerce.boolean().optional(),
+  generateAsDraft: z.coerce.boolean().optional()
+};
+
+const recurringInvoiceCreateSchema = z.object({
+  // Only these two at creation. 'completed' and 'cancelled' are outcomes.
+  status: z.enum(['active', 'paused']).optional(),
+  ...recurringInvoiceBase
+});
+
+const recurringInvoiceUpdateSchema = z.object({
+  ...recurringInvoiceBase,
+  title: shortText.min(2, 'must be at least 2 characters').optional(),
+  items: z.array(lineItemSchema).min(1).max(500).optional(),
+  frequency: z.enum(FREQUENCIES).optional()
+});
+
+const recurringInvoiceStatusSchema = z.object({
+  status: z.enum(['active', 'paused', 'cancelled'])
+});
+
 // ── Users ────────────────────────────────────────
 
 const userInviteSchema = z.object({
@@ -441,6 +493,7 @@ module.exports = {
   creditNoteCreateSchema,
   salesDocumentCreateSchema, salesDocumentUpdateSchema,
   salesDocumentStatusSchema, salesDocumentConvertSchema,
+  recurringInvoiceCreateSchema, recurringInvoiceUpdateSchema, recurringInvoiceStatusSchema,
   userInviteSchema, userUpdateSchema,
   organisationUpdateSchema, transferOwnershipSchema,
   subscriptionStartSchema

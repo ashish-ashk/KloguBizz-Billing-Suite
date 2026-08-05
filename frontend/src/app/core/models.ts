@@ -738,6 +738,77 @@ export interface SalesDocument {
   createdAt?: string;
 }
 
+// ── Recurring invoices (2.2 #14) ──
+
+export type RecurrenceFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
+export type RecurringStatus = 'active' | 'paused' | 'completed' | 'cancelled';
+
+/**
+ * A standing instruction to raise the same invoice on a schedule.
+ *
+ * A template plus a recurrence — **not** an invoice. It has no number, no
+ * balance and never reaches a GST return; each run produces a real `Invoice`
+ * that does all three.
+ */
+export interface RecurringInvoice {
+  _id: string;
+  title: string;
+  clientId?: string | Client | null;
+  billTo?: SalesDocument['billTo'];
+  items: InvoiceItem[];
+  discountPercent?: number;
+  placeOfSupply?: string;
+  taxTreatment?: string;
+  supplyType?: string;
+  reverseCharge?: boolean;
+  notes?: string;
+  paymentTerms?: string;
+  dueInDays?: number;
+
+  frequency: RecurrenceFrequency;
+  interval: number;
+  startDate: string;
+  nextRunAt: string;
+  endsOn?: string | null;
+  endAfterCount?: number | null;
+  status: RecurringStatus;
+  autoSend: boolean;
+  /** When true the generated invoice is a draft — it takes no invoice number and
+   *  moves no stock, so it is the safe mode for a template not yet trusted. */
+  generateAsDraft: boolean;
+
+  occurrences: number;
+  lastRunAt?: string;
+  lastInvoiceId?: string;
+  lastInvoiceNumber?: string;
+  lastError?: string;
+  consecutiveFailures?: number;
+
+  // Derived server-side so the API, the list and the log all agree.
+  scheduleLabel: string;
+  nextRuns: string[];
+  periodsBehind: number;
+  isBehind: boolean;
+  nextPeriodKey: string | null;
+  createdAt?: string;
+}
+
+/** One attempted run — including the ones that produced nothing, because "why
+ *  hasn't it invoiced since June" is only answerable if failures are visible. */
+export interface RecurringInvoiceRun {
+  _id: string;
+  periodKey: string;
+  scheduledFor: string;
+  status: 'generated' | 'failed' | 'skipped';
+  invoiceId?: string;
+  invoiceNumber?: string;
+  total?: number;
+  emailed?: boolean;
+  reason?: string;
+  trigger: 'scheduled' | 'manual';
+  createdAt: string;
+}
+
 /** Pipeline figures for one kind. Every rate is `null` rather than 0 when there
  *  is nothing to divide by — a 0% win rate reads as "we lose everything". */
 export interface SalesDocumentSummary {

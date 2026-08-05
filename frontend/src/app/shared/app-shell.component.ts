@@ -62,6 +62,7 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
             <a routerLink="/invoices" routerLinkActive="active" title="Invoices"><span class="nav-icon"><app-icon name="invoice" /></span><span class="nav-label">Invoices</span></a>
             <a routerLink="/bill-generator" routerLinkActive="active" title="Bill Generator"><span class="nav-icon"><app-icon name="calculator" /></span><span class="nav-label">Bill Generator</span></a>
             <a routerLink="/sales-documents" routerLinkActive="active" title="Quotes &amp; Challans"><span class="nav-icon"><app-icon name="fileText" /></span><span class="nav-label">Quotes &amp; Challans</span></a>
+            <a routerLink="/recurring" routerLinkActive="active" title="Recurring Invoices"><span class="nav-icon"><app-icon name="clock" /></span><span class="nav-label">Recurring</span></a>
             <div class="nav-section">Management</div>
             <a routerLink="/clients" routerLinkActive="active" title="Clients"><span class="nav-icon"><app-icon name="users" /></span><span class="nav-label">Clients</span></a>
             <a routerLink="/items" routerLinkActive="active" title="Inventory"><span class="nav-icon"><app-icon name="box" /></span><span class="nav-label">Inventory</span></a>
@@ -266,6 +267,7 @@ export class AppShellComponent {
       { label: 'Bill Generator', route: '/bill-generator', icon: 'calculator' },
       { label: 'Quotations', route: '/sales-documents', icon: 'fileText' },
       { label: 'Delivery Challans', route: '/sales-documents', icon: 'fileText' },
+      { label: 'Recurring Invoices', route: '/recurring', icon: 'clock' },
       { label: 'Clients', route: '/clients', icon: 'users' },
       { label: 'Inventory', route: '/items', icon: 'box' },
       { label: 'Payments', route: '/payments', icon: 'creditCard' },

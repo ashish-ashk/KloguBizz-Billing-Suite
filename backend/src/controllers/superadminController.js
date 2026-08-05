@@ -11,6 +11,7 @@ const { Invoice } = require('../models/Invoice');
 const { Payment } = require('../models/Payment');
 const { CreditNote } = require('../models/CreditNote');
 const { SalesDocument } = require('../models/SalesDocument');
+const { RecurringInvoice, RecurringInvoiceRun } = require('../models/RecurringInvoice');
 const { ReminderLog } = require('../models/ReminderLog');
 const { Subscription } = require('../models/Subscription');
 const { asyncHandler } = require('../utils/asyncHandler');
@@ -236,6 +237,8 @@ const TENANT_COLLECTIONS = [
   ['payments', Payment],
   ['creditNotes', CreditNote],
   ['salesDocuments', SalesDocument],
+  ['recurringInvoices', RecurringInvoice],
+  ['recurringInvoiceRuns', RecurringInvoiceRun],
   ['reminderLogs', ReminderLog],
   ['subscriptions', Subscription]
 ];

@@ -191,20 +191,39 @@ test('an inter-state quotation quotes IGST, as the invoice will charge', maybe(a
 test('pre-invoice documents never appear in a GST return', maybe(async () => {
   const tenant = await registerOrg();
   const client = await createClient(tenant.token);
-  await createDoc(tenant.token, 'quotation', { clientId: client._id });
+  const quote = await createDoc(tenant.token, 'quotation', { clientId: client._id });
   await createDoc(tenant.token, 'proforma', { clientId: client._id });
   await createDoc(tenant.token, 'delivery-challan', { clientId: client._id, challanPurpose: 'job-work' });
 
   const orgId = new mongoose.Types.ObjectId(String(tenant.org._id));
-  const report = await buildGstr1(orgId, { from: '2020-01-01', to: '2099-12-31' });
+  /**
+   * `report.sections.b2b`, not `report.b2b`.
+   *
+   * The latter is always `undefined`, so `(report.b2b || []).length === 0` passes
+   * whatever the return contains — a test that proves nothing while looking
+   * thorough. The conversion below is what makes this assertion meaningful:
+   * the same buyer, the same amount, but one document is reportable and three
+   * are not.
+   */
+  // `nil` is deliberately excluded: it is a totals object, not a list of
+  // documents, so it has no rows to count.
+  const outward = report => [
+    ...report.sections.b2b, ...report.sections.b2cl,
+    ...report.sections.b2cs, ...report.sections.exp
+  ];
 
+  let report = await buildGstr1(orgId, { from: '2020-01-01', to: '2099-12-31' });
   // A quotation in GSTR-1 would declare turnover that was never supplied; a
   // proforma there would double-count the eventual invoice.
-  const sections = [
-    ...(report.b2b || []), ...(report.b2cl || []), ...(report.b2cs || []),
-    ...(report.exp || []), ...(report.nil || [])
-  ];
-  assert.equal(sections.length, 0, 'no pre-invoice document may reach an outward-supply table');
+  assert.equal(outward(report).length, 0, 'no pre-invoice document may reach an outward-supply table');
+
+  // Converting one produces a real invoice, which *must* appear — otherwise this
+  // test would also pass if the return were simply broken.
+  await call('POST', `/sales-documents/${quote._id}/convert`, { token: tenant.token, body: {} });
+  report = await buildGstr1(orgId, { from: '2020-01-01', to: '2099-12-31' });
+  assert.equal(report.sections.b2b.length, 1, 'the converted invoice is reportable');
+  assert.equal(report.sections.b2b[0].inv.length, 1, 'exactly one invoice, not the documents behind it');
+
   const documented = JSON.stringify(report);
   assert.ok(!documented.includes('QT-'), 'a quotation number must not appear anywhere in the return');
   assert.ok(!documented.includes('PI-'), 'a proforma number must not appear anywhere in the return');

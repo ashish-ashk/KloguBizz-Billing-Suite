@@ -634,6 +634,45 @@ the same seam as e-invoicing.
 
 ---
 
+---
+
+## STATUS — CI/CD removed at the owner's request (2026-08-03)
+
+Phase 3 shipped #60 as GitHub Actions CI plus grouped Dependabot. **Both have been
+removed**, deliberately, on the owner's instruction: the pipeline and the eleven
+Dependabot branches it kept spawning were more process than this project wants,
+and the branch clutter was making the repository hard to work in.
+
+What changed:
+
+- `.github/` is gone — no workflow, no Dependabot config, no YAML to run.
+- Every `dependabot/*` branch was deleted on origin. **`master` is now the only
+  branch**, locally and remotely.
+- Deploy is `git push`. Vercel rebuilds the frontend, Render rebuilds the backend,
+  both from `master`. `docs/DEPLOY.md` is the whole runbook: env vars, when to run
+  migrations, and how to verify a deploy actually worked.
+
+**What was lost, stated plainly rather than glossed over.** CI was doing real
+work: it ran the tests and the linter on every push and made a silent test-skip
+impossible by providing a MongoDB service container. Nothing now *blocks* a push
+that breaks the suite. That risk is accepted, and mitigated by replacing it with
+one command per package rather than nothing:
+
+```bash
+cd backend  && npm run check     # eslint + 282 tests
+cd frontend && npm run check     # eslint + a production build
+```
+
+The one trap `DEPLOY.md` calls out explicitly: **the backend tests skip themselves
+when no MongoDB is reachable, and a skip looks exactly like a pass.** If the run
+reports far fewer than 282 tests, nothing was verified. That was the exact failure
+mode the CI guard existed to prevent, so it is now a documented human check.
+
+Dependency scanning went with Dependabot. `npm audit` still exists and is worth
+running occasionally; it is no longer run for you.
+
+---
+
 # WHAT IS ACTUALLY LEFT
 
 Written after Phase 6a, as one honest inventory. Ordered by what a paying customer
@@ -801,12 +840,57 @@ polled until the audit page was non-empty and then asserted on a *specific* entr
 registration writes entries first, so it passed on an idle machine and failed under the
 heavier parallel load this work added. It now polls for the entry it actually asserts on.
 
-### 5. Recurring invoices (2.2 #14)
+### 5. Recurring invoices (2.2 #14) — ✅ **DONE (2026-08-03)**
 
-**How:** `RecurringInvoice {template, frequency, nextRunAt, endsAt}` plus a job in
-`maintenanceService` that generates and optionally sends. The scheduler pattern and the
-send path both exist now. The real work is the dedup discipline `ReminderLog` already
-demonstrates: never generate twice for the same period, even if the job runs twice.
+**What shipped:** `RecurringInvoice` (template + schedule) and `RecurringInvoiceRun`
+(one row per attempted period), a pure `recurrenceService` for the date arithmetic, a
+`recurringInvoiceService` sweep wired into `maintenanceService`'s hourly job, a full CRUD
+surface at `/api/v1/recurring-invoices`, and a page at `/recurring`.
+
+**The plan was right that the dedup discipline is the real work**, and it needed to be
+stronger than `ReminderLog`'s: a duplicate reminder is an annoyance, a duplicate tax
+invoice has to be undone with a credit note. So `{recurringId, periodKey}` is a **hard
+unique index**, and the claim row is inserted *before* the invoice is created — two
+instances race on that insert rather than on invoice creation, and losing is the normal
+expected outcome, not an error. `periodKey` comes from the **scheduled** date, never from
+"now", at the granularity of the frequency (`2026-08` monthly, `2026-W32` weekly), which
+is what makes a late or repeated sweep compute the same key. Four tests cover it: two
+sweeps, four concurrent sweeps, "run now" then a sweep, and a corrected date landing back
+in the same period — every one produces exactly one invoice.
+
+**Decisions worth knowing, each of which could reasonably have gone the other way:**
+
+- **Catch-up is one period per sweep**, advancing `nextRunAt` by exactly one period rather
+  than jumping to "now plus one". A week of downtime on a daily schedule therefore catches
+  up over seven hourly sweeps, each invoice dated to its own period. Jumping forward would
+  silently skip six invoices, and a tenant would only find out by reconciling revenue.
+- **A schedule more than 60 periods behind pauses itself** instead of catching up. That is
+  not a backlog anyone wants invoiced — it is an imported start date or a clock problem —
+  and it is a deliberate refusal rather than a silent skip forward, because skipping
+  forward discards periods a tenant may genuinely have wanted.
+- **The plan's invoice quota is enforced in the sweep.** A background job that ignored it
+  would be a way to exceed a capped plan without touching the UI, which is exactly the
+  hole Duplicate had (#17). A quota failure records itself and retries; after five
+  consecutive failures the schedule pauses with the reason kept, because a quota resets
+  monthly but failing forever needs a human.
+- **`autoSend` defaults off, and is refused outright on a draft-generating schedule.** An
+  invoice sent unreviewed cannot be taken back, and the first time a template has a wrong
+  rate the tenant should learn it from us, not from their customer. `generateAsDraft`
+  takes no invoice number and moves no stock, which makes it the safe way to adopt the
+  feature at all.
+- **Resuming a paused schedule rebases forward.** A schedule paused for three months would
+  otherwise resume three periods behind and start generating back-dated invoices, which is
+  the opposite of what "resume" means.
+- **Month-end is clamped, with an anchor day.** 31 Jan + 1 month is 28 Feb, and the *next*
+  step returns to 31 Mar rather than sticking at the 28th — otherwise a month-end retainer
+  silently walks itself three days earlier every February.
+
+**A vacuous test was found and fixed while doing this.** The GST-boundary test added with
+the sales documents (#4) asserted on `report.b2b`, but the real shape is
+`report.sections.b2b` — so `(report.b2b || []).length === 0` was passing whatever the
+return contained. Both that test and the new one now assert against `report.sections.*`
+*and* prove the positive case (a converted/generated invoice **does** appear), so the test
+can no longer pass by the return simply being broken.
 
 ### 6. Payment links, hosted pay page, customer portal (2.3 #21, #23)
 

@@ -8,10 +8,12 @@ const { CreditNote } = require('../models/CreditNote');
 const { Subscription } = require('../models/Subscription');
 const { ReminderLog } = require('../models/ReminderLog');
 const { SalesDocument } = require('../models/SalesDocument');
+const { RecurringInvoice, RecurringInvoiceRun } = require('../models/RecurringInvoice');
 const { User } = require('../models/User');
 const { Organisation } = require('../models/Organisation');
 const { purgeCutoff } = require('../utils/softDelete');
 const { logger } = require('../utils/logger');
+const { runRecurringSweep } = require('./recurringInvoiceService');
 
 /**
  * Background housekeeping.
@@ -112,7 +114,10 @@ async function sweepExpiredQuotations() {
 
 async function purgeExpiredDeletions() {
   const cutoff = purgeCutoff();
-  const expired = { clients: 0, items: 0, invoices: 0, vendors: 0, purchases: 0, salesDocuments: 0, organisations: 0 };
+  const expired = {
+    clients: 0, items: 0, invoices: 0, vendors: 0, purchases: 0,
+    salesDocuments: 0, recurringInvoices: 0, organisations: 0
+  };
 
   for (const [key, Model] of [
     ['clients', Client],
@@ -120,7 +125,8 @@ async function purgeExpiredDeletions() {
     ['invoices', Invoice],
     ['vendors', Vendor],
     ['purchases', Purchase],
-    ['salesDocuments', SalesDocument]
+    ['salesDocuments', SalesDocument],
+    ['recurringInvoices', RecurringInvoice]
   ]) {
     const result = await Model.deleteMany({ deletedAt: { $ne: null, $lt: cutoff } });
     expired[key] = result.deletedCount ?? 0;
@@ -129,7 +135,10 @@ async function purgeExpiredDeletions() {
   // Tenants whose owner asked for erasure and whose grace window has passed.
   const doomed = await Organisation.find({ deletedAt: { $ne: null, $lt: cutoff } }).select('_id name').lean();
   for (const org of doomed) {
-    for (const Model of [User, Client, Item, Invoice, Payment, CreditNote, Vendor, Purchase, Subscription, ReminderLog, SalesDocument]) {
+    for (const Model of [
+      User, Client, Item, Invoice, Payment, CreditNote, Vendor, Purchase,
+      Subscription, ReminderLog, SalesDocument, RecurringInvoice, RecurringInvoiceRun
+    ]) {
       await Model.deleteMany({ orgId: org._id });
     }
     await Organisation.deleteOne({ _id: org._id });
@@ -153,10 +162,30 @@ async function runOnce() {
     const quotations = await sweepExpiredQuotations();
     if (quotations.expiredQuotations) logger.info('quotation expiry sweep', quotations);
 
+    /**
+     * Recurring invoices (2.2 #14).
+     *
+     * Deliberately after the other sweeps and inside the same `running` guard:
+     * this is the only job here that *creates* documents, so it must never
+     * overlap with itself. Its own idempotency claim makes a concurrent run from
+     * another instance harmless, but there is no reason to invite one.
+     */
+    const recurring = await runRecurringSweep();
+    if (recurring.generated || recurring.failed || recurring.paused) {
+      logger.info('recurring invoice sweep', {
+        scanned: recurring.scanned,
+        generated: recurring.generated,
+        skipped: recurring.skipped,
+        failed: recurring.failed,
+        paused: recurring.paused,
+        completed: recurring.completed
+      });
+    }
+
     const purged = await purgeExpiredDeletions();
     if (Object.values(purged).some(Boolean)) logger.info('recycle bin purge', purged);
 
-    return { ...result, ...quotations, purged };
+    return { ...result, ...quotations, recurring, purged };
   } catch (error) {
     logger.error('maintenance sweep failed', { err: error });
     return null;

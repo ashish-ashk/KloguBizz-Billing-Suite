@@ -12,6 +12,7 @@ import {
   LoginHistoryFilters, Master, MastersResponse, MetricsSeries, MfaSetup,
   Organisation, OrgSummary, OrgSupportContext, OrgUser, Page, Payment, Plan, PlanUsage,
   PlatformMe, PlatformSummary, PlatformUser, PublicBranding, Purchase, Reminder,
+  RecurrenceFrequency, RecurringInvoice, RecurringInvoiceRun,
   SalesDocument, SalesDocumentKind, SalesDocumentStatus, SalesDocumentSummary, SecurityAlerts,
   Subscription, SuperOverview, SystemHealth, TenantDetail, TenantNotice, Vendor,
   ArAgeing, CollectionMetrics, CustomerStatement, LowStockReport, SalesBreakdown,
@@ -30,6 +31,7 @@ const NS = {
   payments: 'payments',
   creditNotes: 'credit-notes',
   salesDocuments: 'sales-documents',
+  recurring: 'recurring-invoices',
   users: 'users',
   organisation: 'organisation',
   subscription: 'subscription',
@@ -255,6 +257,46 @@ export class ApiService {
   }
   exportSalesDocumentsCsv(params: ListParams = {}) {
     return this.http.get(`${this.api}/sales-documents/export.csv`, { params: this.params(params), responseType: 'blob' });
+  }
+
+  // ── Recurring invoices (2.2 #14) ──
+  recurringInvoices(params: ListParams = {}) {
+    return this.list<RecurringInvoice>(NS.recurring, '/recurring-invoices', params);
+  }
+  recurringInvoice(id: string) { return this.http.get<RecurringInvoice>(`${this.api}/recurring-invoices/${id}`); }
+  /** Includes failures and skips, not only successes. */
+  recurringRuns(id: string, params: ListParams = {}) {
+    return this.http.get<Page<RecurringInvoiceRun>>(`${this.api}/recurring-invoices/${id}/runs`, { params: this.params(params) });
+  }
+  /** What the next sweep would do, creating nothing — the only safe way to
+   *  inspect a schedule that is behind. */
+  recurringPreview() {
+    return this.http.get<{ dryRun: boolean; generated: number; invoices: Array<{ title: string; scheduledFor: string; periodsBehind: number }> }>(
+      `${this.api}/recurring-invoices/preview`
+    );
+  }
+  createRecurringInvoice(payload: Partial<RecurringInvoice> & { title: string; frequency: RecurrenceFrequency }) {
+    return this.afterWrite(this.http.post<RecurringInvoice>(`${this.api}/recurring-invoices`, payload), NS.recurring);
+  }
+  updateRecurringInvoice(id: string, payload: Partial<RecurringInvoice>) {
+    return this.afterWrite(this.http.put<RecurringInvoice>(`${this.api}/recurring-invoices/${id}`, payload), NS.recurring);
+  }
+  setRecurringStatus(id: string, status: 'active' | 'paused' | 'cancelled') {
+    return this.afterWrite(this.http.put<RecurringInvoice>(`${this.api}/recurring-invoices/${id}/status`, { status }), NS.recurring);
+  }
+  /** Raises this period's invoice now. Shares the sweep's idempotency claim, so
+   *  clicking it and then waiting for the hourly job yields one invoice. */
+  runRecurringNow(id: string) {
+    return this.afterWrite(
+      this.http.post<{ schedule: RecurringInvoice; invoice: Invoice }>(`${this.api}/recurring-invoices/${id}/run-now`, {}),
+      NS.recurring, NS.invoices, NS.reports, NS.items
+    );
+  }
+  deleteRecurringInvoice(id: string) {
+    return this.afterWrite(this.http.delete<RecurringInvoice>(`${this.api}/recurring-invoices/${id}`), NS.recurring);
+  }
+  restoreRecurringInvoice(id: string) {
+    return this.afterWrite(this.http.post<RecurringInvoice>(`${this.api}/recurring-invoices/${id}/restore`, {}), NS.recurring);
   }
 
   // ── Payments ─────────────────────────────────

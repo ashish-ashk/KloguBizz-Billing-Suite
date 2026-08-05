@@ -200,6 +200,16 @@ const invoiceSchema = new mongoose.Schema({
     documentNumber: String
   },
   /**
+   * The standing instruction that generated this invoice (2.2 #14), when it was
+   * not raised by hand.
+   *
+   * Worth recording on the invoice rather than only in the run log: the first
+   * question about an unexpected invoice is "where did this come from", and
+   * "a recurring schedule" is the answer that stops it being investigated as a
+   * mistake.
+   */
+  recurringInvoiceId: { type: mongoose.Schema.Types.ObjectId, ref: 'RecurringInvoice', default: null },
+  /**
    * Soft delete (#37).
    *
    * Only ever set on a **draft**: an issued invoice is not deletable at all, soft or

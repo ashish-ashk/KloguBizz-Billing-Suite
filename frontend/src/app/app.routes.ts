@@ -37,6 +37,8 @@ export const routes: Routes = [
       // Quotations, proforma invoices and delivery challans — the paperwork
       // before the invoice (2.2 #11–#13).
       { path: 'sales-documents', loadComponent: () => import('./features/sales-documents/sales-documents.component').then(m => m.SalesDocumentsComponent) },
+      // Standing instructions that raise an invoice every period (2.2 #14).
+      { path: 'recurring', loadComponent: () => import('./features/recurring/recurring-invoices.component').then(m => m.RecurringInvoicesComponent) },
       { path: 'receivables', loadComponent: () => import('./features/reports/receivables.component').then(m => m.ReceivablesComponent) },
       { path: 'activity', loadComponent: () => import('./features/account/activity.component').then(m => m.ActivityComponent) },
       { path: 'security', loadComponent: () => import('./features/account/security.component').then(m => m.AccountSecurityComponent) },

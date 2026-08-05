@@ -37,6 +37,10 @@ const EVENT = {
    *  pre-invoice documents at all", not three near-identical rows. */
   salesDocumentCreated: 'sales_document.created',
   salesDocumentConverted: 'sales_document.converted',
+  /** A standing instruction was set up (2.2 #14). The generated invoices
+   *  themselves record `invoice.created` as normal, so recurring revenue is not
+   *  invisible to the volume metrics. */
+  recurringInvoiceCreated: 'recurring_invoice.created',
   clientCreated: 'client.created',
   itemCreated: 'item.created',
   itemBulkUpload: 'item.bulk_upload',

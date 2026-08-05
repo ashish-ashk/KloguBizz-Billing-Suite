@@ -134,6 +134,9 @@ app.use('/api/v1/credit-notes', require('./src/routes/creditNoteRoutes'));
 // Quotations, proforma invoices and delivery challans — the pre-invoice
 // documents. None of them is a tax invoice; see models/SalesDocument.js.
 app.use('/api/v1/sales-documents', require('./src/routes/salesDocumentRoutes'));
+// Standing instructions that raise an invoice on a schedule. What they produce
+// are ordinary tax invoices; see models/RecurringInvoice.js.
+app.use('/api/v1/recurring-invoices', require('./src/routes/recurringInvoiceRoutes'));
 app.use('/api/v1/users', require('./src/routes/userRoutes'));
 app.use('/api/v1/subscriptions', require('./src/routes/subscriptionRoutes'));
 app.use('/api/v1/reports', require('./src/routes/reportRoutes'));
