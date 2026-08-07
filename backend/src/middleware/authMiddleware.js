@@ -30,7 +30,37 @@ const protect = asyncHandler(async (req, res, next) => {
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) throw httpError(401, 'Authentication token required');
 
-  const payload = jwt.verify(token, env.JWT_SECRET);
+  /**
+   * An unverifiable token is a **401**, not a 500.
+   *
+   * `jwt.verify` throws for the most ordinary event in the system — an access
+   * token reaching its fifteen-minute expiry — and this call used to let that
+   * throw straight through to the error handler, which had no case for it and
+   * returned `500 {"message":"jwt expired"}`.
+   *
+   * That single wrong status code broke the entire session-recovery path,
+   * because every part of it keys off 401: the client's silent refresh never
+   * ran, the retry never happened, and `forceLogout` never fired. What the user
+   * saw was the app quietly stopping about fifteen minutes after signing in —
+   * an unexplained error toast, no data, and no redirect to sign in again, with
+   * a reload changing nothing. It read exactly like an idle timeout, which is
+   * how it went unnoticed: the broken behaviour resembled a plausible feature.
+   *
+   * The distinction below is kept because the two cases are genuinely different.
+   * `TOKEN_EXPIRED` is routine and the client should renew and retry.
+   * `TOKEN_INVALID` means malformed or signed with the wrong key — nothing to
+   * renew, so the session ends. Neither is a server fault, and neither should
+   * ever have been reported as one.
+   */
+  let payload;
+  try {
+    payload = jwt.verify(token, env.JWT_SECRET);
+  } catch (err) {
+    if (err.name === 'TokenExpiredError') {
+      throw httpError(401, 'Your session has expired. Please sign in again.', 'TOKEN_EXPIRED');
+    }
+    throw httpError(401, 'Your session is no longer valid. Please sign in again.', 'TOKEN_INVALID');
+  }
   const user = await User.findById(payload.sub).select('-passwordHash');
   if (!user || user.status !== 'active') throw httpError(401, 'Invalid or inactive user');
 

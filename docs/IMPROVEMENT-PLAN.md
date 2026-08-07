@@ -752,6 +752,100 @@ regression from this change (the runs bracket it), but it is real and it is unid
 
 ---
 
+## STATUS — sessions: one wrong status code, and a missing feature (2026-08-06)
+
+Reported: *"even if I'm actively using the application, after 15 minutes the tokens expire,
+it gives an error toast, no data loads at all, and I'm not even redirected to the login
+page."* Plus a clear statement of what should happen instead: sign out after fifteen
+minutes **without interaction**, not fifteen minutes after signing in.
+
+Two separate things, and the first turned out to be a one-line defect with an
+outsized blast radius.
+
+### The root cause: `jwt.verify` throwing into a 500
+
+`protect` called `jwt.verify(token, env.JWT_SECRET)` unguarded. That call throws on the
+single most routine event in the system — an access token reaching its fifteen-minute
+expiry — and the error handler had no case for it, so the API answered
+**`500 {"message":"jwt expired"}`**.
+
+Every mechanism built to survive an expired token keys off **401**: the client's silent
+refresh, its one automatic retry, and the forced sign-out when neither works. A 500 matches
+none of them. So the token expired, the server called it an internal error, and the client
+— correctly, for a 500 — did nothing except show the failure. No refresh. No retry. No
+redirect. The user sat on a page that would never load again, and reloading did not help
+because the same expired token was still in storage.
+
+The happy path hid it: the proactive renewal timer normally fires a minute *before*
+expiry, so the 401 branch is rarely exercised. It is exercised exactly when something
+already went slightly wrong — a suspended laptop whose timer never fired, a page reloaded
+after the token lapsed, a tab throttled in the background. Which is to say: the recovery
+path was broken precisely in the situations it existed for.
+
+Fixed at the source, with the two cases kept apart because they call for different
+responses — `TOKEN_EXPIRED` (routine, renew and retry) and `TOKEN_INVALID` (malformed or
+wrongly signed, nothing to renew). Neither now leaks `jwt malformed` to a user.
+
+**Verified in a real browser, not just typechecked** — the whole point was a
+client/server interaction, so a driver signed in against a live API and:
+
+| Scenario | Result |
+|---|---|
+| Active use across **two full token lifetimes** (temporarily 90s) | 6 silent rotations, all 200, never signed out, no toast, no console error |
+| **Waking with an already-expired token** and a good refresh token | 3 requests 401 → **one** refresh → all three retried and rendered. User sees nothing |
+| A token the server refuses, **no refresh token** (the state the MFA bug left) | Signs out, redirects to `/login`, one clear message |
+
+That third row is what the report described, and before this change it reproduced exactly:
+stuck on the page, no data, no way back.
+
+### Three client defects found on the way
+
+- **The unrecoverable 401 never logged out.** `refreshAccessToken()` resolves `false`
+  *without* signing out when there is simply no refresh token to present — and the
+  interceptor's `forceLogout` sat below an `if` that had already returned. Every
+  unrecoverable 401 now reaches it, including a retry that 401s a second time.
+- **One event, four identical toasts.** A page load fires several requests in parallel and
+  an expired token 401s all of them. `forceLogout` is now idempotent, and a request whose
+  session has just ended completes silently instead of letting each component also report
+  its own failure — a stack of contradictory messages reads like a crash, not a session
+  ending.
+- **`scheduleExpiry` could recurse.** With a token lifetime shorter than the 60-second
+  renewal margin, the delay is negative on every pass — including the one triggered from
+  inside a successful refresh — producing a tight loop against `/auth/refresh`. Not
+  reachable at 15 minutes; reachable the day someone shortens the token. Now floored, and
+  never run synchronously.
+
+### The feature: an actual idle timeout
+
+The product had, by accident, the **inverse** of what it wanted — active users cut off,
+and a laptop left open on a customer's invoice signed in forever. `core/idle.service.ts`
+separates the two concerns: token lifetime is invisible and renews indefinitely while you
+work; **inactivity** is what ends a session, after 15 minutes, with a one-minute warning
+first (an unsaved invoice vanishing with no warning is its own bug).
+
+Four decisions worth recording:
+
+- **It polls wall-clock timestamps instead of arming a `setTimeout` for the deadline.** A
+  fifteen-minute timer does not survive a laptop suspend; a machine closed at 5pm would
+  reopen still signed in. A timestamp comparison sees fifteen *hours* on the next tick.
+- **Activity is shared across tabs** via `localStorage`, or the background tab reaches its
+  own deadline and signs the account out from under the tab being typed into.
+- **Listeners run outside Angular's zone.** `pointermove` inside the zone means change
+  detection across the whole app, hundreds of times a minute.
+- **Once the countdown is visible, passive movement stops counting.** A nudged cursor is
+  not someone at the desk, so only a key, click or tap rescues the session. This was found
+  by driving the real page: moving the mouse *towards* "Stay signed in" is a `pointermove`,
+  so counting it tore the dialog away mid-click — and the mouse-up landed on whatever was
+  underneath it.
+
+**Verified in the browser** with the limits temporarily shortened: 36 seconds of continuous
+activity against a 20-second limit never warned; going idle warned on schedule, signed out,
+redirected, and cleared the token; a bare mousemove did not rescue it; "Stay signed in"
+did. **307 backend tests pass** (a new one pins the status code — that regression must not
+return), clean `eslint` on both packages, clean production build.
+
+---
+
 ## Tier 1 — architectural, and blocking other things
 
 ### 1. Refresh tokens + a session registry (#50, #51) — ✅ **DONE (2026-08-03)**

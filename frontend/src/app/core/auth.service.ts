@@ -424,9 +424,16 @@ export class AuthService {
    *  detected proactively by the expiry timer below). Same cleanup as
    *  `logout()`, plus an explanatory toast since the user didn't click anything. */
   forceLogout(message?: string) {
+    // Idempotent, because a single page load fires several requests in parallel
+    // and an expired token 401s every one of them. Each is handled
+    // independently, so without this the user is told three or four times over
+    // that their session expired — a stack of identical toasts that reads like
+    // something went badly wrong rather than like a session quietly ending.
+    // Presence of a session is the flag: after the first call there is none.
+    const hadSession = !!this.token || !!this.user();
     this.clearSession();
     this.router.navigateByUrl('/login');
-    if (message) this.toast.info(message);
+    if (message && hadSession) this.toast.info(message);
   }
 
   private clearSession() {
@@ -540,6 +547,9 @@ export class AuthService {
    *  as the timer fires still has a token good for another 15 minutes. */
   private readonly REFRESH_MARGIN_MS = 60_000;
 
+  /** The shortest gap between two proactive renewals — see `scheduleExpiry`. */
+  private readonly MIN_RENEW_DELAY_MS = 5_000;
+
   /** (Re)schedules the proactive silent refresh for whatever token is
    *  currently stored — called on service construction (covers a page
    *  reload/reopen with an already-issued token) and right after login/refresh.
@@ -552,7 +562,23 @@ export class AuthService {
     if (!token) return;
     const expiryMs = this.decodeExpiryMs(token);
     if (!expiryMs) return;
-    const delay = expiryMs - Date.now() - this.REFRESH_MARGIN_MS;
+    /**
+     * Floored, and never run synchronously.
+     *
+     * If the access token's lifetime is ever shorter than `REFRESH_MARGIN_MS`,
+     * this delay is negative on *every* pass — including the one triggered by a
+     * successful refresh, whose `scheduleExpiry` call happens inside that
+     * refresh's own handler. Renewing inline there re-enters `refreshAccessToken`
+     * while its observable is still mid-emission, and the result is a tight loop
+     * that hammers `/auth/refresh` and pins the tab.
+     *
+     * A 15-minute token against a 60-second margin cannot reach that state, so
+     * this is a guard on a configuration mistake rather than a live bug — but it
+     * is one that only appears in production, under whatever traffic follows the
+     * change, and it costs one line to make impossible. An expired token still
+     * recovers immediately: the interceptor's 401 path does not wait for a timer.
+     */
+    const delay = Math.max(expiryMs - Date.now() - this.REFRESH_MARGIN_MS, this.MIN_RENEW_DELAY_MS);
     // Impersonation tokens decline the silent refresh (see refreshAccessToken)
     // since there is no device session behind them to refresh — so the
     // 30-minute window has to be allowed to actually end the session here,
@@ -561,7 +587,6 @@ export class AuthService {
       if (this.isImpersonating()) { this.forceLogout('Your read-only support session has ended.'); return; }
       this.refreshAccessToken().subscribe();
     };
-    if (delay <= 0) { renew(); return; }
     // setTimeout's delay param is a 32-bit signed int (~24.8 days max) —
     // comfortably larger than the 15-minute access token lifetime, but clamped
     // defensively in case that ever changes.

@@ -30,6 +30,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const app = require('../server');
 const { Plan } = require('../src/models/Plan');
@@ -841,6 +842,51 @@ test('disabling MFA needs the password and a code', maybe(async () => {
   });
   // Password is checked before the code, so a wrong password is a 401 regardless.
   assert.equal(wrongPassword.status, 401);
+}));
+
+/**
+ * The status code on an unusable token, which is load-bearing in a way that is
+ * easy to miss.
+ *
+ * Every part of session recovery keys off 401 — the client's silent refresh, its
+ * one retry, and the forced sign-out when neither works. `jwt.verify` throws on
+ * the most routine event in the system (a fifteen-minute access token reaching
+ * its expiry), and letting that reach the error handler produced a **500**. The
+ * result was an application that stopped working a quarter of an hour after
+ * sign-in, showed an unexplained error, and never offered a way back.
+ *
+ * Asserting the *code* rather than only the status matters too: `TOKEN_EXPIRED`
+ * is routine and recoverable, `TOKEN_INVALID` is not, and a client that cannot
+ * tell them apart has to treat every stale token as a full sign-out.
+ */
+test('an expired or malformed token is a 401, never a 500', maybe(async () => {
+  const tenant = await registerOrg();
+
+  const expired = jwt.sign(
+    { sub: tenant.userId, role: 'admin', orgId: String(tenant.org._id), sv: 0 },
+    process.env.JWT_SECRET,
+    { expiresIn: -60 }
+  );
+  const withExpired = await call('GET', '/invoices', { token: expired });
+  assert.equal(withExpired.status, 401, `expired token must be 401, got ${withExpired.status}`);
+  assert.equal(withExpired.body.code, 'TOKEN_EXPIRED');
+
+  // The literal string a client writes when it stores `undefined` — the exact
+  // value that was in a real user's browser.
+  const garbage = await call('GET', '/invoices', { token: 'undefined' });
+  assert.equal(garbage.status, 401, `malformed token must be 401, got ${garbage.status}`);
+  assert.equal(garbage.body.code, 'TOKEN_INVALID');
+
+  // Correctly formed, signed with the wrong key: forgery, not staleness.
+  const forged = jwt.sign({ sub: tenant.userId, role: 'admin' }, 'not-the-real-secret');
+  const wrongKey = await call('GET', '/invoices', { token: forged });
+  assert.equal(wrongKey.status, 401, `wrongly-signed token must be 401, got ${wrongKey.status}`);
+  assert.equal(wrongKey.body.code, 'TOKEN_INVALID');
+
+  // And no message leaks the library's internals to the user.
+  for (const r of [withExpired, garbage, wrongKey]) {
+    assert.doesNotMatch(r.body.message, /jwt|malformed|signature/i, `leaked internals: ${r.body.message}`);
+  }
 }));
 
 test('the superadmin IP allowlist matches plain addresses and CIDR blocks', maybe(async () => {

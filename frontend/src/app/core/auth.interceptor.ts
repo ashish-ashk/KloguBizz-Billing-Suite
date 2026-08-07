@@ -1,6 +1,6 @@
 import { HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
 import { inject } from '@angular/core';
-import { catchError, switchMap, throwError } from 'rxjs';
+import { EMPTY, catchError, switchMap, throwError } from 'rxjs';
 import { AuthService } from './auth.service';
 
 // Requests where a 401 means "this credential really is bad", not "the access
@@ -15,6 +15,41 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
   const authedReq = token ? req.clone({ setHeaders: { Authorization: `Bearer ${token}` } }) : req;
   const canRefresh = !!token && !NEVER_REFRESH_ON_401.some(url => req.url.includes(url));
 
+  /**
+   * Expired/invalid session with no way to recover it: clear credentials
+   * (in-memory signals too, via AuthService.forceLogout — not just localStorage)
+   * and return to login.
+   *
+   * This is a function rather than a block further down because **every**
+   * unrecoverable 401 has to reach it. It previously sat below an `if` that
+   * returned early, so a 401 whose refresh attempt failed skipped it entirely:
+   * the user stayed on the page, every request kept failing, and all they saw was
+   * a generic error toast with no sign-in prompt and no data. The
+   * `refreshAccessToken()` contract makes that easy to hit — it resolves `false`
+   * *without* logging out whenever there is simply no refresh token to present.
+   */
+  const endSession = (err: HttpErrorResponse) => {
+    if (req.url.includes('/auth/login') || req.url.includes('/auth/register')) return false;
+    const message = err.error?.code === 'SESSION_REVOKED'
+      ? 'You were signed out because your account signed in on another device.'
+      : 'Your session has expired. Please sign in again.';
+    auth.forceLogout(message);
+    return true;
+  };
+
+  /**
+   * Once the session has been ended, the failed request is completed silently
+   * rather than rethrown.
+   *
+   * The alternative gives the user two messages for one event: this
+   * interceptor's "your session has expired", and then whatever the calling
+   * component says when its own error handler runs — usually a raw server
+   * message or a bare "something went wrong". They contradict each other in tone
+   * and the second one is noise: the page is already navigating to sign-in, and
+   * there is nothing the component's error branch can usefully do.
+   */
+  const ended = (err: HttpErrorResponse) => (endSession(err) ? EMPTY : throwError(() => err));
+
   return next(authedReq).pipe(
     catchError((err: HttpErrorResponse) => {
       // A 401 on an ordinary request most often just means the access token
@@ -24,22 +59,21 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
       if (err.status === 401 && canRefresh) {
         return auth.refreshAccessToken().pipe(
           switchMap(refreshed => {
-            if (!refreshed) return throwError(() => err);
+            if (!refreshed) return ended(err);
             const newToken = localStorage.getItem('klogubizz_token');
-            return next(req.clone({ setHeaders: { Authorization: `Bearer ${newToken}` } }));
+            return next(req.clone({ setHeaders: { Authorization: `Bearer ${newToken}` } })).pipe(
+              // The replay 401ing too means the brand-new access token was already
+              // refused — the session is genuinely gone (revoked, membership
+              // removed), not merely stale. Without this the retry swallows the
+              // outcome and the user is left on a page that will never load.
+              catchError((retryErr: HttpErrorResponse) =>
+                (retryErr.status === 401 ? ended(retryErr) : throwError(() => retryErr)))
+            );
           })
         );
       }
 
-      // Expired/invalid session with no way to recover it: clear credentials
-      // (in-memory signals too, via AuthService.forceLogout — not just
-      // localStorage) and return to login.
-      if (err.status === 401 && !req.url.includes('/auth/login') && !req.url.includes('/auth/register')) {
-        const message = err.error?.code === 'SESSION_REVOKED'
-          ? 'You were signed out because your account signed in on another device.'
-          : 'Your session has expired. Please sign in again.';
-        auth.forceLogout(message);
-      }
+      if (err.status === 401) return ended(err);
 
       /**
        * A platform account that has not enrolled in MFA (#7).

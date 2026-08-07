@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, signal } from '@angular/core';
+import { AfterViewChecked, Component, ElementRef, OnInit, ViewChild, computed, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth.service';
@@ -59,7 +59,7 @@ import { LegalContentComponent } from '../../shared/legal-content.component';
                   [attr.inputmode]="useBackupCode() ? 'text' : 'numeric'"
                   [attr.maxlength]="useBackupCode() ? 32 : 6"
                   [placeholder]="useBackupCode() ? 'xxxx-xxxx' : '000000'"
-                  autocomplete="one-time-code" autofocus required />
+                  autocomplete="one-time-code" required #codeInput />
               </div>
               @if (error()) {
                 <div class="info-box danger">{{ error() }}</div>
@@ -168,7 +168,7 @@ import { LegalContentComponent } from '../../shared/legal-content.component';
     </app-modal>
   `
 })
-export class LoginComponent implements OnInit {
+export class LoginComponent implements OnInit, AfterViewChecked {
   email = '';
   password = '';
   error = signal('');
@@ -197,6 +197,18 @@ export class LoginComponent implements OnInit {
 
   legalOpen = signal<'terms' | 'sla' | null>(null);
 
+  /**
+   * Focus moves to the code box when the second step appears.
+   *
+   * Done here rather than with the `autofocus` attribute: `autofocus` only acts
+   * on initial page load, so on this screen — where the field is created by a
+   * form submission, not a navigation — it would do nothing at all. It also
+   * moves focus without warning on screens where the user did not ask for it,
+   * which is why the accessibility lint rejects it outright.
+   */
+  @ViewChild('codeInput') private codeInput?: ElementRef<HTMLInputElement>;
+  private codeFocused = false;
+
   constructor(
     private auth: AuthService,
     private api: ApiService,
@@ -212,6 +224,15 @@ export class LoginComponent implements OnInit {
       this.justRegistered.set(true);
       this.email = params.get('email') || '';
     }
+  }
+
+  ngAfterViewChecked() {
+    if (!this.mfaToken()) { this.codeFocused = false; return; }
+    // Guarded, or every change-detection pass would yank the caret back to the
+    // start of whatever the user has already typed.
+    if (this.codeFocused || !this.codeInput) return;
+    this.codeFocused = true;
+    this.codeInput.nativeElement.focus();
   }
 
   submit() {
