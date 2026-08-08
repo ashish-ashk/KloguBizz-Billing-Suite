@@ -28,7 +28,18 @@ const lineItemSchema = new mongoose.Schema({
   gstRate: { type: Number, required: true, default: 18 },
   cessRate: { type: Number, default: 0, min: 0 },
   discountPercent: { type: Number, default: 0, min: 0, max: 100 },
-  taxInclusive: { type: Boolean, default: false }
+  taxInclusive: { type: Boolean, default: false },
+  /**
+   * Batch and expiry (2.5 #42), recorded where they are actually known.
+   *
+   * A batch belongs to the consignment, not to the product — the same medicine
+   * arrives as batch A this month and batch B next month, at different costs and
+   * with different expiry dates. So it is captured on the *purchase line*, which
+   * is the only place in the system that describes one consignment, and it flows
+   * straight onto the cost layer that line creates.
+   */
+  batchNumber: { type: String, trim: true },
+  expiryDate: { type: Date, default: null }
 }, { _id: false });
 
 // Same shape as Invoice's, priced by the same engine — see services/gstService.js.

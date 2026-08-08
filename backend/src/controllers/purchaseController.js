@@ -384,14 +384,47 @@ const deletePurchase = asyncHandler(async (req, res) => {
   // purchase whose credit was claimed in a filed return is history, not a mistake to
   // erase.
   await Purchase.updateOne({ _id: purchase._id }, { $set: deletionPatch(req) });
+
+  /**
+   * The goods go back out with the bill.
+   *
+   * This was missing: deleting a purchase removed the bill and left its stock on
+   * the shelf forever, so the balance drifted up by the quantity of every
+   * purchase ever deleted, with nothing in the ledger to explain it.
+   *
+   * Only the **unsold** remainder can be taken back. Anything already invoiced
+   * has left the building at a cost that is now on a customer's invoice, and
+   * un-receiving it would rewrite that invoice's margin — so it is reported
+   * instead, and the response says so rather than implying a clean reversal.
+   */
+  const reversal = purchase.status === 'draft' ? { moved: 0 } : await stock.reversePurchase(req, purchase);
+
   logAudit({
     req,
     action: 'purchase.deleted',
     entity: 'purchase',
     entityId: purchase._id,
-    meta: { billNumber: purchase.billNumber, claimedInPeriod: purchase.itc?.claimedInPeriod || null }
+    meta: {
+      billNumber: purchase.billNumber,
+      claimedInPeriod: purchase.itc?.claimedInPeriod || null,
+      stockReversed: reversal.moved || 0,
+      stockValueReversed: reversal.reversedValue || 0
+    }
   });
-  res.json({ ok: true, recoverable: true, message: 'Purchase moved to the recycle bin.' });
+  res.json({
+    ok: true,
+    recoverable: true,
+    message: 'Purchase moved to the recycle bin.',
+    stock: reversal.moved
+      ? {
+        reversed: reversal.moved,
+        value: reversal.reversedValue || 0,
+        // Named rather than counted: "3 items could not be fully reversed" is
+        // not actionable, "12 units of Blue Widget were already sold" is.
+        stranded: reversal.stranded || []
+      }
+      : null
+  });
 });
 
 const restorePurchase = asyncHandler(async (req, res) => {

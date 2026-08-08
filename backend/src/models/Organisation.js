@@ -211,6 +211,39 @@ const supportSchema = new mongoose.Schema({
   updatedAt: Date
 }, { _id: false });
 
+/**
+ * How this tenant values its stock (2.5 #41).
+ *
+ * **Not a global constant**, because the choice is an accounting policy the
+ * business makes and is expected to keep: AS-2 and Ind AS 2 both permit FIFO and
+ * weighted average (and both prohibit LIFO, which is why it is not offered), but
+ * they also require the method to be applied *consistently*. Changing it
+ * re-values everything on hand, so it is a deliberate setting rather than
+ * something derived.
+ *
+ * FIFO is the default: it is what a stock book does naturally, it survives
+ * inflation without distorting margin, and it is the answer most Indian SMBs and
+ * their auditors expect.
+ */
+const inventorySchema = new mongoose.Schema({
+  valuationMethod: { type: String, enum: ['fifo', 'weighted-average'], default: 'fifo' },
+  /**
+   * Consume the earliest-expiring batch first rather than the earliest-received.
+   *
+   * Off by default because it only makes sense where goods expire, and where they
+   * do it is not a preference but a requirement — dispensing the older-expiring
+   * pack is the entire point of tracking expiry. Only affects items with expiry
+   * dates recorded; everything else still runs in receipt order.
+   */
+  consumeByExpiry: { type: Boolean, default: false },
+  /**
+   * Warn this many days before a batch expires. Nothing is blocked — an expiry
+   * date is information a person acts on, not a rule the software should enforce
+   * by refusing to sell.
+   */
+  expiryWarningDays: { type: Number, default: 30, min: 0, max: 365 }
+}, { _id: false });
+
 const organisationSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
   adminEmail: { type: String, required: true, lowercase: true, trim: true },
@@ -286,6 +319,7 @@ const organisationSchema = new mongoose.Schema({
   brandingConfig: { type: brandingSchema, default: () => ({}) },
   themeConfig: { type: themeConfigSchema, default: () => ({}) },
   paymentGateway: { type: paymentGatewaySchema, default: () => ({}) },
+  inventory: { type: inventorySchema, default: () => ({}) },
   invoiceSequence: { type: Number, default: 0 },
   // Which financial year (Apr–Mar, labelled by its starting calendar year,
   // e.g. '2026' for FY2026-27) `invoiceSequence` currently counts against.

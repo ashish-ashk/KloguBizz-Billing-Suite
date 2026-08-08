@@ -8,11 +8,14 @@ const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { requireTenant } = require('../middleware/tenantMiddleware');
 const { requireFlag } = require('../services/featureFlagService');
+const { validate } = require('../middleware/validate');
+const { stockAdjustSchema } = require('../validators/schemas');
 const {
   ageingReport, ageingExcel,
   customerStatement, customerStatementExcel,
   collectionMetrics, salesBreakdown, invoicesExcel,
   stockLedger, lowStock, adjustStock, recomputeStock,
+  stockValuation, expiringStock, itemStockLayers,
   tenantAuditLog
 } = require('../controllers/receivablesController');
 
@@ -58,8 +61,18 @@ router.get('/invoices/export.xlsx', invoicesExcel);
  */
 router.get('/stock/ledger', stockLedger);
 router.get('/stock/low', lowStock);
-router.post('/stock/:id/adjust', requireRole('admin'), adjustStock);
+router.post('/stock/:id/adjust', requireRole('admin'), validate(stockAdjustSchema), adjustStock);
 router.post('/stock/:id/recompute', requireRole('admin'), recomputeStock);
+/**
+ * Valuation and expiry (2.5 #41, #42).
+ *
+ * Readable by any role for the same reason the ledger is: knowing what is on the
+ * shelf and what it is worth is what everyone in the business is doing here.
+ * Changing it still needs admin.
+ */
+router.get('/stock/valuation', stockValuation);
+router.get('/stock/expiring', expiringStock);
+router.get('/stock/:id/layers', itemStockLayers);
 
 /**
  * The tenant's own audit trail (2.6 #50).

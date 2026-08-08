@@ -1,6 +1,9 @@
 const multer = require('multer');
 const router = require('express').Router();
-const { listItems, createItem, updateItem, deleteItem, restoreItem, downloadItemTemplate, bulkUploadItems } = require('../controllers/itemController');
+const {
+  listItems, itemByBarcode, createItem, updateItem, deleteItem, restoreItem,
+  downloadItemTemplate, bulkUploadItems
+} = require('../controllers/itemController');
 const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { requireTenant } = require('../middleware/tenantMiddleware');
@@ -37,6 +40,11 @@ router.get('/', listItems);
 // a plan tier. See services/featureFlagService.js.
 router.get('/bulk-upload/template', requireRole('admin', 'accountant'), requireFlag('bulkUpload'), downloadItemTemplate);
 router.post('/bulk-upload', requireRole('admin', 'accountant'), requireFlag('bulkUpload'), excelUpload, bulkUploadItems);
+/**
+ * Before `/:id`, or a barcode would be parsed as an id and 400 on the cast.
+ * Readable by every role: scanning to look something up is not an admin action.
+ */
+router.get('/barcode/:barcode', itemByBarcode);
 router.post('/', requireRole('admin', 'accountant'), validate(itemCreateSchema), createItem);
 router.put('/:id', requireRole('admin', 'accountant'), validate(itemUpdateSchema), updateItem);
 router.delete('/:id', requireRole('admin'), deleteItem);

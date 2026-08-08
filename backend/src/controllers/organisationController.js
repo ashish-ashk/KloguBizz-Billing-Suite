@@ -23,7 +23,11 @@ const { noticesFor } = require('../services/noticeService');
 //   adminEmail             → identity, changed via the user record
 const TENANT_EDITABLE_FIELDS = [
   'name', 'gstin', 'pan', 'phone', 'address', 'state', 'stateCode',
-  'brandingConfig', 'themeConfig'
+  'brandingConfig', 'themeConfig',
+  // Stock valuation policy (2.5 #41). Merged rather than replaced, like the
+  // other nested config — a PUT that sets only `valuationMethod` must not wipe
+  // the expiry settings alongside it.
+  'inventory'
 ];
 
 /**
@@ -56,7 +60,7 @@ const getOrganisation = asyncHandler(async (req, res) => {
  * changed, leave the rest alone. Removing an image is still possible — it is an
  * explicit `logoUrl: ''`, which is present and therefore applied.
  */
-const MERGEABLE_OBJECTS = ['brandingConfig', 'themeConfig'];
+const MERGEABLE_OBJECTS = ['brandingConfig', 'themeConfig', 'inventory'];
 
 /**
  * Sub-objects that must *also* be merged field by field rather than written

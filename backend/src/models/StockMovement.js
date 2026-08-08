@@ -47,7 +47,53 @@ const stockMovementSchema = new mongoose.Schema({
   documentId: { type: mongoose.Schema.Types.ObjectId },
   documentNumber: String,
   note: String,
-  actorName: String
+  actorName: String,
+
+  /**
+   * What this movement cost (2.5 #41).
+   *
+   * On the way **in**, the acquisition cost of the goods. On the way **out**,
+   * the weighted cost of the layers actually consumed — which is the cost of
+   * goods sold, and is not derivable from anything else on the row: two sales of
+   * the same item on the same day can carry different costs because they drew on
+   * different receipts.
+   *
+   * `value` is signed like `quantity`, so total inventory movement is a `$sum`
+   * rather than a conditional, matching the ledger's existing convention.
+   */
+  unitCost: { type: Number, default: null },
+  value: { type: Number, default: null },
+
+  /**
+   * Exactly which layers an outbound movement drew on, and how much of each.
+   *
+   * Recorded rather than recomputed because **reversal is otherwise impossible
+   * to get right**. When a cancelled invoice puts stock back, the goods must
+   * return to the layers they came out of, at the cost they left at. Without
+   * this, the only options are to invent a new layer at today's cost — which
+   * silently rewrites history and changes reported profit on a closed period —
+   * or to guess. Both are wrong in ways nobody would ever notice.
+   */
+  consumed: {
+    type: [{
+      _id: false,
+      layerId: { type: mongoose.Schema.Types.ObjectId, ref: 'StockLayer' },
+      quantity: Number,
+      unitCost: Number
+    }],
+    default: undefined
+  },
+
+  /** Which layer an inbound movement created, so it can be unwound. */
+  layerId: { type: mongoose.Schema.Types.ObjectId, ref: 'StockLayer', default: null },
+
+  /** Snapshotted, because the org setting can change and a historical row must
+   *  still explain how its own cost was arrived at. */
+  valuationMethod: { type: String, enum: ['fifo', 'weighted-average'], default: null },
+
+  /** Batch and expiry (2.5 #42), when the item is tracked that way. */
+  batchNumber: { type: String, trim: true },
+  expiryDate: { type: Date, default: null }
 }, { timestamps: true });
 
 stockMovementSchema.index({ orgId: 1, itemId: 1, createdAt: -1 });

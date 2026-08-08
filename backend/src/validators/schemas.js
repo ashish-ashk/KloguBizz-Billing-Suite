@@ -99,6 +99,7 @@ const itemCreateSchema = z.object({
   stockQty: z.coerce.number().refine(Number.isFinite, 'must be a number').optional(),
   reorderLevel: nonNegativeNumber.optional().nullable(),
   barcode: shortText.optional().nullable(),
+  trackBatches: z.coerce.boolean().optional(),
   status: z.enum(['active', 'inactive']).optional()
 });
 
@@ -416,6 +417,13 @@ const userUpdateSchema = z.object({
 
 // ── Organisation ─────────────────────────────────
 
+/** The tenant's stock valuation policy. */
+const inventorySettingsSchema = z.object({
+  valuationMethod: z.enum(['fifo', 'weighted-average']).optional(),
+  consumeByExpiry: z.coerce.boolean().optional(),
+  expiryWarningDays: z.coerce.number().int().min(0).max(365).optional()
+});
+
 const organisationUpdateSchema = z.object({
   name: shortText.min(2, 'must be at least 2 characters').optional(),
   gstin,
@@ -427,7 +435,11 @@ const organisationUpdateSchema = z.object({
   // Branding and theme are nested free-form config validated by the Mongoose
   // schema; passthrough keeps them intact without restating every knob here.
   brandingConfig: z.record(z.any()).optional(),
-  themeConfig: z.record(z.any()).optional()
+  themeConfig: z.record(z.any()).optional(),
+  // Typed rather than passthrough: an unrecognised valuation method would be
+  // stored, silently ignored by the service's `|| 'fifo'` fallback, and read
+  // back as if it had been accepted.
+  inventory: inventorySettingsSchema.optional()
 });
 
 const transferOwnershipSchema = z.object({
@@ -461,13 +473,51 @@ const vendorCreateSchema = z.object({
 });
 const vendorUpdateSchema = vendorCreateSchema.partial();
 
+/**
+ * A manual stock correction.
+ *
+ * The note is required by the schema rather than only by the controller, because
+ * an unexplained adjustment is the exact failure the ledger exists to prevent —
+ * a balance that changed and cannot be reconciled. `quantity` is signed and
+ * explicitly refuses zero: a zero adjustment is always a mistake, and accepting
+ * it writes a movement that says nothing happened.
+ */
+const stockAdjustSchema = z.object({
+  quantity: z.coerce.number()
+    .refine(Number.isFinite, 'must be a number')
+    .refine(value => value !== 0, 'must not be zero — use a negative number to reduce stock'),
+  // Deliberately not `.min(1)` here. The controller refuses an empty note with a
+  // specific `NOTE_REQUIRED` code and a sentence explaining why; routing it
+  // through zod instead would replace both with a generic VALIDATION_ERROR.
+  note: shortText.optional().nullable(),
+  reason: z.enum(['adjustment', 'damage', 'opening']).optional(),
+  unitCost: money.optional().nullable(),
+  batchNumber: shortText.optional().nullable(),
+  expiryDate: isoDate.optional().nullable()
+});
+
+
+/**
+ * A purchase line, which is an invoice line plus the two facts only a receipt of
+ * goods knows.
+ *
+ * Deliberately not added to the shared `lineItemSchema`: a batch number on a
+ * *sales* invoice line would be a different thing entirely (which batch was
+ * dispatched, decided by the consumption order, not typed by the seller), and
+ * one schema meaning two things is how a field ends up populated inconsistently.
+ */
+const purchaseLineItemSchema = lineItemSchema.extend({
+  batchNumber: shortText.optional().nullable(),
+  expiryDate: isoDate.optional().nullable()
+});
+
 const purchaseBaseShape = {
   vendorId: objectId,
   // The supplier's own number, which is what GSTR-2A/2B reconciliation matches on.
   billNumber: shortText.min(1, 'is required'),
   billDate: isoDate,
   dueDate: isoDate.optional().nullable(),
-  items: z.array(lineItemSchema).min(1, 'must contain at least one line item').max(500, 'cannot exceed 500 line items'),
+  items: z.array(purchaseLineItemSchema).min(1, 'must contain at least one line item').max(500, 'cannot exceed 500 line items'),
   discountPercent: percent.optional(),
   placeOfSupply: stateCode.optional().nullable(),
   taxTreatment: z.enum(TAX_TREATMENTS).optional(),
@@ -502,6 +552,7 @@ const accountDeletionSchema = z.object({
 module.exports = {
   TAX_TREATMENTS, SUPPLY_TYPES,
   vendorCreateSchema, vendorUpdateSchema,
+  stockAdjustSchema, inventorySettingsSchema,
   purchaseCreateSchema, purchaseUpdateSchema, purchasePaySchema,
   mfaEnableSchema, mfaVerifySchema, mfaDisableSchema,
   verifyEmailSchema, accountDeletionSchema,

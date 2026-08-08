@@ -9,14 +9,32 @@ const { pickFields } = require('../utils/pickFields');
 const { assertValidMaster } = require('../services/masterService');
 const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
 const { notDeleted, scopeFilter, deletionPatch, RESTORE_PATCH } = require('../utils/softDelete');
+const stock = require('../services/stockService');
 
 // `orgId` is never accepted from the body — it comes from the token, so an
 // update can't relocate the record into another tenant.
 const ITEM_FIELDS = [
   'itemCode', 'name', 'description', 'type', 'hsn', 'category', 'unit',
   'gstRate', 'cessRate', 'sellingPrice', 'mrp', 'purchasePrice', 'taxInclusive',
-  'stockQty', 'reorderLevel', 'barcode', 'status'
+  'stockQty', 'reorderLevel', 'barcode', 'status', 'trackBatches'
 ];
+
+/**
+ * `stockQty` is accepted when *creating* an item and refused when updating it.
+ *
+ * Creating is the one moment a balance legitimately arrives from outside the
+ * ledger — it is the opening stock, and asking someone to add an item and then
+ * separately post an opening movement for it is a worse product. So the figure
+ * is taken and immediately turned into a proper `opening` movement with a cost
+ * behind it (see `createItem`), which keeps quantity and value in step from the
+ * very first row.
+ *
+ * Editing it is different: there is no honest movement to post, because nobody
+ * knows what changed or why. The old behaviour — a plain hand-edit — is exactly
+ * what made the number untraceable and is why the ledger was built. It now
+ * returns a 400 pointing at the adjustment endpoint, which requires a note.
+ */
+const UPDATE_FORBIDDEN_FIELDS = ['stockQty'];
 
 const ITEM_SORTS = ['name', 'itemCode', 'sellingPrice', 'stockQty', 'createdAt'];
 
@@ -56,13 +74,51 @@ async function assertMasters(body) {
 const createItem = asyncHandler(async (req, res) => {
   const fields = pickFields(req.body, ITEM_FIELDS);
   await assertMasters(fields);
-  const item = await Item.create({ ...fields, orgId: req.orgId });
-  logAudit({ req, action: 'item.created', entity: 'item', entityId: item._id, meta: { name: item.name } });
+
+  // Held back and posted as a movement below, so the opening balance has a
+  // ledger row and a cost rather than appearing from nowhere.
+  const openingQty = Number(fields.stockQty) || 0;
+  const opening = openingQty > 0 && fields.type !== 'service' ? openingQty : 0;
+  fields.stockQty = 0;
+
+  const item = await Item.create({ ...fields, orgId: req.orgId, stockQty: 0, stockValue: 0 });
+
+  if (opening) {
+    await stock.adjust({
+      req,
+      orgId: req.orgId,
+      itemId: item._id,
+      quantity: opening,
+      reason: 'opening',
+      note: 'Opening stock recorded when the item was created',
+      // The catalogue's purchase price is the only cost known at this point, and
+      // it is what the person entering the item just typed. Zero would make the
+      // first sale look like pure profit.
+      unitCost: Number(fields.purchasePrice) > 0 ? Number(fields.purchasePrice) : 0
+    }).catch(error => {
+      // The item exists and is usable; the opening balance is bookkeeping about
+      // it. Failing the create here would leave a caller who cannot tell whether
+      // to retry.
+      (req.log || console).error?.('opening stock failed', { err: error, itemId: String(item._id) });
+    });
+  }
+
+  const saved = opening ? await Item.findById(item._id) : item;
+  logAudit({ req, action: 'item.created', entity: 'item', entityId: item._id, meta: { name: item.name, openingStock: opening } });
   recordEvent({ req, type: EVENT.itemCreated });
-  res.status(201).json(item);
+  res.status(201).json(saved);
 });
 
 const updateItem = asyncHandler(async (req, res) => {
+  for (const field of UPDATE_FORBIDDEN_FIELDS) {
+    if (req.body?.[field] !== undefined) {
+      throw httpError(
+        400,
+        'Stock cannot be edited directly — post an adjustment instead, so the change has a reason attached to it.',
+        'STOCK_NOT_EDITABLE'
+      );
+    }
+  }
   const fields = pickFields(req.body, ITEM_FIELDS);
   await assertMasters(fields);
   const item = await Item.findOneAndUpdate(
@@ -72,6 +128,31 @@ const updateItem = asyncHandler(async (req, res) => {
   );
   if (!item) throw httpError(404, 'Item not found');
   logAudit({ req, action: 'item.updated', entity: 'item', entityId: item._id, meta: { name: item.name } });
+  res.json(item);
+});
+
+/**
+ * One item, by its barcode (2.5 #44).
+ *
+ * A dedicated endpoint rather than the existing `?q=` search, because a scanner
+ * needs a different answer to a person. `?q=` is a fuzzy `$or` across four
+ * fields that returns a *page* of candidates ranked by nothing in particular —
+ * fine for someone reading a list, useless for a till, where the only acceptable
+ * outcomes are "this exact item" or "no match". A scan that silently picks the
+ * first of several near-matches rings up the wrong product.
+ *
+ * The barcode is unique per tenant at the database level (see `Item`), so
+ * exactly-one is guaranteed rather than hoped for.
+ */
+const itemByBarcode = asyncHandler(async (req, res) => {
+  const barcode = String(req.params.barcode || '').trim();
+  if (!barcode) throw httpError(400, 'A barcode is required');
+  const item = await Item.findOne({ ...notDeleted(req), barcode, status: 'active' }).lean();
+  if (!item) {
+    // 404 with a code, so the till can offer "add this as a new item" instead of
+    // showing an error the cashier cannot act on.
+    throw httpError(404, 'No active item has that barcode.', 'BARCODE_NOT_FOUND');
+  }
   res.json(item);
 });
 
@@ -145,4 +226,7 @@ const bulkUploadItems = asyncHandler(async (req, res) => {
   res.json({ totalRows, created, failed: failedResults });
 });
 
-module.exports = { listItems, createItem, updateItem, deleteItem, restoreItem, downloadItemTemplate, bulkUploadItems };
+module.exports = {
+  listItems, itemByBarcode, createItem, updateItem, deleteItem, restoreItem,
+  downloadItemTemplate, bulkUploadItems
+};

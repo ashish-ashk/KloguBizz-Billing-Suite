@@ -155,6 +155,24 @@ const maybe = fn => async t => {
   return fn(t);
 };
 
+/**
+ * Polls until a predicate returns something truthy.
+ *
+ * Email logging is fire-and-forget on purpose — bookkeeping must never be able to
+ * fail the thing it records — so the response returns before the insert lands.
+ * Asserting immediately passes on an idle machine and fails under a loaded
+ * parallel run, which is the worst kind of test.
+ */
+async function waitUntil(check, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const result = await check();
+    if (result) return result;
+    if (Date.now() > deadline) return null;
+    await new Promise(resolve => { setTimeout(resolve, 50); });
+  }
+}
+
 // ── Classification (#29, #30, #31) ───────────────
 
 test('the tax head follows the place of supply, not the buyer’s registered state', maybe(async () => {
@@ -1027,11 +1045,22 @@ test('a bounced address is suppressed and then refused', maybe(async () => {
   const suppression = await Suppression.findOne({ email: 'bounces@example.test' }).lean();
   assert.equal(suppression.reason, 'bounce');
 
-  // The next send is refused rather than attempted — continuing to mail a bounced
-  // address is what destroys a sending domain's reputation for every tenant.
+  /**
+   * The next send is refused rather than attempted — continuing to mail a bounced
+   * address is what destroys a sending domain's reputation for every tenant.
+   *
+   * Polled for the *specific* row rather than asserting that the newest one has
+   * it. Email logging is fire-and-forget, and the bounce handler's own row lands
+   * within the same millisecond as this send's — `createdAt` has millisecond
+   * resolution, so `sort({createdAt: -1})[0]` picked between them arbitrarily.
+   * That is what made this test fail roughly one run in six with
+   * `'bounced' !== 'suppressed'`, which reads like a real regression and is not.
+   */
   await call('POST', `/invoices/${invoice._id}/remind`, { token: tenant.token });
-  const logs = await EmailLog.find({ to: 'bounces@example.test' }).sort({ createdAt: -1 }).lean();
-  assert.equal(logs[0].status, 'suppressed');
+  const suppressed = await waitUntil(
+    () => EmailLog.findOne({ to: 'bounces@example.test', status: 'suppressed' }).lean()
+  );
+  assert.ok(suppressed, 'a send to a suppressed address must be refused and logged as such');
 }));
 
 test('a soft bounce does not suppress the address', maybe(async () => {

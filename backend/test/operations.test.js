@@ -24,6 +24,7 @@ const { Plan } = require('../src/models/Plan');
 const { Organisation } = require('../src/models/Organisation');
 const { Item } = require('../src/models/Item');
 const { StockMovement } = require('../src/models/StockMovement');
+const { StockLayer } = require('../src/models/StockLayer');
 const { EmailLog } = require('../src/models/EmailLog');
 const stock = require('../src/services/stockService');
 
@@ -165,13 +166,19 @@ test('issuing an invoice takes stock out and writes a ledger row', maybe(async (
   const after = await Item.findById(item._id).lean();
   assert.equal(after.stockQty, 95, '5 of 100 left the shelf');
 
-  const movements = await StockMovement.find({ itemId: item._id }).lean();
-  assert.equal(movements.length, 1);
-  assert.equal(movements[0].quantity, -5, 'signed: a sale is negative');
-  assert.equal(movements[0].reason, 'sale');
-  assert.equal(movements[0].documentNumber, invoice.invoiceNumber);
+  // Two rows: the opening balance the item was created with, then the sale.
+  // Opening stock used to arrive as a bare `stockQty` on the item with nothing in
+  // the ledger to explain it — which meant a rebuild from the ledger would wipe
+  // it (see 'a balance can be rebuilt from the ledger').
+  const movements = await StockMovement.find({ itemId: item._id }).sort({ createdAt: 1 }).lean();
+  assert.equal(movements.length, 2);
+  assert.equal(movements[0].reason, 'opening');
+  assert.equal(movements[0].quantity, 100);
+  assert.equal(movements[1].quantity, -5, 'signed: a sale is negative');
+  assert.equal(movements[1].reason, 'sale');
+  assert.equal(movements[1].documentNumber, invoice.invoiceNumber);
   // The balance travels with the row, so a ledger line reads without re-summing above it.
-  assert.equal(movements[0].balanceAfter, 95);
+  assert.equal(movements[1].balanceAfter, 95);
 
   // Reported back rather than silent, so an unmatched line is visible.
   assert.equal(invoice.stock.moved, 1);
@@ -187,7 +194,8 @@ test('a draft moves no stock', maybe(async () => {
   // Nothing has been issued, so no goods have left. Decrementing on a draft would make
   // the balance depend on how many drafts happen to be lying around.
   assert.equal(after.stockQty, 100);
-  assert.equal(await StockMovement.countDocuments({ itemId: item._id }), 0);
+  // Only the opening balance. Nothing was issued, so nothing left the shelf.
+  assert.equal(await StockMovement.countDocuments({ itemId: item._id, reason: { $ne: 'opening' } }), 0);
 }));
 
 test('cancelling an invoice puts the stock back, exactly once', maybe(async () => {
@@ -219,7 +227,7 @@ test('a line that matches no catalogue item moves nothing', maybe(async () => {
   // balance that is wrong in a way nobody can trace.
   assert.equal(invoice.stock.moved, 0);
   assert.equal(invoice.stock.unmatched, 1);
-  assert.equal(await StockMovement.countDocuments({ orgId: tenant.org._id }), 0);
+  assert.equal(await StockMovement.countDocuments({ orgId: tenant.org._id, reason: { $ne: 'opening' } }), 0);
 }));
 
 test('a service is never stock-tracked', maybe(async () => {
@@ -303,8 +311,13 @@ test('an adjustment needs a note, and the ledger cannot be edited', maybe(async 
   assert.equal(adjusted.status, 200);
   assert.equal(adjusted.body.stockQty, 97);
 
-  const movement = await StockMovement.findOne({ itemId: item._id }).lean();
+  // The damage row specifically — the item also carries an `opening` row from
+  // the balance it was created with.
+  const movement = await StockMovement.findOne({ itemId: item._id, reason: 'damage' }).lean();
   assert.equal(movement.note, 'Three rods bent in transit');
+  // Written-off goods leave at what they cost, so the loss lands in the right
+  // place instead of appearing as an unexplained change in quantity.
+  assert.equal(movement.quantity, -3);
   await assert.rejects(
     () => StockMovement.updateOne({ _id: movement._id }, { $set: { quantity: 999 } }),
     /append-only/,
@@ -322,8 +335,17 @@ test('a balance can be rebuilt from the ledger', maybe(async () => {
   await Item.updateOne({ _id: item._id }, { $set: { stockQty: 12345 } });
   const rebuilt = await call('POST', `/reports/stock/${item._id}/recompute`, { token: tenant.token, body: {} });
   assert.equal(rebuilt.status, 200);
-  // The cached counter is only safe *because* it is recomputable from the immutable rows.
-  assert.equal(rebuilt.body.stockQty, -5);
+  /**
+   * 100 opening, less the 5 sold.
+   *
+   * This assertion used to expect **-5**, and that was the repair path quietly
+   * destroying data: opening stock arrived as a hand-set `stockQty` with no
+   * ledger row, so rebuilding "from the ledger" threw the opening balance away
+   * and left every item that had one short by its entire starting quantity. The
+   * fix was not here — it was making opening stock a real movement.
+   */
+  assert.equal(rebuilt.body.stockQty, 95);
+  assert.equal(rebuilt.body.stockValue, 0, 'the value is rebuilt alongside the quantity');
 }));
 
 test('low stock lists only items with a reorder level set', maybe(async () => {
@@ -342,6 +364,398 @@ test('low stock lists only items with a reorder level set', maybe(async () => {
   assert.ok(!names.includes('Untracked'), 'a missing reorder level means untracked, not zero');
   assert.equal(body.items.find(i => i.name === 'Almost out').shortfall, 7);
   assert.ok(low._id);
+}));
+
+// ── Valuation (2.5 #41) ──────────────────────────
+
+/** A vendor, since every valuation test needs a purchase to create cost layers. */
+async function createVendor(token, overrides = {}) {
+  const { status, body } = await call('POST', '/purchases/vendors', {
+    token,
+    body: { name: 'Steel Supplier', stateCode: '27', gstin: '27AAPFU0939F1ZV', ...overrides }
+  });
+  assert.equal(status, 201, `vendor create failed: ${JSON.stringify(body)}`);
+  return body;
+}
+
+let billCounter = 0;
+async function purchase(token, vendorId, items, overrides = {}) {
+  billCounter += 1;
+  const { status, body } = await call('POST', '/purchases', {
+    token,
+    body: { vendorId, billNumber: `SUP/${billCounter}`, billDate: '2026-06-01', items, ...overrides }
+  });
+  assert.equal(status, 201, `purchase failed: ${JSON.stringify(body)}`);
+  return body;
+}
+
+test('a purchase creates a cost layer at the net rate, excluding recoverable tax', maybe(async () => {
+  const tenant = await registerOrg();
+  const item = await createItem(tenant.token, { stockQty: 0, purchasePrice: 0 });
+  const vendor = await createVendor(tenant.token);
+
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Steel Rod', hsn: '7213', qty: 100, rate: 400, gstRate: 18 }
+  ]);
+
+  const layers = await StockLayer.find({ itemId: item._id }).lean();
+  assert.equal(layers.length, 1);
+  // GST on a purchase is an input tax credit, not a cost. Capitalising it would
+  // overstate inventory by 18% and overstate COGS by the same when it sells.
+  assert.equal(layers[0].unitCost, 400);
+  assert.equal(layers[0].remaining, 100);
+  assert.equal((await Item.findById(item._id).lean()).stockValue, 40000);
+}));
+
+test('an inclusive, discounted purchase line is netted down exactly once', maybe(async () => {
+  const tenant = await registerOrg();
+  const item = await createItem(tenant.token, { stockQty: 0, purchasePrice: 0 });
+  const vendor = await createVendor(tenant.token);
+
+  // 118 inclusive of 18% -> 100 taxable, less 10% -> 90.
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 118, gstRate: 18, taxInclusive: true, discountPercent: 10 }
+  ]);
+
+  const layer = await StockLayer.findOne({ itemId: item._id }).lean();
+  // The same tax engine the bill's own totals use — a second implementation of
+  // "strip the tax, then discount" would drift, and the inventory value would
+  // disagree with the bill it came from by a few percent.
+  assert.equal(layer.unitCost, 90);
+}));
+
+test('FIFO sells the oldest stock first and reports what it cost', maybe(async () => {
+  const tenant = await registerOrg();
+  const client = await createClient(tenant.token);
+  const item = await createItem(tenant.token, { stockQty: 0, purchasePrice: 0 });
+  const vendor = await createVendor(tenant.token);
+
+  await purchase(tenant.token, vendor._id, [{ desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 100, gstRate: 18 }], { billDate: '2026-05-01' });
+  await purchase(tenant.token, vendor._id, [{ desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 200, gstRate: 18 }], { billDate: '2026-06-01' });
+
+  // 15 units: all ten of the 100 batch, then five of the 200 batch.
+  await createInvoice(tenant.token, {
+    clientId: client._id,
+    items: [{ desc: 'Steel Rod', hsn: '7213', qty: 15, rate: 500, gstRate: 18 }]
+  });
+
+  const sale = await StockMovement.findOne({ itemId: item._id, reason: 'sale' }).lean();
+  assert.equal(sale.value, -2000, '10 x 100 + 5 x 200');
+  assert.equal(sale.unitCost, 133.33, 'the weighted cost of what was actually taken');
+  assert.equal(sale.valuationMethod, 'fifo');
+  // Which layers, and how much of each — the record that makes reversal possible.
+  assert.equal(sale.consumed.length, 2);
+  assert.deepEqual(sale.consumed.map(c => c.quantity), [10, 5]);
+
+  const remaining = await StockLayer.find({ itemId: item._id, remaining: { $gt: 0 } }).lean();
+  assert.equal(remaining.length, 1);
+  assert.equal(remaining[0].unitCost, 200);
+  assert.equal(remaining[0].remaining, 5);
+  assert.equal((await Item.findById(item._id).lean()).stockValue, 1000);
+}));
+
+test('weighted average blends receipts into one layer', maybe(async () => {
+  const tenant = await registerOrg();
+  const client = await createClient(tenant.token);
+  await call('PUT', '/organisations/current', {
+    token: tenant.token,
+    body: { inventory: { valuationMethod: 'weighted-average' } }
+  });
+  const item = await createItem(tenant.token, { stockQty: 0, purchasePrice: 0 });
+  const vendor = await createVendor(tenant.token);
+
+  await purchase(tenant.token, vendor._id, [{ desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 100, gstRate: 18 }], { billDate: '2026-05-01' });
+  await purchase(tenant.token, vendor._id, [{ desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 200, gstRate: 18 }], { billDate: '2026-06-01' });
+
+  const layers = await StockLayer.find({ itemId: item._id }).lean();
+  assert.equal(layers.length, 1, 'receipts merge rather than queue');
+  assert.equal(layers[0].unitCost, 150);
+  assert.equal(layers[0].remaining, 20);
+
+  await createInvoice(tenant.token, {
+    clientId: client._id,
+    items: [{ desc: 'Steel Rod', hsn: '7213', qty: 15, rate: 500, gstRate: 18 }]
+  });
+  const sale = await StockMovement.findOne({ itemId: item._id, reason: 'sale' }).lean();
+  // Every unit costs the same under this method, which is the whole point of it.
+  assert.equal(sale.unitCost, 150);
+  assert.equal(sale.value, -2250);
+}));
+
+test('cancelling an invoice returns the goods to the layers they left', maybe(async () => {
+  const tenant = await registerOrg();
+  const client = await createClient(tenant.token);
+  const item = await createItem(tenant.token, { stockQty: 0, purchasePrice: 0 });
+  const vendor = await createVendor(tenant.token);
+
+  await purchase(tenant.token, vendor._id, [{ desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 100, gstRate: 18 }], { billDate: '2026-05-01' });
+  await purchase(tenant.token, vendor._id, [{ desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 200, gstRate: 18 }], { billDate: '2026-06-01' });
+
+  const invoice = await createInvoice(tenant.token, {
+    clientId: client._id,
+    items: [{ desc: 'Steel Rod', hsn: '7213', qty: 15, rate: 500, gstRate: 18 }]
+  });
+  assert.equal((await Item.findById(item._id).lean()).stockValue, 1000);
+
+  await call('POST', `/invoices/${invoice._id}/cancel`, {
+    token: tenant.token,
+    body: { reason: 'Customer changed their mind' }
+  });
+
+  // Back to 20 units worth 3000 — *exactly* what it was before the sale. Creating
+  // a fresh layer at today's cost would rewrite the profit of a period that may
+  // already have been reported.
+  const layers = await StockLayer.find({ itemId: item._id }).sort({ receivedAt: 1 }).lean();
+  assert.deepEqual(layers.map(l => [l.unitCost, l.remaining]), [[100, 10], [200, 10]]);
+  assert.equal((await Item.findById(item._id).lean()).stockValue, 3000);
+}));
+
+test('a partial credit note restores only its share of the original cost', maybe(async () => {
+  const tenant = await registerOrg();
+  const client = await createClient(tenant.token);
+  const item = await createItem(tenant.token, { stockQty: 0, purchasePrice: 0 });
+  const vendor = await createVendor(tenant.token);
+
+  await purchase(tenant.token, vendor._id, [{ desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 100, gstRate: 18 }]);
+  const invoice = await createInvoice(tenant.token, {
+    clientId: client._id,
+    items: [{ desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 500, gstRate: 18 }]
+  });
+  assert.equal((await Item.findById(item._id).lean()).stockValue, 0);
+
+  const note = await call('POST', '/credit-notes', {
+    token: tenant.token,
+    body: {
+      invoiceId: invoice._id,
+      date: '2026-06-15',
+      reason: 'sales-return',
+      items: [{ desc: 'Steel Rod', hsn: '7213', qty: 4, rate: 500, gstRate: 18 }]
+    }
+  });
+  assert.equal(note.status, 201, JSON.stringify(note.body));
+
+  // Four units back at the 100 they left at — not at a guess, and not at zero.
+  assert.equal((await Item.findById(item._id).lean()).stockValue, 400);
+  const returned = await StockMovement.findOne({ itemId: item._id, reason: 'return' }).lean();
+  assert.equal(returned.unitCost, 100);
+  assert.equal(returned.value, 400);
+}));
+
+test('selling more than is on hand is allowed, and valued at the last cost', maybe(async () => {
+  const tenant = await registerOrg();
+  const client = await createClient(tenant.token);
+  const item = await createItem(tenant.token, { stockQty: 0, purchasePrice: 0 });
+  const vendor = await createVendor(tenant.token);
+
+  await purchase(tenant.token, vendor._id, [{ desc: 'Steel Rod', hsn: '7213', qty: 5, rate: 100, gstRate: 18 }]);
+
+  // Goods sold before the supplier's bill was entered is the most ordinary thing
+  // that happens in a real shop. Refusing the invoice over it would be the
+  // software telling the business it is wrong about its own trade.
+  const invoice = await createInvoice(tenant.token, {
+    clientId: client._id,
+    items: [{ desc: 'Steel Rod', hsn: '7213', qty: 8, rate: 500, gstRate: 18 }]
+  });
+  assert.ok(invoice._id);
+  assert.equal((await Item.findById(item._id).lean()).stockQty, -3);
+
+  const sale = await StockMovement.findOne({ itemId: item._id, reason: 'sale' }).lean();
+  // 5 covered at 100, 3 uncovered valued at the last known cost rather than free.
+  assert.equal(sale.value, -800);
+}));
+
+test('deleting a purchase takes its unsold stock back out', maybe(async () => {
+  const tenant = await registerOrg();
+  const item = await createItem(tenant.token, { stockQty: 0, purchasePrice: 0 });
+  const vendor = await createVendor(tenant.token);
+  const bill = await purchase(tenant.token, vendor._id, [{ desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 100, gstRate: 18 }]);
+  assert.equal((await Item.findById(item._id).lean()).stockQty, 10);
+
+  const deleted = await call('DELETE', `/purchases/${bill._id}`, { token: tenant.token });
+  assert.equal(deleted.status, 200);
+  // `purchase-reversed` was in the reason enum from the day the ledger was
+  // written and had never once been emitted: deleting a bill left its goods on
+  // the shelf forever.
+  const after = await Item.findById(item._id).lean();
+  assert.equal(after.stockQty, 0);
+  assert.equal(after.stockValue, 0);
+  assert.ok(await StockMovement.findOne({ itemId: item._id, reason: 'purchase-reversed' }).lean());
+}));
+
+test('goods already sold cannot be un-received, and the response says so', maybe(async () => {
+  const tenant = await registerOrg();
+  const client = await createClient(tenant.token);
+  const item = await createItem(tenant.token, { stockQty: 0, purchasePrice: 0 });
+  const vendor = await createVendor(tenant.token);
+  const bill = await purchase(tenant.token, vendor._id, [{ desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 100, gstRate: 18 }]);
+
+  await createInvoice(tenant.token, {
+    clientId: client._id,
+    items: [{ desc: 'Steel Rod', hsn: '7213', qty: 6, rate: 500, gstRate: 18 }]
+  });
+
+  const deleted = await call('DELETE', `/purchases/${bill._id}`, { token: tenant.token });
+  assert.equal(deleted.status, 200);
+  // Only the unsold four come back. Removing the six would drive the layer
+  // negative and rewrite the margin on an invoice already sent to a customer.
+  assert.equal((await Item.findById(item._id).lean()).stockQty, 0);
+  assert.equal(deleted.body.stock.stranded[0].quantity, 6);
+}));
+
+test('opening stock is a costed movement, and the balance cannot be hand-edited after', maybe(async () => {
+  const tenant = await registerOrg();
+  const item = await createItem(tenant.token, { stockQty: 40, purchasePrice: 25 });
+
+  // Created with a balance — legitimate exactly once, at creation — and it
+  // arrives as a ledger row with a cost rather than out of nowhere.
+  assert.equal(item.stockQty, 40);
+  assert.equal(item.stockValue, 1000);
+  const opening = await StockMovement.findOne({ itemId: item._id, reason: 'opening' }).lean();
+  assert.equal(opening.quantity, 40);
+  assert.equal(opening.unitCost, 25);
+
+  const edited = await call('PUT', `/items/${item._id}`, { token: tenant.token, body: { stockQty: 999 } });
+  // The hand-edit is what made the number impossible to explain in the first place.
+  assert.equal(edited.status, 400);
+  assert.equal(edited.body.code, 'STOCK_NOT_EDITABLE');
+  assert.equal((await Item.findById(item._id).lean()).stockQty, 40);
+}));
+
+test('the valuation report values stock at cost, not at what it hopes to sell for', maybe(async () => {
+  const tenant = await registerOrg();
+  const item = await createItem(tenant.token, { stockQty: 0, sellingPrice: 500, purchasePrice: 0 });
+  const vendor = await createVendor(tenant.token);
+  await purchase(tenant.token, vendor._id, [{ desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 100, gstRate: 18 }]);
+
+  const { status, body } = await call('GET', '/reports/stock/valuation', { token: tenant.token });
+  assert.equal(status, 200);
+  assert.equal(body.method, 'fifo');
+  assert.equal(body.totals.value, 1000);
+  // AS-2 carries inventory at the lower of cost and net realisable value —
+  // `sellingPrice x quantity` books a profit that has not been earned.
+  assert.equal(body.totals.retailValue, 5000);
+  assert.equal(body.totals.unrealisedMargin, 4000);
+  const row = body.items.find(i => String(i.itemId) === String(item._id));
+  assert.equal(row.averageCost, 100);
+  assert.equal(row.reconciled, true, 'the ledger balance and the layered quantity must agree');
+}));
+
+// ── Batch and expiry (2.5 #42) ───────────────────
+
+test('a batch keeps its own layer, and expiring stock is reported before it expires', maybe(async () => {
+  const tenant = await registerOrg();
+  const item = await createItem(tenant.token, {
+    name: 'Paracetamol', itemCode: 'MED-1', stockQty: 0, trackBatches: true, purchasePrice: 0
+  });
+  const vendor = await createVendor(tenant.token);
+
+  const soon = new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10);
+  const later = new Date(Date.now() + 300 * 86400000).toISOString().slice(0, 10);
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Paracetamol', hsn: '3004', qty: 50, rate: 10, gstRate: 12, batchNumber: 'B-EXPIRING', expiryDate: soon }
+  ], { billDate: '2026-05-01' });
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Paracetamol', hsn: '3004', qty: 50, rate: 12, gstRate: 12, batchNumber: 'B-FRESH', expiryDate: later }
+  ], { billDate: '2026-05-02' });
+
+  const layers = await StockLayer.find({ itemId: item._id }).sort({ receivedAt: 1 }).lean();
+  assert.deepEqual(layers.map(l => l.batchNumber), ['B-EXPIRING', 'B-FRESH']);
+
+  const { status, body } = await call('GET', '/reports/stock/expiring?days=30', { token: tenant.token });
+  assert.equal(status, 200);
+  assert.equal(body.count, 1, 'only the batch inside the window');
+  assert.equal(body.batches[0].batchNumber, 'B-EXPIRING');
+  assert.equal(body.batches[0].expired, false);
+  assert.equal(body.batches[0].quantity, 50);
+}));
+
+test('a batch is never blended away, even under weighted average', maybe(async () => {
+  const tenant = await registerOrg();
+  await call('PUT', '/organisations/current', {
+    token: tenant.token,
+    body: { inventory: { valuationMethod: 'weighted-average' } }
+  });
+  const item = await createItem(tenant.token, { name: 'Paracetamol', itemCode: 'MED-2', stockQty: 0, purchasePrice: 0 });
+  const vendor = await createVendor(tenant.token);
+
+  const d1 = new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10);
+  const d2 = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
+  await purchase(tenant.token, vendor._id, [{ desc: 'Paracetamol', hsn: '3004', qty: 10, rate: 10, gstRate: 12, batchNumber: 'A', expiryDate: d1 }]);
+  await purchase(tenant.token, vendor._id, [{ desc: 'Paracetamol', hsn: '3004', qty: 10, rate: 20, gstRate: 12, batchNumber: 'B', expiryDate: d2 }]);
+
+  // Blending two batches into one row would destroy the ability to say which
+  // stock expires when — a physical fact the accounting method has no business
+  // averaging away.
+  const layers = await StockLayer.find({ itemId: item._id }).lean();
+  assert.equal(layers.length, 2);
+}));
+
+test('first-expiry-first-out dispenses the shorter-dated batch, not the older receipt', maybe(async () => {
+  const tenant = await registerOrg();
+  const client = await createClient(tenant.token);
+  await call('PUT', '/organisations/current', {
+    token: tenant.token,
+    body: { inventory: { consumeByExpiry: true } }
+  });
+  const item = await createItem(tenant.token, { name: 'Paracetamol', itemCode: 'MED-3', stockQty: 0, purchasePrice: 0 });
+  const vendor = await createVendor(tenant.token);
+
+  const soon = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+  const later = new Date(Date.now() + 400 * 86400000).toISOString().slice(0, 10);
+  // Received FIRST but expires LAST — under plain FIFO this would go out first.
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Paracetamol', hsn: '3004', qty: 10, rate: 10, gstRate: 12, batchNumber: 'LONG', expiryDate: later }
+  ], { billDate: '2026-05-01' });
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Paracetamol', hsn: '3004', qty: 10, rate: 20, gstRate: 12, batchNumber: 'SHORT', expiryDate: soon }
+  ], { billDate: '2026-06-01' });
+
+  await createInvoice(tenant.token, {
+    clientId: client._id,
+    items: [{ desc: 'Paracetamol', hsn: '3004', qty: 10, rate: 50, gstRate: 12 }]
+  });
+
+  const left = await StockLayer.find({ itemId: item._id, remaining: { $gt: 0 } }).lean();
+  assert.equal(left.length, 1);
+  assert.equal(left[0].batchNumber, 'LONG', 'the short-dated batch goes first, which is the entire point');
+}));
+
+// ── Barcode (2.5 #44) ────────────────────────────
+
+test('a barcode resolves to exactly one item, and cannot be duplicated', maybe(async () => {
+  const tenant = await registerOrg();
+  const item = await createItem(tenant.token, {
+    name: 'Scanned Rod', itemCode: 'SCAN-1', barcode: '8901234567894', stockQty: 0
+  });
+
+  const found = await call('GET', '/items/barcode/8901234567894', { token: tenant.token });
+  assert.equal(found.status, 200);
+  assert.equal(String(found.body._id), String(item._id));
+
+  const missing = await call('GET', '/items/barcode/0000000000000', { token: tenant.token });
+  // A code the till can act on — "add this as a new item" — rather than an error
+  // the cashier can only stare at.
+  assert.equal(missing.status, 404);
+  assert.equal(missing.body.code, 'BARCODE_NOT_FOUND');
+
+  const duplicate = await call('POST', '/items', {
+    token: tenant.token,
+    body: { name: 'Impostor', itemCode: 'SCAN-2', unit: 'Nos', gstRate: 18, sellingPrice: 100, barcode: '8901234567894' }
+  });
+  // A barcode that resolves to two items is worse than none: the scan silently
+  // picks one. Enforced by the database, not by a check that loses the race.
+  assert.notEqual(duplicate.status, 201, 'a duplicate barcode must be refused');
+}));
+
+test('two tenants may use the same barcode', maybe(async () => {
+  const first = await registerOrg();
+  const second = await registerOrg();
+  const a = await createItem(first.token, { name: 'Shared Code', itemCode: 'SH-1', barcode: '5012345678900', stockQty: 0 });
+  const b = await createItem(second.token, { name: 'Shared Code', itemCode: 'SH-1', barcode: '5012345678900', stockQty: 0 });
+  assert.ok(a._id && b._id, 'uniqueness is per tenant — the same product exists in many shops');
+
+  const found = await call('GET', '/items/barcode/5012345678900', { token: second.token });
+  assert.equal(String(found.body._id), String(b._id), 'and a scan resolves within the scanning tenant only');
 }));
 
 // ── Receivables (2.4 #28, #29, #33) ──────────────

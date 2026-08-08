@@ -249,7 +249,9 @@ test('a delivery challan moves no stock — the invoice raised from it does', ma
   // records. Stock moves when ownership does.
   let stored = await Item.findOne({ itemCode: 'TW-1', orgId: tenant.org._id }).lean();
   assert.equal(stored.stockQty, 100, 'a challan must not decrement stock');
-  assert.equal(await StockMovement.countDocuments({ orgId: tenant.org._id }), 0);
+  // Excluding the opening balance the item was created with, which is a real
+  // ledger row now rather than a bare number on the item.
+  assert.equal(await StockMovement.countDocuments({ orgId: tenant.org._id, reason: { $ne: 'opening' } }), 0);
 
   const converted = await call('POST', `/sales-documents/${challan._id}/convert`, { token: tenant.token, body: {} });
   assert.equal(converted.status, 201, JSON.stringify(converted.body));
