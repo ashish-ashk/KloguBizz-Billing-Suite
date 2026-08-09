@@ -246,18 +246,32 @@ const TENANT_COLLECTIONS = [
   ['subscriptions', Subscription]
 ];
 
+/**
+ * Guards against a fat-fingered request wiping the wrong tenant: the caller has
+ * to name the organisation they mean.
+ *
+ * Exported so the approval gate can run it *before* recording an approval
+ * request (3.4 #12) — asking a second person to authorise a deletion that would
+ * be refused anyway wastes their attention, and an approval queue people learn
+ * to skim is one that has stopped working.
+ */
+async function assertDeletionConfirmed(req) {
+  const org = await Organisation.findById(req.params.id).select('name').lean();
+  if (!org) throw httpError(404, 'Organisation not found');
+  const confirmation = String(req.body?.confirmName ?? '').trim();
+  if (confirmation && confirmation !== org.name) {
+    throw httpError(400, `The name you typed does not match "${org.name}".`, 'CONFIRMATION_MISMATCH');
+  }
+}
+
 // Permanently removes a tenant and all of its data.
 const deleteOrganisation = asyncHandler(async (req, res) => {
   const org = await Organisation.findById(req.params.id);
   if (!org) throw httpError(404, 'Organisation not found');
 
-  // Guard against a fat-fingered request wiping the wrong tenant: the caller has
-  // to name the organisation they mean. Irreversible and platform-wide, so the
-  // confirmation is worth the friction.
-  const confirmation = String(req.body?.confirmName ?? '').trim();
-  if (confirmation && confirmation !== org.name) {
-    throw httpError(400, `The name you typed does not match "${org.name}".`, 'CONFIRMATION_MISMATCH');
-  }
+  // Checked again here: this controller has to stay correct however it is
+  // reached, not only through the route that happens to guard it today.
+  await assertDeletionConfirmed(req);
 
   const deleted = {};
   const { atomic } = await withTransaction(async session => {
@@ -629,6 +643,7 @@ module.exports = {
   createOrganisation,
   updateOrganisation,
   deleteOrganisation,
+  assertDeletionConfirmed,
   listPlansAdmin,
   upsertPlan,
   planHistory,

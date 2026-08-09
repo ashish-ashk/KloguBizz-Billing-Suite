@@ -21,6 +21,9 @@ const { serialiseOrganisation } = require('../services/brandingAssetService');
 const { getUsage } = require('../services/planService');
 const metrics = require('../services/metricsService');
 const jobs = require('../services/jobRunService');
+const approvals = require('../services/approvalService');
+const { ApprovalRequest } = require('../models/ApprovalRequest');
+const { BreakGlassGrant } = require('../models/BreakGlassGrant');
 /**
  * Status changes live in a service so the dunning sweep can suspend an account
  * exactly the way an operator does — a second implementation in the job is how
@@ -137,6 +140,61 @@ const metricsRebuild = asyncHandler(async (req, res) => {
  * genuine platform-wide figure; the latency percentiles are this instance's only,
  * and say so.
  */
+// ── Two-person approval and break-glass (3.4 #12) ──
+
+/**
+ * The approval queue.
+ *
+ * Pending first and unfiltered by requester: an approval queue you have to go
+ * looking for is one that does not get looked at, and the requester is the one
+ * person who cannot action their own entry.
+ */
+const listApprovals = asyncHandler(async (req, res) => {
+  const filter = req.query.status ? { status: String(req.query.status) } : {};
+  const requests = await ApprovalRequest.find(filter).sort({ status: 1, createdAt: -1 }).limit(100).lean();
+  res.json({
+    requests,
+    pending: await ApprovalRequest.countDocuments({ status: 'pending' })
+  });
+});
+
+const decideApproval = asyncHandler(async (req, res) => {
+  const approval = await approvals.decide({
+    req,
+    approvalId: req.params.id,
+    approve: req.body?.approve === true,
+    note: req.body?.note
+  });
+  res.json(approval);
+});
+
+/**
+ * Emergency elevation.
+ *
+ * Guarded only by `platformRead`, deliberately: every platform account can take
+ * one, because the case this serves is precisely the one where the person with
+ * the right role is unreachable. What makes it safe is that it expires, demands
+ * a reason, is loudly audited, and records what it was used for.
+ */
+const takeBreakGlass = asyncHandler(async (req, res) => {
+  const grant = await approvals.breakGlass({
+    req,
+    capability: req.body?.capability,
+    reason: req.body?.reason,
+    minutes: req.body?.minutes
+  });
+  res.status(201).json(grant);
+});
+
+/** Every elevation taken, for the review this whole mechanism depends on. */
+const listBreakGlass = asyncHandler(async (req, res) => {
+  const grants = await BreakGlassGrant.find({}).sort({ grantedAt: -1 }).limit(100).lean();
+  res.json({
+    grants,
+    active: grants.filter(g => !g.revokedAt && new Date(g.expiresAt) > new Date()).length
+  });
+});
+
 /** Recent executions of one job, or of all of them. */
 const jobRuns = asyncHandler(async (req, res) => {
   res.json({ runs: await jobs.history({ name: req.query.name, limit: req.query.limit }) });
@@ -1076,6 +1134,10 @@ module.exports = {
   metricsRebuild,
   systemHealth,
   jobRuns,
+  listApprovals,
+  decideApproval,
+  takeBreakGlass,
+  listBreakGlass,
   tenantDetail,
   tenantInvoices,
   tenantUsers,

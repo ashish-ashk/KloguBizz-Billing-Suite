@@ -94,6 +94,60 @@ async function login(email, password = 'Password@123') {
 
 /** A platform account, created directly since there is deliberately no
  *  self-service way to mint one — same pattern as platformConsole.test.js. */
+
+/**
+ * Deletes a tenant through the two-person approval flow (3.4 #12).
+ *
+ * Tenant deletion is the one action in the console that is both irreversible and
+ * total, so it now needs a second operator. A test that deletes directly is
+ * testing a path that no longer exists.
+ */
+async function deleteOrgWithApproval(token, orgId, body = {}) {
+  const asked = await call('DELETE', `/superadmin/organisations/${orgId}`, {
+    token,
+    body: { ...body, reason: 'Automated test exercising the tenant deletion cascade' }
+  });
+  // A refusal on the request's own merits (a mismatched confirmation name, a
+  // missing tenant) comes back here, before anyone is asked to approve it.
+  if (asked.status !== 202) return asked;
+
+  const approver = await secondApprover();
+  const decided = await call('POST', `/superadmin/approvals/${asked.body.approvalId}/decide`, {
+    token: approver, body: { approve: true, note: 'Approved by the test harness' }
+  });
+  assert.equal(decided.status, 200, `approval failed: ${JSON.stringify(decided.body)}`);
+
+  // Carried in the body rather than the header, because not every test harness
+  // in this repo passes headers — and the middleware accepts both.
+  return call('DELETE', `/superadmin/organisations/${orgId}`, {
+    token,
+    body: {
+      ...body,
+      reason: 'Automated test exercising the tenant deletion cascade',
+      approvalId: String(asked.body.approvalId)
+    }
+  });
+}
+
+/** A *different* platform owner, since nobody may approve their own request. */
+async function secondApprover() {
+  const bcrypt = require('bcryptjs');
+  const email = 'platform-approver@klogubizz.test';
+  if (!await User.findOne({ email })) {
+    await User.create({
+      name: 'Platform Approver',
+      email,
+      passwordHash: await bcrypt.hash('Password@123', 12),
+      role: 'superadmin',
+      platformRole: 'owner',
+      status: 'active'
+    });
+  }
+  const login = await call('POST', '/auth/login', { body: { email, password: 'Password@123' } });
+  assert.equal(login.status, 200, `approver login failed: ${JSON.stringify(login.body)}`);
+  return login.body.token;
+}
+
 async function platformAccount() {
   counter += 1;
   const email = `platform-owner-${counter}@member.test`;
@@ -222,10 +276,7 @@ test('deleting an organisation only deletes identities with no membership left a
   const sharedUserId = (await User.findOne({ email: orgA.email }).lean())._id;
 
   const platformToken = await platformAccount();
-  const deletion = await call('DELETE', `/superadmin/organisations/${orgA.org._id}`, {
-    token: platformToken,
-    body: { confirmName: orgA.org.name }
-  });
+  const deletion = await deleteOrgWithApproval(platformToken, orgA.org._id, { confirmName: orgA.org.name });
   assert.equal(deletion.status, 204, JSON.stringify(deletion.body));
 
   // Orphaned no more: the membership rows for the deleted org are gone.

@@ -40,6 +40,8 @@ const { JobRun } = require('../src/models/JobRun');
 const jobs = require('../src/services/jobRunService');
 const { EmailLog } = require('../src/models/EmailLog');
 const { runDunningSweep } = require('../src/services/dunningService');
+const { ApprovalRequest } = require('../src/models/ApprovalRequest');
+const { BreakGlassGrant } = require('../src/models/BreakGlassGrant');
 const { applyEvent } = require('../src/controllers/razorpayWebhookController');
 
 /** The webhook's decision layer, without rebuilding an HMAC for every case —
@@ -1674,5 +1676,314 @@ test('dunning appears in the job registry, so a stopped sweep is visible', maybe
   // A billing job that silently stops is the most expensive kind: nobody is
   // chased, nobody is suspended, and the revenue leaks with no signal at all.
   assert.ok(jobs.JOBS['billing.dunning'], 'the sweep must be registered, or it can never be reported as stalled');
+}));
+
+// ── Two-person approval and break-glass (3.4 #12) ─
+
+const DELETE_REASON = 'Customer requested closure, ticket 4821, confirmed by phone';
+
+async function requestDeletion(token, orgId, reason = DELETE_REASON) {
+  return call('DELETE', `/superadmin/organisations/${orgId}`, { token, body: { reason } });
+}
+
+test('deleting a tenant is recorded, not done, until someone else agrees', maybe(async () => {
+  const owner = await platformAccount('owner');
+  const victim = await registerOrg();
+
+  const asked = await requestDeletion(owner.token, victim.org._id);
+  /**
+   * 202, not 403.
+   *
+   * 403 says "you may not", which is wrong — they may, once somebody agrees —
+   * and a client seeing 403 has no reason to show anything but an error.
+   */
+  assert.equal(asked.status, 202);
+  assert.equal(asked.body.code, 'APPROVAL_PENDING');
+  assert.ok(asked.body.approvalId);
+  // And crucially, nothing happened.
+  assert.ok(await Organisation.findById(victim.org._id).lean(), 'the tenant is still there');
+}));
+
+test('you cannot approve your own request', maybe(async () => {
+  const owner = await platformAccount('owner');
+  const victim = await registerOrg();
+  const asked = await requestDeletion(owner.token, victim.org._id);
+
+  const selfApproved = await call('POST', `/superadmin/approvals/${asked.body.approvalId}/decide`, {
+    token: owner.token, body: { approve: true }
+  });
+  // The entire feature, in one assertion.
+  assert.equal(selfApproved.status, 403);
+  assert.equal(selfApproved.body.code, 'APPROVAL_SELF');
+}));
+
+test('an approver must be able to do the thing themselves', maybe(async () => {
+  const owner = await platformAccount('owner');
+  const auditor = await platformAccount('auditor');
+  const victim = await registerOrg();
+  const asked = await requestDeletion(owner.token, victim.org._id);
+
+  const rubberStamp = await call('POST', `/superadmin/approvals/${asked.body.approvalId}/decide`, {
+    token: auditor.token, body: { approve: true }
+  });
+  // Otherwise the check is theatre: a read-only auditor could authorise a
+  // deletion they are specifically not trusted to perform, and the second
+  // signature would carry no more weight than a bystander's.
+  assert.equal(rubberStamp.status, 403);
+  assert.equal(rubberStamp.body.code, 'PLATFORM_CAPABILITY_REQUIRED');
+}));
+
+test('once approved, the original requester carries it out', maybe(async () => {
+  const owner = await platformAccount('owner');
+  const second = await platformAccount('owner');
+  const victim = await registerOrg();
+
+  const asked = await requestDeletion(owner.token, victim.org._id);
+  const approved = await call('POST', `/superadmin/approvals/${asked.body.approvalId}/decide`, {
+    token: second.token, body: { approve: true, note: 'Confirmed with the customer' }
+  });
+  assert.equal(approved.status, 200);
+  assert.equal(approved.body.status, 'approved');
+
+  const done = await call('DELETE', `/superadmin/organisations/${victim.org._id}`, {
+    token: owner.token,
+    body: { reason: DELETE_REASON },
+    headers: { 'x-approval-id': String(asked.body.approvalId) }
+  });
+  // 204: the delete carried out, with nothing to return.
+  assert.equal(done.status, 204, JSON.stringify(done.body));
+  assert.equal(await Organisation.findById(victim.org._id).lean(), null);
+}));
+
+test('an approval cannot be spent on a different tenant', maybe(async () => {
+  const owner = await platformAccount('owner');
+  const second = await platformAccount('owner');
+  const approvedVictim = await registerOrg();
+  const otherTenant = await registerOrg();
+
+  const asked = await requestDeletion(owner.token, approvedVictim.org._id);
+  await call('POST', `/superadmin/approvals/${asked.body.approvalId}/decide`, {
+    token: second.token, body: { approve: true }
+  });
+
+  const misused = await call('DELETE', `/superadmin/organisations/${otherTenant.org._id}`, {
+    token: owner.token,
+    body: { reason: DELETE_REASON },
+    headers: { 'x-approval-id': String(asked.body.approvalId) }
+  });
+  /**
+   * The hole this closes: request "delete tenant A", get it approved, then use
+   * the approval to delete tenant B. The approver saw one thing and consented to
+   * another.
+   */
+  assert.equal(misused.status, 403);
+  assert.equal(misused.body.code, 'APPROVAL_MISMATCH');
+  assert.ok(await Organisation.findById(otherTenant.org._id).lean(), 'and B survives');
+}));
+
+test('an approval is single use', maybe(async () => {
+  const owner = await platformAccount('owner');
+  const second = await platformAccount('owner');
+  const victim = await registerOrg();
+
+  const asked = await requestDeletion(owner.token, victim.org._id);
+  await call('POST', `/superadmin/approvals/${asked.body.approvalId}/decide`, {
+    token: second.token, body: { approve: true }
+  });
+  const headers = { 'x-approval-id': String(asked.body.approvalId) };
+  await call('DELETE', `/superadmin/organisations/${victim.org._id}`, { token: owner.token, body: { reason: DELETE_REASON }, headers });
+
+  // The tenant is gone, so a replayed request is a 404 before it ever reaches
+  // the approval check — which is honest, and not what this test is about. The
+  // property is that the approval itself is spent.
+  assert.equal((await ApprovalRequest.findById(asked.body.approvalId).lean()).status, 'used');
+
+  const survivor = await registerOrg();
+  const reused = await call('DELETE', `/superadmin/organisations/${survivor.org._id}`, {
+    token: owner.token, body: { reason: DELETE_REASON }, headers
+  });
+  // An approval is consent to one action, not a standing licence — and it is
+  // refused here even before the path mismatch would catch it.
+  assert.equal(reused.status, 409);
+  assert.equal(reused.body.code, 'APPROVAL_USED');
+  assert.ok(await Organisation.findById(survivor.org._id).lean());
+}));
+
+test('an expired approval is refused', maybe(async () => {
+  const owner = await platformAccount('owner');
+  const second = await platformAccount('owner');
+  const victim = await registerOrg();
+
+  const asked = await requestDeletion(owner.token, victim.org._id);
+  await call('POST', `/superadmin/approvals/${asked.body.approvalId}/decide`, {
+    token: second.token, body: { approve: true }
+  });
+  await ApprovalRequest.updateOne(
+    { _id: asked.body.approvalId },
+    { $set: { expiresAt: new Date(Date.now() - 1000) } }
+  );
+
+  const stale = await call('DELETE', `/superadmin/organisations/${victim.org._id}`, {
+    token: owner.token,
+    body: { reason: DELETE_REASON },
+    headers: { 'x-approval-id': String(asked.body.approvalId) }
+  });
+  // Consent was given, but not to today's version of the world.
+  assert.equal(stale.status, 403);
+  assert.equal(stale.body.code, 'APPROVAL_EXPIRED');
+}));
+
+test('a rejected request cannot be carried out', maybe(async () => {
+  const owner = await platformAccount('owner');
+  const second = await platformAccount('owner');
+  const victim = await registerOrg();
+
+  const asked = await requestDeletion(owner.token, victim.org._id);
+  await call('POST', `/superadmin/approvals/${asked.body.approvalId}/decide`, {
+    token: second.token, body: { approve: false, note: 'Customer is still disputing this' }
+  });
+
+  const anyway = await call('DELETE', `/superadmin/organisations/${victim.org._id}`, {
+    token: owner.token,
+    body: { reason: DELETE_REASON },
+    headers: { 'x-approval-id': String(asked.body.approvalId) }
+  });
+  assert.equal(anyway.status, 403);
+  assert.equal(anyway.body.code, 'APPROVAL_NOT_GRANTED');
+  assert.ok(await Organisation.findById(victim.org._id).lean());
+}));
+
+test('a request nobody can judge is refused before it is recorded', maybe(async () => {
+  const owner = await platformAccount('owner');
+  const victim = await registerOrg();
+
+  const vague = await requestDeletion(owner.token, victim.org._id, 'cleanup');
+  // An approval request nobody can judge trains the second person to click yes,
+  // which converts a control into a formality.
+  assert.equal(vague.status, 400);
+  assert.equal(vague.body.code, 'REASON_REQUIRED');
+  assert.equal(await ApprovalRequest.countDocuments({ 'preview.organisationId': String(victim.org._id) }), 0);
+}));
+
+test('property order in the body does not invalidate an approval', maybe(async () => {
+  const { hashBody } = require('../src/services/approvalService');
+  // JSON round-trips and client libraries reorder keys freely. Without a
+  // canonical hash the feature would read as flaky rather than strict.
+  assert.equal(
+    hashBody({ reason: 'x', confirm: true }),
+    hashBody({ confirm: true, reason: 'x' })
+  );
+  assert.notEqual(hashBody({ reason: 'x' }), hashBody({ reason: 'y' }));
+}));
+
+// ── Break-glass ──
+
+test('an operator can take emergency access, and it is loud', maybe(async () => {
+  const support = await platformAccount('support');
+  const taken = await call('POST', '/superadmin/break-glass', {
+    token: support.token,
+    body: {
+      capability: 'org.delete',
+      reason: 'Owner unreachable; customer data must be removed tonight per ticket 5120',
+      minutes: 15
+    }
+  });
+  assert.equal(taken.status, 201, JSON.stringify(taken.body));
+  assert.equal(taken.body.capability, 'org.delete');
+  assert.ok(new Date(taken.body.expiresAt) > new Date());
+
+  // The event existing at all is the control.
+  const entry = await waitForAudit({ action: 'breakglass.taken' });
+  assert.ok(entry, 'taking emergency access must itself be an audited event');
+}));
+
+test('emergency access cannot grant the power to change roles', maybe(async () => {
+  const support = await platformAccount('support');
+  const refused = await call('POST', '/superadmin/break-glass', {
+    token: support.token,
+    body: { capability: 'platform.admin', reason: 'Need to fix a role assignment urgently tonight' }
+  });
+  // Otherwise break-glass is a way to permanently promote yourself in fifteen
+  // minutes, and every other control here is decoration.
+  assert.equal(refused.status, 403);
+  assert.equal(refused.body.code, 'CAPABILITY_NOT_ELEVATABLE');
+}));
+
+test('emergency access needs a reason someone can review', maybe(async () => {
+  const support = await platformAccount('support');
+  const vague = await call('POST', '/superadmin/break-glass', {
+    token: support.token, body: { capability: 'org.delete', reason: 'fixing' }
+  });
+  assert.equal(vague.status, 400);
+  assert.equal(vague.body.code, 'REASON_REQUIRED');
+}));
+
+test('emergency access gets you the capability, not a bypass of the second signature', maybe(async () => {
+  const support = await platformAccount('support');
+  const victim = await registerOrg();
+
+  // Without the grant, the role check refuses outright.
+  const before = await requestDeletion(support.token, victim.org._id);
+  assert.equal(before.status, 403);
+  assert.equal(before.body.code, 'PLATFORM_CAPABILITY_REQUIRED');
+
+  await call('POST', '/superadmin/break-glass', {
+    token: support.token,
+    body: { capability: 'org.delete', reason: 'Owner unreachable and this is time critical, ticket 5121' }
+  });
+
+  const after = await requestDeletion(support.token, victim.org._id);
+  /**
+   * 202, not 200. Elevation clears the role check and leaves the approval
+   * requirement standing — an emergency is a reason to let somebody act, not a
+   * reason to remove the second pair of eyes.
+   */
+  assert.equal(after.status, 202);
+  assert.ok(await Organisation.findById(victim.org._id).lean());
+}));
+
+test('an expired grant stops working', maybe(async () => {
+  const support = await platformAccount('support');
+  const victim = await registerOrg();
+  const taken = await call('POST', '/superadmin/break-glass', {
+    token: support.token,
+    body: { capability: 'org.delete', reason: 'Time-critical removal while the owner is unreachable' }
+  });
+  await BreakGlassGrant.updateOne({ _id: taken.body._id }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
+
+  const after = await requestDeletion(support.token, victim.org._id);
+  // A standing self-grant is just a bigger role with extra steps.
+  assert.equal(after.status, 403);
+  assert.equal(after.body.code, 'PLATFORM_CAPABILITY_REQUIRED');
+}));
+
+test('what emergency access was used for is recorded', maybe(async () => {
+  const support = await platformAccount('support');
+  const victim = await registerOrg();
+  const taken = await call('POST', '/superadmin/break-glass', {
+    token: support.token,
+    body: { capability: 'org.delete', reason: 'Owner unreachable, urgent removal requested by the customer' }
+  });
+  await requestDeletion(support.token, victim.org._id);
+
+  const grant = await waitUntil(async () => {
+    const row = await BreakGlassGrant.findById(taken.body._id).lean();
+    return row?.usedFor?.length ? row : null;
+  });
+  // "You took emergency access — what did you do with it?" has to have an answer
+  // that does not depend on cross-referencing timestamps in a log.
+  assert.ok(grant, 'a grant must record what it was used for');
+  assert.match(grant.usedFor[0].path, /organisations/);
+}));
+
+test('taking access you already have is refused', maybe(async () => {
+  const owner = await platformAccount('owner');
+  const pointless = await call('POST', '/superadmin/break-glass', {
+    token: owner.token,
+    body: { capability: 'org.delete', reason: 'Just in case something goes wrong later tonight' }
+  });
+  // An unnecessary grant dilutes the signal that a real one is supposed to send.
+  assert.equal(pointless.status, 400);
+  assert.equal(pointless.body.code, 'ALREADY_PERMITTED');
 }));
 

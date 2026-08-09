@@ -20,6 +20,8 @@ const platform = require('../controllers/platformController');
 const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { CAPABILITY, requireCapability } = require('../middleware/platformRoleMiddleware');
+const { requireApproval, requireCapabilityOrGrant } = require('../middleware/approvalMiddleware');
+const { assertDeletionConfirmed } = require('../controllers/superadminController');
 const { superadminIpAllowlist } = require('../middleware/accountGuards');
 const { emailDeliverability, releaseSuppression, listSuppressions } = require('../controllers/platformController');
 
@@ -82,7 +84,39 @@ router.post('/organisations/:id/impersonate', requireCapability(CAPABILITY.tenan
 router.get('/organisations/:id', requireCapability(CAPABILITY.platformRead), platform.tenantDetail);
 router.put('/organisations/:id', requireCapability(CAPABILITY.orgWrite), updateOrganisation);
 // Irreversible and platform-wide: its own capability, held only by an owner.
-router.delete('/organisations/:id', requireCapability(CAPABILITY.orgDelete), deleteOrganisation);
+/**
+ * Deleting a tenant needs a second operator (3.4 #12).
+ *
+ * The one action in this console that is both irreversible and total: it erases
+ * a business's entire records. Roles do not help here — the person clicking has
+ * exactly the permission required, and the difference between a legitimate
+ * deletion and a catastrophic one is a mis-click on a list of similar names.
+ *
+ * `requireCapabilityOrGrant` rather than the plain guard, so an owner locked out
+ * of their own console at 3am is not the reason a customer stays broken. The
+ * approval requirement still applies on top: break-glass gets you the
+ * capability, not a bypass of the second signature.
+ */
+router.delete(
+  '/organisations/:id',
+  requireCapabilityOrGrant(CAPABILITY.orgDelete),
+  requireApproval({
+    capability: CAPABILITY.orgDelete,
+    describe: req => `Permanently delete organisation ${req.params.id} and everything it owns`,
+    preview: req => ({ organisationId: req.params.id }),
+    // The typed-name confirmation is a local check on the request itself, so it
+    // runs first. `deleteOrganisation` checks it again — belt and braces, and
+    // the controller must stay correct when called any other way.
+    precondition: assertDeletionConfirmed
+  }),
+  deleteOrganisation
+);
+
+// ── Approvals and emergency access (3.4 #12) ──
+router.get('/approvals', requireCapability(CAPABILITY.platformRead), platform.listApprovals);
+router.post('/approvals/:id/decide', requireCapability(CAPABILITY.platformRead), platform.decideApproval);
+router.post('/break-glass', requireCapability(CAPABILITY.platformRead), platform.takeBreakGlass);
+router.get('/break-glass', requireCapability(CAPABILITY.auditRead), platform.listBreakGlass);
 
 // ── Tenant users (support actions) ───────────────
 router.put('/users/:id', requireCapability(CAPABILITY.tenantSupport), platform.updateTenantUser);

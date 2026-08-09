@@ -1434,11 +1434,72 @@ which passes on an idle machine and fails under load.
 that a retry would have fixed. That is the evidence BullMQ needs, and it did not exist
 before this.
 
-### 12. Two-person approval and break-glass elevation (3.4)
+### 12. Two-person approval and break-glass elevation (3.4) - **DONE (2026-08-07)**
 
-**How:** an `ApprovalRequest` collection, a `requireApproval(capability)` middleware that
-returns `202 APPROVAL_PENDING` and records the intent, and a console screen for the second
-approver. Break-glass is the same mechanism with a TTL on the grant.
+**Roles stop the wrong people doing dangerous things. This is for the things that are
+dangerous when the *right* person does them.** Deleting a tenant erases a business's entire
+records, and the difference between a legitimate deletion and a catastrophic one is a
+mis-click on a list of similar-looking names. No role design prevents that, because the
+person clicking has exactly the permission required.
+
+**The requester retries; the approver does not execute.** The alternative — the approver's
+click carrying out the action — is more convenient and worse. It puts them in the position
+of triggering something they did not compose, which is precisely what makes rubber-stamping
+easy, and it means replaying a stored request body later against state that may have moved.
+Keeping intent and execution with the same person leaves the approver's job as the one
+thing they are there for: yes or no.
+
+**202, not 403.** 403 says "you may not", which is wrong — they may, once somebody agrees —
+and a client seeing 403 has no reason to show anything but an error. 202 says "recorded,
+not yet done", and carries the id to come back with.
+
+**Every refusal in `consumeApproval` closes a specific hole:**
+
+| Refusal | The hole |
+|---|---|
+| Different path or body hash | Request "delete tenant A", get it approved, use it on tenant B. The approver saw one thing and consented to another |
+| Already used | An approval is consent to one action, not a standing licence |
+| Expired (1 hour) | Consent was given, but not to today's version of the world |
+| Same person | Checked at decision time *and* at use time — this is the entire property, and it should not rest on one line in one place |
+| Approver lacks the capability | Otherwise a read-only auditor could authorise a deletion they are specifically not trusted to perform, and the second signature carries no more weight than a bystander's |
+
+A **precondition** runs before anything is recorded, so a request that would fail on its own
+merits — a mismatched confirmation name — never reaches a human. An approval queue people
+learn to skim is one that has stopped working.
+
+#### Break-glass
+
+**Self-service, deliberately.** The case it serves is the one two-person approval cannot: it
+is 3am, a customer is broken, and the person who would approve is asleep. Requiring a second
+person defeats the entire purpose.
+
+**What makes that safe is not prevention — it is visibility and expiry.** A grant lasts
+minutes (60 max), demands a reason long enough to be reviewable, is itself a loudly audited
+event, and **records every request it was used for**, so "you took emergency access, what
+did you do with it?" has an answer that does not require cross-referencing timestamps in a
+log. The security model is explicitly *after the fact*: an operator who abuses this is
+caught, not blocked, which is the right trade when the alternative is an outage nobody can
+fix. Written down so nobody later mistakes the absence of a second approver for an
+oversight.
+
+**It cannot grant `platform.admin`** — the capability that grants capabilities. Allowing it
+would turn a fifteen-minute emergency into a permanent promotion and make every other
+control here decoration.
+
+**And it is not a bypass of the second signature.** Elevation clears the *role* check and
+leaves the approval requirement standing: an emergency is a reason to let somebody act, not
+a reason to remove the second pair of eyes.
+
+**Two bugs found while wiring it:**
+
+- **`approvalId` in the request body changed the body hash**, so the body-carried form of
+  the approval could never match and only the header worked. It is metadata *about* the
+  authorisation, not part of what is authorised, and is now stripped before hashing.
+- **The confirmation-name check ran after the approval gate**, so a mistyped name would
+  have been sent to a second operator to approve before being refused.
+
+**387 backend tests pass**, including three existing suites updated to go through the new
+flow — a test that deletes a tenant directly is now testing a path that does not exist.
 
 ## Tier 4 — engineering hygiene
 

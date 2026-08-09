@@ -105,6 +105,60 @@ async function registerOrg() {
   return { token: body.token, org: body.organisation, email };
 }
 
+
+/**
+ * Deletes a tenant through the two-person approval flow (3.4 #12).
+ *
+ * Tenant deletion is the one action in the console that is both irreversible and
+ * total, so it now needs a second operator. A test that deletes directly is
+ * testing a path that no longer exists.
+ */
+async function deleteOrgWithApproval(token, orgId, body = {}) {
+  const asked = await call('DELETE', `/superadmin/organisations/${orgId}`, {
+    token,
+    body: { ...body, reason: 'Automated test exercising the tenant deletion cascade' }
+  });
+  // A refusal on the request's own merits (a mismatched confirmation name, a
+  // missing tenant) comes back here, before anyone is asked to approve it.
+  if (asked.status !== 202) return asked;
+
+  const approver = await secondApprover();
+  const decided = await call('POST', `/superadmin/approvals/${asked.body.approvalId}/decide`, {
+    token: approver, body: { approve: true, note: 'Approved by the test harness' }
+  });
+  assert.equal(decided.status, 200, `approval failed: ${JSON.stringify(decided.body)}`);
+
+  // Carried in the body rather than the header, because not every test harness
+  // in this repo passes headers — and the middleware accepts both.
+  return call('DELETE', `/superadmin/organisations/${orgId}`, {
+    token,
+    body: {
+      ...body,
+      reason: 'Automated test exercising the tenant deletion cascade',
+      approvalId: String(asked.body.approvalId)
+    }
+  });
+}
+
+/** A *different* platform owner, since nobody may approve their own request. */
+async function secondApprover() {
+  const bcrypt = require('bcryptjs');
+  const email = 'platform-approver@klogubizz.test';
+  if (!await User.findOne({ email })) {
+    await User.create({
+      name: 'Platform Approver',
+      email,
+      passwordHash: await bcrypt.hash('Password@123', 12),
+      role: 'superadmin',
+      platformRole: 'owner',
+      status: 'active'
+    });
+  }
+  const login = await call('POST', '/auth/login', { body: { email, password: 'Password@123' } });
+  assert.equal(login.status, 200, `approver login failed: ${JSON.stringify(login.body)}`);
+  return login.body.token;
+}
+
 async function superadminToken() {
   const email = `platform-owner@klogubizz.test`;
   const existing = await User.findOne({ email });
@@ -449,11 +503,8 @@ test('deleting a tenant removes every one of its collections but keeps the audit
   assert.ok(await CreditNote.countDocuments({ orgId }) > 0, 'precondition: the credit note exists');
   assert.ok(await ReminderLog.countDocuments({ orgId }) > 0, 'precondition: the reminder log exists');
 
-  const deleted = await call('DELETE', `/superadmin/organisations/${orgId}`, {
-    token,
-    body: { confirmName: a.org.name }
-  });
-  assert.equal(deleted.status, 204);
+  const deleted = await deleteOrgWithApproval(token, orgId, { confirmName: a.org.name });
+  assert.equal(deleted.status, 204, JSON.stringify(deleted.body));
 
   // Items, credit notes and reminder logs were the three the cascade missed —
   // they used to be orphaned forever, pointing at an organisation that was gone.
@@ -472,10 +523,8 @@ test('deleting a tenant removes every one of its collections but keeps the audit
 test('deleting a tenant refuses a mismatched confirmation name', maybe(async () => {
   const a = await registerOrg();
   const token = await superadminToken();
-  const result = await call('DELETE', `/superadmin/organisations/${a.org._id}`, {
-    token,
-    body: { confirmName: 'Some Other Tenant' }
-  });
+  const result = await deleteOrgWithApproval(token, a.org._id, { confirmName: 'Some Other Tenant' });
+  // Refused on its own merits, *before* a second person is asked to look at it.
   assert.equal(result.status, 400);
   assert.equal(result.body.code, 'CONFIRMATION_MISMATCH');
   assert.equal(await Organisation.countDocuments({ _id: a.org._id }), 1, 'the tenant survives');
