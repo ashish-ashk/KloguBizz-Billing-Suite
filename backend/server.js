@@ -150,6 +150,7 @@ app.use('/api/v1/reports', require('./src/routes/reportRoutes'));
 // Purchases, vendors and the ITC register — the inward half of the ledger,
 // without which there is no input tax credit and no net GST liability.
 app.use('/api/v1/purchases', require('./src/routes/purchaseRoutes'));
+app.use('/api/v1/expenses', require('./src/routes/expenseRoutes'));
 app.use('/api/v1/superadmin', require('./src/routes/superadminRoutes'));
 app.use('/api/v1/webhooks/razorpay', require('./src/routes/razorpayWebhookRoutes'));
 // SendGrid delivery events (bounces, complaints, opens). Authenticated by a shared

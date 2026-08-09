@@ -26,6 +26,8 @@ const { Item } = require('../src/models/Item');
 const { StockMovement } = require('../src/models/StockMovement');
 const { StockLayer } = require('../src/models/StockLayer');
 const { EmailLog } = require('../src/models/EmailLog');
+const { Master } = require('../src/models/Settings');
+const { invalidateMasterCache } = require('../src/services/masterService');
 const stock = require('../src/services/stockService');
 
 let server;
@@ -767,6 +769,337 @@ test('two tenants may use the same barcode', maybe(async () => {
 
   const found = await call('GET', '/items/barcode/5012345678900', { token: second.token });
   assert.equal(String(found.body._id), String(b._id), 'and a scan resolves within the scanning tenant only');
+}));
+
+// ── Profit & loss (2.4 #32) ──────────────────────
+
+/**
+ * A tenant with the chart of accounts seeded, since `assertValidMaster` is
+ * permissive when a list is empty and half these tests are about what happens
+ * when it is not.
+ */
+async function withExpenseCategories() {
+  await Master.deleteMany({ type: 'expenseCategory' });
+  await Master.create([
+    { type: 'expenseCategory', code: 'salaries', label: 'Salaries & wages', active: true, sortOrder: 0 },
+    { type: 'expenseCategory', code: 'rent', label: 'Rent', active: true, sortOrder: 1 },
+    { type: 'expenseCategory', code: 'freight', label: 'Freight & transport', active: true, sortOrder: 2 },
+    { type: 'expenseCategory', code: 'other', label: 'Other expenses', active: true, sortOrder: 3 }
+  ]);
+  invalidateMasterCache('expenseCategory');
+}
+
+async function pl(token, query = '') {
+  const { status, body } = await call('GET', `/expenses/profit-loss${query}`, { token });
+  assert.equal(status, 200, JSON.stringify(body));
+  return body;
+}
+
+test('buying stock is not an expense — it becomes one when the stock sells', maybe(async () => {
+  const tenant = await registerOrg();
+  const client = await createClient(tenant.token);
+  const item = await createItem(tenant.token, { stockQty: 0, purchasePrice: 0, sellingPrice: 500 });
+  const vendor = await createVendor(tenant.token);
+
+  // 100 units at 200 = 20,000 of stock bought.
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Steel Rod', hsn: '7213', qty: 100, rate: 200, gstRate: 18 }
+  ], { billDate: '2026-06-01' });
+
+  const beforeSale = await pl(tenant.token, '?from=2026-04-01&to=2027-03-31');
+  /**
+   * The whole point of this report.
+   *
+   * The obvious implementation — "revenue minus purchases" — reports a 20,000
+   * loss here. Nothing has been consumed: cash became goods on a shelf. A
+   * business that stocked up would see a loss it did not make, then a wildly
+   * overstated profit in the month it sold.
+   */
+  assert.equal(beforeSale.totalExpenses, 0, 'stock on the shelf is not an expense');
+  // And no zero-value row for the bill that became stock in full — a statement
+  // padded with empty lines invites the reader to wonder what is missing.
+  assert.equal(beforeSale.expenses.length, 0);
+  assert.equal(beforeSale.netProfit, 0);
+  assert.equal(beforeSale.excluded.inventoryPurchases, 20000, 'and the report says where it went');
+
+  // Sell 40 of them for 500 each.
+  await createInvoice(tenant.token, {
+    clientId: client._id,
+    date: '2026-06-20',
+    items: [{ desc: 'Steel Rod', hsn: '7213', qty: 40, rate: 500, gstRate: 18 }]
+  });
+
+  const after = await pl(tenant.token, '?from=2026-04-01&to=2027-03-31');
+  assert.equal(after.revenue.net, 20000, '40 x 500, taxable value');
+  assert.equal(after.costOfGoodsSold.total, 8000, '40 x 200 — only what left the shelf');
+  assert.equal(after.grossProfit, 12000);
+  // Still zero: the other 60 units are stock, not cost.
+  assert.equal(after.totalExpenses, 0, 'the unsold 60 are still an asset');
+  assert.equal(after.netProfit, 12000);
+  assert.ok(item._id);
+}));
+
+test('GST is neither revenue nor cost', maybe(async () => {
+  const tenant = await registerOrg();
+  const client = await createClient(tenant.token);
+  await createItem(tenant.token, { stockQty: 0, purchasePrice: 0 });
+
+  await createInvoice(tenant.token, {
+    clientId: client._id,
+    date: '2026-06-20',
+    items: [{ desc: 'Consulting', hsn: '998311', qty: 1, rate: 10000, gstRate: 18 }]
+  });
+
+  const report = await pl(tenant.token, '?from=2026-04-01&to=2027-03-31');
+  // Charged 11,800 and earned 10,000. The 1,800 is collected on the
+  // government's behalf and owed to it — booking it as revenue would overstate
+  // income by the tax rate and make every margin wrong.
+  assert.equal(report.revenue.net, 10000);
+  assert.equal(report.revenue.taxCollected, 1800, 'shown, so nobody mistakes revenue for money in');
+}));
+
+test('a credit note reduces revenue', maybe(async () => {
+  const tenant = await registerOrg();
+  const client = await createClient(tenant.token);
+  const invoice = await createInvoice(tenant.token, {
+    clientId: client._id,
+    date: '2026-06-10',
+    items: [{ desc: 'Consulting', hsn: '998311', qty: 1, rate: 10000, gstRate: 18 }]
+  });
+  await call('POST', '/credit-notes', {
+    token: tenant.token,
+    body: {
+      invoiceId: invoice._id,
+      date: '2026-06-15',
+      reason: 'post-sale-discount',
+      items: [{ desc: 'Consulting', hsn: '998311', qty: 1, rate: 2500, gstRate: 18 }]
+    }
+  });
+
+  const report = await pl(tenant.token, '?from=2026-04-01&to=2027-03-31');
+  assert.equal(report.revenue.gross, 10000);
+  // No other invoice-side report nets these — the GST summary deliberately does
+  // not, because a return reports them in their own table. A P&L that ignored
+  // them would overstate revenue by every discount and return ever given.
+  assert.equal(report.revenue.creditNotes, 2500);
+  assert.equal(report.revenue.net, 7500);
+  assert.equal(report.revenue.creditsByReason[0].reason, 'post-sale-discount');
+}));
+
+test('a purchase that never became stock is an expense straight away', maybe(async () => {
+  const tenant = await registerOrg();
+  await withExpenseCategories();
+  const vendor = await createVendor(tenant.token);
+
+  // Nothing in the catalogue matches this line, so it moved no stock — it was
+  // consumed, not stored.
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Courier charges for June', hsn: '996812', qty: 1, rate: 4000, gstRate: 18 }
+  ], { billDate: '2026-06-05', category: 'freight' });
+
+  const report = await pl(tenant.token, '?from=2026-04-01&to=2027-03-31');
+  assert.equal(report.totalExpenses, 4000);
+  // Named, not coded. The document stores the master's `code`; the statement
+  // renders its `label`. Getting that backwards put "salaries" on a statement
+  // beside "Salaries & wages" as two separate lines for the same thing.
+  const line = report.expenses.find(e => e.category === 'Freight & transport');
+  assert.equal(line.amount, 4000);
+  assert.equal(line.source, 'purchases');
+  assert.equal(report.excluded.inventoryPurchases, 0);
+}));
+
+test('one bill part stock and part expense is split, not counted twice', maybe(async () => {
+  const tenant = await registerOrg();
+  await withExpenseCategories();
+  await createItem(tenant.token, { stockQty: 0, purchasePrice: 0 });
+  const vendor = await createVendor(tenant.token);
+
+  await purchase(tenant.token, vendor._id, [
+    // Matches the catalogue: becomes stock.
+    { desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 200, gstRate: 18 },
+    // Does not: consumed now.
+    { desc: 'Delivery to site', hsn: '996812', qty: 1, rate: 1500, gstRate: 18 }
+  ], { billDate: '2026-06-05', category: 'freight' });
+
+  const report = await pl(tenant.token, '?from=2026-04-01&to=2027-03-31');
+  // 2,000 of the 3,500 bill went on the shelf; only the 1,500 was consumed.
+  // Charging the whole bill would double-count the rods against COGS later.
+  assert.equal(report.excluded.inventoryPurchases, 2000);
+  assert.equal(report.totalExpenses, 1500);
+}));
+
+test('capital goods are excluded from expenses and reported as excluded', maybe(async () => {
+  const tenant = await registerOrg();
+  await withExpenseCategories();
+  const vendor = await createVendor(tenant.token);
+
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Lathe machine', hsn: '8458', qty: 1, rate: 250000, gstRate: 18 }
+  ], { billDate: '2026-06-05', itcCategory: 'capital-goods', category: 'other' });
+
+  const report = await pl(tenant.token, '?from=2026-04-01&to=2027-03-31');
+  // A machine used for years is not one year's expense. The correct treatment is
+  // depreciation, which needs an asset register this product does not have — so
+  // it is left out *and said to be left out*, rather than silently either way.
+  assert.equal(report.totalExpenses, 0);
+  assert.equal(report.excluded.capitalGoods, 250000);
+}));
+
+test('input tax that cannot be claimed is a real expense', maybe(async () => {
+  const tenant = await registerOrg();
+  await withExpenseCategories();
+  const vendor = await createVendor(tenant.token);
+
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Client entertainment', hsn: '996331', qty: 1, rate: 10000, gstRate: 18 }
+  ], { billDate: '2026-06-05', itcCategory: 'blocked', category: 'other' });
+
+  const report = await pl(tenant.token, '?from=2026-04-01&to=2027-03-31');
+  // Section 17(5): the tax was paid and cannot be recovered, so it is money gone
+  // rather than an asset. Dropping it would understate the true cost by 18%.
+  const taxLine = report.expenses.find(e => e.category === 'Input tax not claimable');
+  assert.ok(taxLine, 'blocked input tax must appear as its own line');
+  assert.equal(taxLine.amount, 1800);
+  assert.equal(report.totalExpenses, 11800, 'the cost plus the tax on it');
+}));
+
+test('salaries can be recorded at all, and land in the P&L', maybe(async () => {
+  const tenant = await registerOrg();
+  await withExpenseCategories();
+
+  const created = await call('POST', '/expenses', {
+    token: tenant.token,
+    body: { date: '2026-06-30', category: 'salaries', description: 'June payroll', amount: 185000, paymentMethod: 'Bank Transfer' }
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+
+  const report = await pl(tenant.token, '?from=2026-04-01&to=2027-03-31');
+  // The largest expense most businesses have, and it had no home in the data
+  // model at all: payroll has no vendor and no bill number, so it cannot be a
+  // Purchase. A profit figure without it is wrong in the flattering direction.
+  const line = report.expenses.find(e => e.category === 'Salaries & wages');
+  assert.equal(line.amount, 185000);
+  assert.equal(line.source, 'expenses');
+  assert.equal(report.netProfit, -185000);
+}));
+
+test('an expense category outside the chart of accounts is refused', maybe(async () => {
+  const tenant = await registerOrg();
+  await withExpenseCategories();
+
+  const bad = await call('POST', '/expenses', {
+    token: tenant.token,
+    body: { date: '2026-06-30', category: 'Frieght', description: 'Typo', amount: 100 }
+  });
+  // Without this a tenant's own accounts grow "Freight", "freight " and
+  // "Frieght" as three separate lines, and nobody notices until the P&L is
+  // unreadable.
+  assert.equal(bad.status, 400);
+  assert.equal(bad.body.code, 'INVALID_MASTER_VALUE');
+}));
+
+test('stock written off is an expense, and kept apart from cost of sales', maybe(async () => {
+  const tenant = await registerOrg();
+  const item = await createItem(tenant.token, { stockQty: 0, purchasePrice: 0 });
+  const vendor = await createVendor(tenant.token);
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 200, gstRate: 18 }
+  ], { billDate: '2026-06-01' });
+
+  await call('POST', `/reports/stock/${item._id}/adjust`, {
+    token: tenant.token,
+    body: { quantity: -3, reason: 'damage', note: 'Three bent in the crate' }
+  });
+
+  const report = await pl(tenant.token, '?from=2026-04-01&to=2027-03-31');
+  const line = report.expenses.find(e => e.category === 'Stock damaged or written off');
+  assert.equal(line.amount, 600, '3 x 200');
+  // Deliberately not folded into cost of sales: shrinkage is the number a
+  // business most wants to see on its own, and burying it in COGS hides it.
+  assert.equal(report.costOfGoodsSold.total, 0);
+}));
+
+test('the period is respected on both sides', maybe(async () => {
+  const tenant = await registerOrg();
+  await withExpenseCategories();
+  const client = await createClient(tenant.token);
+
+  await createInvoice(tenant.token, {
+    clientId: client._id, date: '2026-05-10',
+    items: [{ desc: 'Consulting', hsn: '998311', qty: 1, rate: 5000, gstRate: 18 }]
+  });
+  await createInvoice(tenant.token, {
+    clientId: client._id, date: '2026-09-10', dueDate: '2026-10-10',
+    items: [{ desc: 'Consulting', hsn: '998311', qty: 1, rate: 7000, gstRate: 18 }]
+  });
+  await call('POST', '/expenses', {
+    token: tenant.token,
+    body: { date: '2026-05-20', category: 'rent', description: 'May rent', amount: 2000 }
+  });
+  await call('POST', '/expenses', {
+    token: tenant.token,
+    body: { date: '2026-09-20', category: 'rent', description: 'September rent', amount: 3000 }
+  });
+
+  const q1 = await pl(tenant.token, '?from=2026-04-01&to=2026-06-30');
+  assert.equal(q1.revenue.net, 5000);
+  assert.equal(q1.totalExpenses, 2000);
+  assert.equal(q1.netProfit, 3000);
+
+  const year = await pl(tenant.token, '?fy=2026');
+  assert.equal(year.revenue.net, 12000);
+  assert.equal(year.totalExpenses, 5000);
+  assert.equal(year.netProfit, 7000);
+  assert.equal(year.period.label, 'FY2026-27');
+}));
+
+test('margins are null rather than zero when nothing was earned', maybe(async () => {
+  const tenant = await registerOrg();
+  await withExpenseCategories();
+  await call('POST', '/expenses', {
+    token: tenant.token,
+    body: { date: '2026-06-30', category: 'rent', description: 'Rent before trading started', amount: 5000 }
+  });
+
+  const report = await pl(tenant.token, '?from=2026-04-01&to=2027-03-31');
+  assert.equal(report.revenue.net, 0);
+  // A margin on no revenue is undefined, not 0% — reporting 0% would read as
+  // "we sold things and made nothing", which is a different and wrong story.
+  assert.equal(report.grossMargin, null);
+  assert.equal(report.netMargin, null);
+  assert.equal(report.netProfit, -5000);
+}));
+
+test('a deleted expense stops counting but can be brought back', maybe(async () => {
+  const tenant = await registerOrg();
+  await withExpenseCategories();
+  const created = await call('POST', '/expenses', {
+    token: tenant.token,
+    body: { date: '2026-06-30', category: 'rent', description: 'June rent', amount: 9000 }
+  });
+  assert.equal((await pl(tenant.token, '?fy=2026')).totalExpenses, 9000);
+
+  await call('DELETE', `/expenses/${created.body._id}`, { token: tenant.token });
+  assert.equal((await pl(tenant.token, '?fy=2026')).totalExpenses, 0);
+
+  // Soft, because a period's profit may already have been reported on it.
+  const restored = await call('POST', `/expenses/${created.body._id}/restore`, { token: tenant.token });
+  assert.equal(restored.status, 200);
+  assert.equal((await pl(tenant.token, '?fy=2026')).totalExpenses, 9000);
+}));
+
+test('one tenant never sees another tenant costs', maybe(async () => {
+  const first = await registerOrg();
+  const second = await registerOrg();
+  await withExpenseCategories();
+  await call('POST', '/expenses', {
+    token: first.token,
+    body: { date: '2026-06-30', category: 'rent', description: 'Their rent', amount: 50000 }
+  });
+
+  const mine = await pl(second.token, '?fy=2026');
+  assert.equal(mine.totalExpenses, 0);
+  assert.equal(mine.netProfit, 0);
 }));
 
 // ── Receivables (2.4 #28, #29, #33) ──────────────

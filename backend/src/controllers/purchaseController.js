@@ -12,6 +12,7 @@ const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
 const { streamCsv } = require('../services/csvService');
 const { notDeleted, scopeFilter, deletionPatch, RESTORE_PATCH } = require('../utils/softDelete');
 const { recordEvent, EVENT } = require('../services/usageEventService');
+const { assertValidMaster } = require('../services/masterService');
 const stock = require('../services/stockService');
 
 /**
@@ -236,6 +237,17 @@ const createPurchase = asyncHandler(async (req, res) => {
   const body = pickFields(req.body, [...PURCHASE_FIELDS, 'itcCategory', 'itcNote']);
   const vendor = await Vendor.findOne({ _id: body.vendorId, ...notDeleted(req) });
   if (!vendor) throw httpError(400, 'A valid vendor is required');
+
+  /**
+   * The bill's expense category, checked against the same master the P&L groups
+   * by (2.4 #32).
+   *
+   * `category` has been on this model since it was written and **nothing ever
+   * read it** — a free-text field with no list behind it, which is how a tenant
+   * ends up with "Freight", "freight " and "Frieght" as three lines of their own
+   * accounts. Now that the P&L groups by it, it has to mean something.
+   */
+  await assertValidMaster('expenseCategory', body.category, 'Expense category');
 
   const totals = await totalsForPurchase(req, body, vendor);
   const itc = computeItc(totals, body);

@@ -72,4 +72,35 @@ async function listMasterValues(type) {
   return labels;
 }
 
-module.exports = { assertValidMaster, invalidateMasterCache, listMasterValues };
+/**
+ * The same list, but as `{ value, label }` pairs.
+ *
+ * `listMasterValues` returns `code || label` — the thing `assertValidMaster`
+ * checks against — which is fine where the two are the same word ("Nos", "UPI")
+ * and wrong where they are not. Expense categories deliberately have short
+ * machine codes and readable names, and rendering the code in a dropdown both
+ * looks broken and produces real damage: a user picking "salaries" files against
+ * a different string than one who typed "Salaries & wages" before the list was
+ * configured, and the P&L grows two lines for the same thing. That happened.
+ *
+ * So a caller that renders a dropdown uses this, submits `value`, and shows
+ * `label`.
+ */
+async function listMasterOptions(type) {
+  const docs = await Master.find({ type, active: { $ne: false } }).sort({ sortOrder: 1 }).lean();
+  return docs
+    .map(doc => ({
+      value: type === 'gstRate' ? Number(doc.rate) : (doc.code || doc.label),
+      label: doc.label || doc.code || '',
+      description: doc.description || ''
+    }))
+    .filter(option => option.value !== undefined && option.value !== null && option.value !== '');
+}
+
+/** Maps stored values back to their human labels, for display in a report. */
+async function labelsByValue(type) {
+  const options = await listMasterOptions(type);
+  return new Map(options.map(option => [String(option.value), option.label]));
+}
+
+module.exports = { assertValidMaster, invalidateMasterCache, listMasterValues, listMasterOptions, labelsByValue };

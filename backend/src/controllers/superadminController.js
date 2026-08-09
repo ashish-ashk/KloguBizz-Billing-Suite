@@ -332,7 +332,7 @@ const listMasters = asyncHandler(async (req, res) => {
   res.json({ reminders, masters: grouped });
 });
 
-const MASTER_TYPES = ['gstRate', 'hsn', 'paymentMethod', 'unit'];
+const MASTER_TYPES = ['gstRate', 'hsn', 'paymentMethod', 'unit', 'expenseCategory'];
 
 /**
  * Saves the full list of masters for one type.

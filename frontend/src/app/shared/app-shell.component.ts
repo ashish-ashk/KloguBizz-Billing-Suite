@@ -70,6 +70,7 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
             <a routerLink="/payments" routerLinkActive="active" title="Payments"><span class="nav-icon"><app-icon name="creditCard" /></span><span class="nav-label">Payments</span></a>
             <a routerLink="/purchases" routerLinkActive="active" title="Purchases"><span class="nav-icon"><app-icon name="inbox" /></span><span class="nav-label">Purchases</span></a>
             <a routerLink="/receivables" routerLinkActive="active" title="Receivables"><span class="nav-icon"><app-icon name="clock" /></span><span class="nav-label">Receivables</span></a>
+            <a routerLink="/profit-loss" routerLinkActive="active" title="Profit &amp; Loss"><span class="nav-icon"><app-icon name="rupee" /></span><span class="nav-label">Profit &amp; Loss</span></a>
             <a routerLink="/reports" routerLinkActive="active" title="Reports"><span class="nav-icon"><app-icon name="chart" /></span><span class="nav-label">Reports</span></a>
             <a routerLink="/gst-returns" routerLinkActive="active" title="GST Returns"><span class="nav-icon"><app-icon name="percent" /></span><span class="nav-label">GST Returns</span></a>
             <a routerLink="/users" routerLinkActive="active" title="Users &amp; Roles"><span class="nav-icon"><app-icon name="shieldUser" /></span><span class="nav-label">Users &amp; Roles</span></a>
@@ -278,6 +279,8 @@ export class AppShellComponent {
       { label: 'Payments', route: '/payments', icon: 'creditCard' },
       { label: 'Purchases', route: '/purchases', icon: 'inbox' },
       { label: 'Receivables', route: '/receivables', icon: 'clock' },
+      { label: 'Profit & Loss', route: '/profit-loss', icon: 'rupee' },
+      { label: 'Expenses', route: '/profit-loss', icon: 'rupee' },
       { label: 'Reports', route: '/reports', icon: 'chart' },
       { label: 'GST Returns', route: '/gst-returns', icon: 'percent' },
       { label: 'Security & Privacy', route: '/security', icon: 'lock' },

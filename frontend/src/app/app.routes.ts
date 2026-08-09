@@ -39,6 +39,7 @@ export const routes: Routes = [
       { path: 'clients', loadComponent: () => import('./features/clients/clients.component').then(m => m.ClientsComponent) },
       { path: 'items', loadComponent: () => import('./features/items/items.component').then(m => m.ItemsComponent) },
       { path: 'inventory', loadComponent: () => import('./features/inventory/inventory.component').then(m => m.InventoryComponent) },
+      { path: 'profit-loss', loadComponent: () => import('./features/profit-loss/profit-loss.component').then(m => m.ProfitLossComponent) },
       { path: 'payments', loadComponent: () => import('./features/payments/payments.component').then(m => m.PaymentsComponent) },
       { path: 'reports', loadComponent: () => import('./features/reports/reports.component').then(m => m.ReportsComponent) },
       // Phase 5: the section-wise return, which is what can actually be filed.

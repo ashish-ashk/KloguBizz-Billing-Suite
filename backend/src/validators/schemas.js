@@ -417,6 +417,24 @@ const userUpdateSchema = z.object({
 
 // ── Organisation ─────────────────────────────────
 
+/**
+ * A cost with no vendor bill (2.4 #32).
+ *
+ * No tax fields, deliberately: anything carrying claimable GST is a `Purchase`,
+ * and that rule is what keeps the returns reading from one place.
+ */
+const expenseCreateSchema = z.object({
+  date: isoDate,
+  category: shortText.min(1, 'is required'),
+  description: shortText.min(1, 'is required'),
+  amount: money.refine(value => value > 0, 'must be greater than zero'),
+  paymentMethod: shortText.optional().nullable(),
+  reference: shortText.optional().nullable(),
+  paidTo: shortText.optional().nullable(),
+  notes: longText.optional().nullable()
+});
+const expenseUpdateSchema = expenseCreateSchema.partial();
+
 /** The tenant's stock valuation policy. */
 const inventorySettingsSchema = z.object({
   valuationMethod: z.enum(['fifo', 'weighted-average']).optional(),
@@ -553,6 +571,7 @@ module.exports = {
   TAX_TREATMENTS, SUPPLY_TYPES,
   vendorCreateSchema, vendorUpdateSchema,
   stockAdjustSchema, inventorySettingsSchema,
+  expenseCreateSchema, expenseUpdateSchema,
   purchaseCreateSchema, purchaseUpdateSchema, purchasePaySchema,
   mfaEnableSchema, mfaVerifySchema, mfaDisableSchema,
   verifyEmailSchema, accountDeletionSchema,

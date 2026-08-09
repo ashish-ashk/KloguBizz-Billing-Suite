@@ -1162,11 +1162,77 @@ Doing them before valuation would have meant designing the layer model twice. Th
 now obvious: `StockLayer` and `StockMovement` each take a `locationId`, consumption filters
 on it, and a transfer becomes a paired movement out and in.
 
-### 8. P&L and expense reporting (2.4 #32)
+### 8. P&L and expense reporting (2.4 #32) - **DONE (2026-08-07)**
 
-**How:** purchases exist now, so this is finally computable. It needs an expense-category
-master and a chart-of-accounts-lite: revenue from invoices, costs from purchases, grouped
-by period.
+**The plan's premise was wrong.** It said "purchases exist now, so this is finally
+computable". Purchases were never the missing piece — **cost of goods sold** was, and that
+did not exist until cost layers shipped in #7. The obvious implementation, "revenue from
+invoices minus costs from purchases", is not merely imprecise; it is wrong in a way that
+looks entirely reasonable until someone acts on it.
+
+**Buying stock is not an expense.** It converts cash into goods on a shelf. Nothing has
+been consumed and no profit has moved. The cost becomes an expense when the goods *sell*,
+matched against the revenue they earned. Count the purchase instead and two errors partly
+hide each other: a month spent stocking up shows a loss the business did not make, and the
+month it sells that stock shows a profit far larger than it earned. Count *both* the
+purchase and the cost of goods sold, and every inventory item is charged twice.
+
+So there are two cost sources and nothing appears in both. COGS comes from the stock
+ledger — what actually left the shelf, at what the layers say it cost. Operating expenses
+are costs that never became stock. **And the split is not a judgement the user has to
+make**: a purchase line either created a cost layer or it did not, and layers record which
+purchase they came from, so the inventory portion of every bill is a fact already on file.
+A single bill covering rods and the freight to deliver them is split automatically.
+
+**A second cost document, because `Purchase` cannot hold most spending.** It requires a
+vendor and a bill number, uniquely indexed so the same input tax credit cannot be claimed
+twice — correct for what it models, and it makes salaries impossible to record. Salaries
+are the largest expense most businesses have, and a profit figure that omits them is wrong
+in the flattering direction. The rule dividing the two is one line: **a `Purchase` may
+carry input tax credit; an `Expense` never does.** That keeps the GST returns reading from
+one place and means `Expense` needs no tax fields at all.
+
+**What is excluded, and shown to be excluded, on the report itself:**
+
+| Excluded | Why |
+|---|---|
+| Purchases that became stock | Not consumed yet. Appears later as COGS |
+| Capital goods | An asset used for years. The expense is depreciation, which needs an asset register this product does not have — so it is left out *and said to be*, rather than silently either way |
+| GST charged to customers | Collected on the government's behalf and owed to it. Never revenue |
+| Money not yet received | Accrual: an invoice is revenue when issued. Receivables answers the cash question |
+
+Input tax that *cannot* be claimed goes the other way — section 17(5) blocked items are
+money genuinely gone, so they get their own expense line rather than being quietly dropped.
+Credit notes reduce revenue, which **no other invoice-side report does**: the GST summary
+deliberately does not net them because a return reports them in their own table, but a P&L
+that ignores them overstates revenue by every discount and return ever given.
+
+**Two bugs found by driving the real page:**
+
+- **A dropdown with nothing in it.** `assertValidMaster` is deliberately permissive when a
+  master list is empty, so the API accepts any category — but the UI offered a `<select>`
+  with no options and the form simply could not be submitted, with nothing on screen
+  saying why. It now falls back to free text, matching the server's actual contract rather
+  than being stricter than the API. Same species as the "Not available yet" MFA dead end.
+- **Machine codes rendered as labels.** `listMasterValues` returns `code || label` — fine
+  where they are the same word ("Nos", "UPI"), wrong for expense categories, which
+  deliberately have short codes and readable names. The dropdown offered `bank-charges`,
+  and a statement grew `salaries` beside `Salaries & wages` as two lines for the same
+  thing. New `listMasterOptions` returns `{value, label}` pairs; the statement resolves
+  codes back to names.
+
+**Migration 009** seeds fifteen standard Indian SMB expense heads, salaries first. Without
+it the permissive-when-empty rule would let a tenant's own accounts grow "Rent", "rent" and
+"Office Rent" within a month. Idempotent, and an operator's decision to reorder or
+deactivate a category survives a re-run — verified.
+
+**337 backend tests pass**, including one for each way the double-count could creep back
+in. Verified in a real browser end to end: the statement, the excluded-items explanation,
+recording an expense and watching the profit figure move.
+
+**Still missing, stated rather than buried:** depreciation (needs an asset register), and
+a purchase-side debit note — there is no mirror of `CreditNote` for goods returned to a
+supplier, so those cannot be netted off costs.
 
 ## Tier 3 — platform and billing (Part 3.3, 3.5, 3.4)
 

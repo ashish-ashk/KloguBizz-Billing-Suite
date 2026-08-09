@@ -1010,6 +1010,57 @@ export interface ExpiringStockReport {
   }>;
 }
 
+export interface Expense {
+  _id: string;
+  date: string;
+  category: string;
+  description: string;
+  amount: number;
+  paymentMethod?: string;
+  reference?: string;
+  paidTo?: string;
+  notes?: string;
+  createdAt?: string;
+}
+
+/** A master list entry: `value` is what validation checks, `label` is what a
+ *  person reads. Rendering the value in a dropdown looks broken and lets two
+ *  spellings of the same category into the accounts. */
+export interface MasterOption {
+  value: string;
+  label: string;
+  description?: string;
+}
+
+export interface ProfitLossReport {
+  period: { from: string; to: string; label?: string };
+  /** Revenue when invoiced and costs when incurred, regardless of what has been
+   *  paid — what Indian businesses file on, and what makes periods comparable. */
+  basis: 'accrual';
+  revenue: {
+    gross: number;
+    creditNotes: number;
+    net: number;
+    invoices: number;
+    /** Collected on the government's behalf. Shown so nobody mistakes the
+     *  revenue line for the money that came in. */
+    taxCollected: number;
+    creditsByReason: Array<{ reason: string; amount: number; count: number }>;
+  };
+  costOfGoodsSold: { total: number; sold: number; returned: number };
+  grossProfit: number;
+  /** Null rather than zero when nothing was sold — a margin on no revenue is
+   *  undefined, and 0% would read as "we sold things and made nothing". */
+  grossMargin: number | null;
+  expenses: Array<{ category: string; amount: number; count: number; source: string }>;
+  totalExpenses: number;
+  netProfit: number;
+  netMargin: number | null;
+  /** What was left out and why, on the report rather than in documentation — a
+   *  figure nobody can reconcile to their own records is not trusted. */
+  excluded: { inventoryPurchases: number; capitalGoods: number };
+}
+
 export interface StockLayerRow {
   _id: string;
   unitCost: number;

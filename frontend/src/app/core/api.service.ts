@@ -18,6 +18,7 @@ import {
   Subscription, SuperOverview, SystemHealth, TenantDetail, TenantNotice, Vendor,
   ArAgeing, CollectionMetrics, CustomerStatement, LowStockReport, SalesBreakdown,
   StockValuationReport, ExpiringStockReport, StockLayerRow,
+  Expense, ProfitLossReport, MasterOption,
   StockMovement, TenantActivityEntry
 } from './models';
 
@@ -41,6 +42,7 @@ const NS = {
   reports: 'reports',
   vendors: 'vendors',
   purchases: 'purchases',
+  expenses: 'expenses',
   superadmin: 'superadmin'
 } as const;
 
@@ -613,6 +615,40 @@ export class ApiService {
    */
   itemByBarcode(barcode: string) {
     return this.http.get<Item>(`${this.api}/items/barcode/${encodeURIComponent(barcode)}`);
+  }
+
+  // ── Expenses and profit & loss (2.4 #32) ─────
+
+  expenses(params: ListParams = {}) {
+    return this.list<Expense>(NS.expenses, '/expenses', params);
+  }
+  expenseCategories() {
+    return this.cache.through(
+      `${NS.expenses}:categories`,
+      () => this.http.get<{ categories: MasterOption[] }>(`${this.api}/expenses/categories`)
+    );
+  }
+  createExpense(payload: Partial<Expense>) {
+    // Invalidates reports too: a cost that does not move the profit figure the
+    // moment it is recorded looks like it was not saved.
+    return this.afterWrite(this.http.post<Expense>(`${this.api}/expenses`, payload), NS.expenses, NS.reports);
+  }
+  updateExpense(id: string, payload: Partial<Expense>) {
+    return this.afterWrite(this.http.put<Expense>(`${this.api}/expenses/${id}`, payload), NS.expenses, NS.reports);
+  }
+  deleteExpense(id: string) {
+    return this.afterWrite(this.http.delete<{ ok: boolean }>(`${this.api}/expenses/${id}`), NS.expenses, NS.reports);
+  }
+  profitLoss(params: { fy?: number; from?: string; to?: string } = {}) {
+    return this.cache.through(
+      this.key(`${NS.reports}:pl`, params),
+      () => this.http.get<ProfitLossReport>(`${this.api}/expenses/profit-loss`, { params: this.params(params) })
+    );
+  }
+  profitLossExcel(params: { fy?: number; from?: string; to?: string } = {}) {
+    return this.http.get(`${this.api}/expenses/profit-loss/export.xlsx`, {
+      params: this.params(params), responseType: 'blob'
+    });
   }
 
   // ── Tenant activity log (2.6 #50) ────────────

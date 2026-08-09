@@ -100,7 +100,10 @@ auditLogSchema.pre('save', function guardResave(next) {
 // Global master data managed by the super admin: GST rate slabs, HSN/SAC
 // codes, payment methods and units of measure. `type` discriminates the kind.
 const masterSchema = new mongoose.Schema({
-  type: { type: String, required: true, enum: ['gstRate', 'hsn', 'paymentMethod', 'unit'], index: true },
+  // `expenseCategory` is the P&L's chart of accounts (2.4 #32) — the lines a
+  // cost can land on. Kept a master rather than an enum so the list can change
+  // without a deploy.
+  type: { type: String, required: true, enum: ['gstRate', 'hsn', 'paymentMethod', 'unit', 'expenseCategory'], index: true },
   code: String,
   label: String,
   description: String,
