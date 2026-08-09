@@ -4,12 +4,14 @@
   "scripts": {
     "start": "ng serve --host 0.0.0.0 --port 4200",
     "build": "ng build",
-    "test": "ng test --watch=false",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --check \"src/**/*.{ts,html,css}\"",
     "format:write": "prettier --write \"src/**/*.{ts,html,css}\"",
-    "check": "npm run lint && ng build --configuration production"
+    "check": "npm run lint && npm run test && ng build --configuration production"
   },
   "private": true,
   "dependencies": {
@@ -30,11 +32,13 @@
     "@angular-devkit/build-angular": "^18.2.0",
     "@angular/cli": "^18.2.0",
     "@angular/compiler-cli": "^18.2.0",
+    "@playwright/test": "^1.62.1",
     "angular-eslint": "^18.4.3",
     "eslint": "^9.39.5",
     "prettier": "^3.9.6",
     "typescript": "~5.5.4",
-    "typescript-eslint": "^8.65.0"
+    "typescript-eslint": "^8.65.0",
+    "vitest": "^2.1.9"
   },
   "overrides": {
     "vite": "5.4.17",

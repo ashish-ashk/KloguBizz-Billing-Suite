@@ -1503,16 +1503,55 @@ flow — a test that deletes a tenant directly is now testing a path that does n
 
 ## Tier 4 — engineering hygiene
 
-### 13. Frontend tests (#59's frontend half)
+### 13. Frontend tests (#59's frontend half) - **DONE (2026-08-07)**
 
-**Why not yet:** no test runner is configured at all, so this is a tooling task before it is
-a test-writing one.
+**Vitest for logic, one Playwright test for the app, and deliberately nothing in between.**
 
-**How:** `ng add @angular/build:karma`, or Vitest with `@analogjs/vitest-angular`. Start
-where a bug is expensive and the code is pure logic: `core/server-list.ts` (the
-stale-response guard), `core/invoice-templates.ts` (`resolveTemplate` and the legacy id
-map), `core/format.ts` (`numberToWords`, GSTIN validation). Then one Playwright smoke test:
-register → invoice → PDF.
+The plan suggested Karma or Vitest. Vitest, and the reason is what actually needs testing.
+Karma runs a real browser, which is right for component tests — and components are not where
+this codebase's expensive bugs live. The ones that have cost time are in **pure logic**: a
+stale-response guard, a template id map, currency and GSTIN formatting. None of that needs a
+browser, and a suite that needs one is a suite slow enough to stop being run.
+
+**18 unit tests**, on the two modules where a fault is invisible and everywhere at once:
+
+- **`ServerList`** — every paginated list in the app runs through it. The stale-response
+  guard is the case that works perfectly on a fast connection and fails only for users on a
+  slow one: two requests in flight, the older one answers last, and the table shows results
+  for a query the user has already moved on from — with no error and no clue. Also covers a
+  *late failure* blanking a good page, backing off a page that emptied, and not recursing
+  when the last page is legitimately empty.
+- **`format`** — `numberToWords` prints on a tax invoice. It is a legal element of an Indian
+  invoice, and its edges (the lakh/crore grouping, the teens, paise rounding, a negative on
+  a credit note) are exactly where an off-by-one hides for years because nobody re-reads a
+  function that worked once on a round number.
+
+**And one end-to-end test, which is where the real failures were.** Every serious frontend
+bug this session was a *whole page* failure that a component test structurally cannot see:
+a login step that did not exist, a dropdown with no options that could not be submitted, a
+dialog that dismissed itself when the mouse moved toward its button, a form that silently
+sent a field the server had started refusing. Each component was individually fine; the app
+was broken.
+
+So `e2e/smoke.spec.ts` drives the path the business runs on — sign up, add a customer, raise
+an invoice, download the PDF — through the UI as a person would, including reaching the PDF
+through the row's overflow menu rather than shortcutting to the endpoint. It asserts on the
+**money**: 2 × ₹5,000 at 18% is ₹10,000 + ₹1,800 = ₹11,800, computed server-side from two
+state codes. Seeing that arithmetic on screen is proof the tax engine — the actual product —
+ran end to end. It also fails on any uncaught page error, which is what the white-screen bug
+would have tripped.
+
+**Verified by running it**, not by writing it: 14 seconds, green. It found two mistakes in
+its own assertions on the way (the invoice list shows totals, not line descriptions; the PDF
+lives in an overflow menu) — which is the point of running a test before trusting it.
+
+**One test, not a suite.** A broad end-to-end suite is slow, flaky for reasons unrelated to
+the code, and muted within a month — at which point it is worse than nothing, because its
+green tick is trusted and means nothing.
+
+**Not wired into `npm run check`** — it needs a running API and database, and a gate that
+fails on a laptop with nothing started is a gate people learn to skip. `npm run check` now
+runs lint + unit tests + production build; `npm run test:e2e` is the separate command.
 
 ### 14. OpenAPI (#63)
 

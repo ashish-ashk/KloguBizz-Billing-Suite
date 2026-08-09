@@ -36,3 +36,8 @@ testem.log
 # System files
 .DS_Store
 Thumbs.db
+
+# Playwright artefacts. Kept only on failure and regenerated every run — a
+# checked-in screenshot of a passing build is noise nobody opens.
+/test-results
+/playwright-report
