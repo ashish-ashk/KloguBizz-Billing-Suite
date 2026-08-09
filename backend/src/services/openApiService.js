@@ -181,6 +181,7 @@ function buildOpenApiDocument(app) {
   const paths = {};
   const schemas = {};
   const undocumented = [];
+  const validatedElsewhere = [];
 
   for (const route of routes) {
     const { path, parameters } = toOpenApiPath(route.path);
@@ -203,8 +204,16 @@ function buildOpenApiDocument(app) {
         requestBody = { required: true, content: { 'application/json': { schema: { type: 'object' } } } };
       }
     } else if (BODY_METHODS.has(route.method)) {
-      // The list that makes this worth generating — see the header.
-      undocumented.push(`${route.method.toUpperCase()} ${path}`);
+      const elsewhere = route.handlers.find(h => h.validatedElsewhere);
+      if (elsewhere) {
+        // Validated, just not by a zod schema. Recorded with its reason rather
+        // than left in the gap list, where a permanent entry would train people
+        // to ignore the list.
+        validatedElsewhere.push({ endpoint: `${route.method.toUpperCase()} ${path}`, by: elsewhere.validatedElsewhere });
+      } else {
+        // The list that makes this worth generating — see the header.
+        undocumented.push(`${route.method.toUpperCase()} ${path}`);
+      }
     }
 
     paths[path] = paths[path] || {};
@@ -279,6 +288,8 @@ function buildOpenApiDocument(app) {
       likelyGaps: undocumented.filter(entry => entry.startsWith('PUT') || entry.startsWith('PATCH')).sort(),
       /** Action-style posts. Many legitimately take no body. */
       actions: undocumented.filter(entry => entry.startsWith('POST')).sort(),
+      /** Validated by something other than a zod schema, with the reason. */
+      validatedElsewhere,
       note: 'These accept a request body with no zod schema, so their shape is enforced only by the '
         + 'controller. `likelyGaps` are PUT/PATCH routes, which almost always carry a body — adding '
         + 'validate(schema) documents and validates them at once. `actions` are POSTs, many of which '

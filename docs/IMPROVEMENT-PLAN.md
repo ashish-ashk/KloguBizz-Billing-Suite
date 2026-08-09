@@ -1598,6 +1598,37 @@ spec that exists only at runtime cannot be reviewed.
 that particular endpoints exist would be a hand-written spec with extra steps, which is
 exactly what this replaces.
 
+#### And then the gaps it found were closed
+
+Finding twelve unvalidated routes and leaving them would have wasted the finding. All
+twelve now carry a schema, and the spec reports **zero** unvalidated PUT/PATCH routes.
+
+The worst of them was `PUT /superadmin/reminders/:id`, which passed `req.body` straight into
+`findByIdAndUpdate` — every field on the model writable by any caller who guessed its name.
+`PUT /superadmin/plans/:code` was next: it now carries plan-versioning logic, and an
+unfiltered body could set `currentVersion` and desynchronise a plan from its own price
+history.
+
+`PUT /superadmin/settings/:key` is the one exception, and it is marked rather than fixed or
+hidden. Its body shape depends on the *path parameter* — `assertValidSetting` dispatches to
+a per-setting schema — and no single zod object can express "the body is whatever this key
+says it is". It is tagged `validatedElsewhere` with the reason, so the document says what is
+true instead of leaving a permanent entry in the gap list that would train people to ignore
+it.
+
+**Two mistakes made writing those schemas, both instructive:**
+
+- The masters endpoint takes a **bare array**; the first schema wrapped it in
+  `{ items: [...] }`, which reads better and is not what the client sends.
+- The feature-flags schema required booleans — stricter, apparently better, and wrong.
+  `sanitiseFlagOverrides` already drops non-booleans *by design*, with a test asserting that
+  a request containing junk succeeds with the junk removed, and the console posts the whole
+  catalogue back. The strict version would have rejected an ordinary save.
+
+  The general lesson: **a validator added after the fact must describe what the endpoint
+  already accepts.** Tightening a contract is a separate change with its own consequences,
+  not something to slip in under "add validation".
+
 ### 15. E-way bill (2.1 #6) and GSTR-2A/2B reconciliation (2.1 #7)
 
 **Why not yet:** both need a live GSP connection.

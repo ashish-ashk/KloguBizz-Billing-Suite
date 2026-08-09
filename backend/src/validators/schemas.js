@@ -567,7 +567,171 @@ const accountDeletionSchema = z.object({
   reason: longText.optional().nullable()
 });
 
+// ── Platform console (#63) ───────────────────────
+
+/**
+ * Platform console request shapes (#63).
+ *
+ * These twelve routes had no validator, which the generated API description
+ * surfaced by naming them — the console is the least-exercised surface in the
+ * product and the one where a bad write does the most damage, and it was the
+ * only area with no request validation at all.
+ *
+ * The controllers already sanitise: they pick fields, clamp lengths and check
+ * enums. So these schemas are not the only defence, and are not written as
+ * though they were. What they add is **refusing an unrecognised field outright**
+ * rather than ignoring it, and saying so — which is the difference between a
+ * console that silently drops a typo'd key and one that tells the operator their
+ * request did not do what they thought.
+ */
+
+/** A per-organisation ceiling, or `null` to remove it. Not zero: zero would read
+ *  as "no invoices allowed", which is not a thing anyone means. */
+const limitOverride = z.union([nonNegativeNumber.int().min(1), z.null()]).optional();
+
+/**
+ * A tenant's profile, edited from the console.
+ *
+ * Wider than `organisationUpdateSchema` because the platform can change things a
+ * tenant cannot — its plan and its status. Deliberately **not** a superset by
+ * inheritance: the tenant-facing schema is a promise to tenants about what they
+ * may change, and coupling the two would let a widening here quietly widen that.
+ */
+const organisationAdminUpdateSchema = z.object({
+  name: shortText.min(2, 'must be at least 2 characters').optional(),
+  adminEmail: optionalEmail,
+  gstin,
+  pan,
+  phone,
+  address: longText.optional().nullable(),
+  state: shortText.optional().nullable(),
+  stateCode: stateCode.optional(),
+  plan: shortText.optional(),
+  status: z.enum(['trial', 'active', 'suspended', 'cancelled']).optional(),
+  brandingConfig: z.record(z.any()).optional(),
+  themeConfig: z.record(z.any()).optional()
+});
+
+const tenantLimitsSchema = z.object({
+  userLimit: limitOverride,
+  invoiceLimit: limitOverride,
+  note: shortText.optional().nullable()
+});
+
+/**
+ * Feature-flag overrides.
+ *
+ * Deliberately loose — `z.any()` values rather than `z.boolean()`.
+ *
+ * The first version of this schema required booleans, which is the stricter and
+ * apparently better rule, and it was wrong. `sanitiseFlagOverrides` already
+ * drops unknown keys and non-booleans **by design**, and there is a test
+ * asserting that a request containing junk succeeds with the junk removed. The
+ * console sends the whole flag catalogue back, so a stricter schema here would
+ * have rejected an ordinary save outright.
+ *
+ * The lesson is worth keeping: a validator added after the fact must describe
+ * what the endpoint already accepts. Tightening a contract is a separate change
+ * with its own consequences, not something to slip in under "add validation".
+ */
+const tenantFlagsSchema = z.union([
+  z.object({ flags: z.record(z.any()) }),
+  z.record(z.any())
+]);
+
+const tenantNoticeSchema = z.object({
+  message: longText.optional().nullable(),
+  level: z.enum(['info', 'warning', 'danger']).optional(),
+  expiresAt: isoDate.optional().nullable()
+});
+
+const tenantSupportSchema = z.object({
+  accountManager: shortText.optional().nullable(),
+  tags: z.array(shortText).max(20, 'cannot exceed 20 tags').optional(),
+  riskLevel: z.enum(['none', 'watch', 'high']).optional(),
+  notes: longText.optional().nullable()
+});
+
+const tenantUserUpdateSchema = z.object({
+  // Named `targetOrgId` and not `orgId`, because the request sanitiser strips
+  // `orgId` from every body — a lesson learned when switch-org silently lost it.
+  targetOrgId: objectId.optional(),
+  role: z.enum(['admin', 'accountant', 'viewer']).optional(),
+  status: z.enum(['active', 'disabled']).optional()
+});
+
+const platformRoleSchema = z.object({
+  platformRole: z.enum(['owner', 'billing', 'support', 'auditor'])
+});
+
+const broadcastSchema = z.object({
+  message: longText.optional().nullable(),
+  level: z.enum(['info', 'warning', 'danger']).optional(),
+  expiresAt: isoDate.optional().nullable()
+});
+
+/**
+ * A plan, published through the versioning service (3.3 #9).
+ *
+ * `currentVersion` is deliberately absent: it is derived from the version
+ * history, and letting a caller set it would desynchronise a plan from its own
+ * record of what it has cost.
+ */
+const planUpsertSchema = z.object({
+  code: shortText.optional(),
+  name: shortText.min(1, 'is required'),
+  monthlyPrice: money.optional().nullable(),
+  yearlyPrice: money.optional().nullable(),
+  userLimit: nonNegativeNumber.optional().nullable(),
+  invoiceLimit: nonNegativeNumber.optional().nullable(),
+  features: z.array(shortText).max(50).optional(),
+  active: z.coerce.boolean().optional(),
+  sortOrder: z.coerce.number().int().optional(),
+  changeNote: shortText.optional().nullable(),
+  /** Moves existing subscribers off their grandfathered terms. Explicit, because
+   *  the default is not to. */
+  applyToExisting: z.coerce.boolean().optional()
+});
+
+/**
+ * One master list, replaced wholesale.
+ *
+ * A bare array, because that is what the endpoint takes — `Array.isArray(req.body)`.
+ * The first version wrapped it in `{ items: [...] }`, which reads better and is
+ * not what the client sends.
+ */
+const mastersSaveSchema = z.array(
+  z.object({
+    code: shortText.optional().nullable(),
+    label: shortText.optional().nullable(),
+    description: longText.optional().nullable(),
+    rate: z.coerce.number().optional().nullable(),
+    active: z.coerce.boolean().optional(),
+    sortOrder: z.coerce.number().int().optional()
+  })
+).max(500);
+
+/**
+ * A reminder stage.
+ *
+ * This one mattered most of the twelve: `updateReminder` passed `req.body`
+ * straight into `findByIdAndUpdate`, so any field on the model was writable by
+ * any caller who guessed its name.
+ */
+const reminderUpdateSchema = z.object({
+  name: shortText.optional(),
+  daysAfterDue: z.coerce.number().int().optional(),
+  subject: longText.optional().nullable(),
+  template: longText.optional().nullable(),
+  active: z.coerce.boolean().optional(),
+  sortOrder: z.coerce.number().int().optional()
+});
+
 module.exports = {
+  organisationAdminUpdateSchema,
+  tenantLimitsSchema, tenantFlagsSchema, tenantNoticeSchema, tenantSupportSchema,
+  tenantUserUpdateSchema, platformRoleSchema, broadcastSchema, planUpsertSchema,
+  mastersSaveSchema, reminderUpdateSchema,
   TAX_TREATMENTS, SUPPLY_TYPES,
   vendorCreateSchema, vendorUpdateSchema,
   stockAdjustSchema, inventorySettingsSchema,

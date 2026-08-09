@@ -20,6 +20,19 @@ const platform = require('../controllers/platformController');
 const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { CAPABILITY, requireCapability } = require('../middleware/platformRoleMiddleware');
+const { validate, validatedElsewhere } = require('../middleware/validate');
+/**
+ * Request shapes for the console (#63).
+ *
+ * These routes had no validator at all until the generated API description named
+ * them. The console is the least-exercised surface in the product and the one
+ * where a bad write does the most damage.
+ */
+const {
+  tenantLimitsSchema, tenantFlagsSchema, tenantNoticeSchema, tenantSupportSchema,
+  tenantUserUpdateSchema, platformRoleSchema, broadcastSchema, planUpsertSchema,
+  mastersSaveSchema, reminderUpdateSchema, organisationAdminUpdateSchema
+} = require('../validators/schemas');
 const { requireApproval, requireCapabilityOrGrant } = require('../middleware/approvalMiddleware');
 const { assertDeletionConfirmed } = require('../controllers/superadminController');
 const { superadminIpAllowlist } = require('../middleware/accountGuards');
@@ -73,16 +86,16 @@ router.get('/organisations/:id/users', requireCapability(CAPABILITY.platformRead
 router.get('/organisations/:id/invoices', requireCapability(CAPABILITY.platformRead), platform.tenantInvoices);
 router.get('/organisations/:id/timeline', requireCapability(CAPABILITY.auditRead), platform.tenantTimeline);
 router.post('/organisations/:id/status', requireCapability(CAPABILITY.orgWrite), platform.setTenantStatus);
-router.put('/organisations/:id/limits', requireCapability(CAPABILITY.orgWrite), platform.setTenantLimits);
-router.put('/organisations/:id/flags', requireCapability(CAPABILITY.orgWrite), platform.setTenantFlags);
+router.put('/organisations/:id/limits', requireCapability(CAPABILITY.orgWrite), validate(tenantLimitsSchema), platform.setTenantLimits);
+router.put('/organisations/:id/flags', requireCapability(CAPABILITY.orgWrite), validate(tenantFlagsSchema), platform.setTenantFlags);
 router.post('/organisations/:id/trial', requireCapability(CAPABILITY.orgWrite), platform.setTenantTrial);
-router.put('/organisations/:id/notice', requireCapability(CAPABILITY.orgWrite), platform.setTenantNotice);
-router.put('/organisations/:id/support', requireCapability(CAPABILITY.orgWrite), platform.setTenantSupport);
+router.put('/organisations/:id/notice', requireCapability(CAPABILITY.orgWrite), validate(tenantNoticeSchema), platform.setTenantNotice);
+router.put('/organisations/:id/support', requireCapability(CAPABILITY.orgWrite), validate(tenantSupportSchema), platform.setTenantSupport);
 router.post('/organisations/:id/force-logout', requireCapability(CAPABILITY.tenantSupport), platform.forceLogoutOrg);
 router.post('/organisations/:id/impersonate', requireCapability(CAPABILITY.tenantSupport), platform.impersonate);
 
 router.get('/organisations/:id', requireCapability(CAPABILITY.platformRead), platform.tenantDetail);
-router.put('/organisations/:id', requireCapability(CAPABILITY.orgWrite), updateOrganisation);
+router.put('/organisations/:id', requireCapability(CAPABILITY.orgWrite), validate(organisationAdminUpdateSchema), updateOrganisation);
 // Irreversible and platform-wide: its own capability, held only by an owner.
 /**
  * Deleting a tenant needs a second operator (3.4 #12).
@@ -119,32 +132,33 @@ router.post('/break-glass', requireCapability(CAPABILITY.platformRead), platform
 router.get('/break-glass', requireCapability(CAPABILITY.auditRead), platform.listBreakGlass);
 
 // ── Tenant users (support actions) ───────────────
-router.put('/users/:id', requireCapability(CAPABILITY.tenantSupport), platform.updateTenantUser);
+router.put('/users/:id', requireCapability(CAPABILITY.tenantSupport), validate(tenantUserUpdateSchema), platform.updateTenantUser);
 router.post('/users/:id/reset-password', requireCapability(CAPABILITY.tenantSupport), platform.resetTenantUserPassword);
 router.post('/users/:id/unlock', requireCapability(CAPABILITY.tenantSupport), platform.unlockTenantUser);
 router.post('/users/:id/force-logout', requireCapability(CAPABILITY.tenantSupport), platform.forceLogoutUser);
 
 // ── Platform accounts ────────────────────────────
 router.get('/platform-users', requireCapability(CAPABILITY.platformRead), platform.listPlatformUsers);
-router.put('/platform-users/:id/role', requireCapability(CAPABILITY.platformAdmin), platform.setPlatformRole);
+router.put('/platform-users/:id/role', requireCapability(CAPABILITY.platformAdmin), validate(platformRoleSchema), platform.setPlatformRole);
 
 // ── Broadcast ────────────────────────────────────
-router.put('/broadcast', requireCapability(CAPABILITY.settingsWrite), platform.setBroadcast);
+router.put('/broadcast', requireCapability(CAPABILITY.settingsWrite), validate(broadcastSchema), platform.setBroadcast);
 
 // ── Plans & pricing ──────────────────────────────
 router.get('/plans', requireCapability(CAPABILITY.platformRead), listPlansAdmin);
-router.post('/plans', requireCapability(CAPABILITY.billingWrite), upsertPlan);
-router.put('/plans/:code', requireCapability(CAPABILITY.billingWrite), upsertPlan);
+router.post('/plans', requireCapability(CAPABILITY.billingWrite), validate(planUpsertSchema), upsertPlan);
+router.put('/plans/:code', requireCapability(CAPABILITY.billingWrite), validate(planUpsertSchema), upsertPlan);
 /** Every price this plan has ever carried. Readable with plain platform read
  *  access: "what did we charge in March" is a support question, not a pricing one. */
 router.get('/plans/:code/history', requireCapability(CAPABILITY.platformRead), planHistory);
 
 // ── Platform configuration ───────────────────────
 router.get('/masters', requireCapability(CAPABILITY.platformRead), listMasters);
-router.put('/masters/:type', requireCapability(CAPABILITY.settingsWrite), saveMasters);
-router.put('/reminders/:id', requireCapability(CAPABILITY.settingsWrite), updateReminder);
+router.put('/masters/:type', requireCapability(CAPABILITY.settingsWrite), validate(mastersSaveSchema), saveMasters);
+router.put('/reminders/:id', requireCapability(CAPABILITY.settingsWrite), validate(reminderUpdateSchema), updateReminder);
 router.get('/settings', requireCapability(CAPABILITY.platformRead), getSettings);
-router.put('/settings/:key', requireCapability(CAPABILITY.settingsWrite), saveSetting);
+router.put('/settings/:key', requireCapability(CAPABILITY.settingsWrite),
+  validatedElsewhere('validators/settings.js assertValidSetting — the body shape depends on :key'), saveSetting);
 
 // ── Audit & security (3.4) ───────────────────────
 // Declared before the plain list so the literal path isn't shadowed by it.

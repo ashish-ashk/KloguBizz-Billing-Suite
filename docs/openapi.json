@@ -3408,6 +3408,482 @@
         },
         "additionalProperties": false
       },
+      "PutSuperadminOrganisationsIdLimitsRequest": {
+        "type": "object",
+        "properties": {
+          "userLimit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "enum": [
+                  "null"
+                ],
+                "nullable": true
+              }
+            ]
+          },
+          "invoiceLimit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "enum": [
+                  "null"
+                ],
+                "nullable": true
+              }
+            ]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 200,
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PutSuperadminOrganisationsIdFlagsRequest": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "flags": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "flags"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        ]
+      },
+      "PutSuperadminOrganisationsIdNoticeRequest": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "maxLength": 5000,
+            "nullable": true
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "danger"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PutSuperadminOrganisationsIdSupportRequest": {
+        "type": "object",
+        "properties": {
+          "accountManager": {
+            "type": "string",
+            "maxLength": 200,
+            "nullable": true
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "maxItems": 20
+          },
+          "riskLevel": {
+            "type": "string",
+            "enum": [
+              "none",
+              "watch",
+              "high"
+            ]
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 5000,
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PutSuperadminOrganisationsIdRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 2
+          },
+          "adminEmail": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  ""
+                ]
+              },
+              {
+                "type": "string",
+                "format": "email"
+              }
+            ],
+            "nullable": true
+          },
+          "gstin": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  ""
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "nullable": true
+          },
+          "pan": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  ""
+                ]
+              },
+              {
+                "type": "string",
+                "pattern": "^[A-Z]{5}[0-9]{4}[A-Z]$"
+              }
+            ],
+            "nullable": true
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  ""
+                ]
+              },
+              {
+                "type": "string",
+                "pattern": "^[0-9+\\-() ]{6,20}$"
+              }
+            ],
+            "nullable": true
+          },
+          "address": {
+            "type": "string",
+            "maxLength": 5000,
+            "nullable": true
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 200,
+            "nullable": true
+          },
+          "stateCode": {
+            "type": "string",
+            "pattern": "^(0[1-9]|[12][0-9]|3[0-8]|97|99)$"
+          },
+          "plan": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "trial",
+              "active",
+              "suspended",
+              "cancelled"
+            ]
+          },
+          "brandingConfig": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "themeConfig": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "PutSuperadminUsersIdRequest": {
+        "type": "object",
+        "properties": {
+          "targetOrgId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{24}$"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "accountant",
+              "viewer"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "PutSuperadminPlatformUsersIdRoleRequest": {
+        "type": "object",
+        "properties": {
+          "platformRole": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "billing",
+              "support",
+              "auditor"
+            ]
+          }
+        },
+        "required": [
+          "platformRole"
+        ],
+        "additionalProperties": false
+      },
+      "PutSuperadminBroadcastRequest": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "maxLength": 5000,
+            "nullable": true
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "danger"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "PostSuperadminPlansRequest": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "monthlyPrice": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000000000,
+            "nullable": true
+          },
+          "yearlyPrice": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000000000,
+            "nullable": true
+          },
+          "userLimit": {
+            "type": "number",
+            "minimum": 0,
+            "nullable": true
+          },
+          "invoiceLimit": {
+            "type": "number",
+            "minimum": 0,
+            "nullable": true
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "maxItems": 50
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "type": "integer"
+          },
+          "changeNote": {
+            "type": "string",
+            "maxLength": 200,
+            "nullable": true
+          },
+          "applyToExisting": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "PutSuperadminPlansCodeRequest": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "monthlyPrice": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000000000,
+            "nullable": true
+          },
+          "yearlyPrice": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000000000,
+            "nullable": true
+          },
+          "userLimit": {
+            "type": "number",
+            "minimum": 0,
+            "nullable": true
+          },
+          "invoiceLimit": {
+            "type": "number",
+            "minimum": 0,
+            "nullable": true
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "maxItems": 50
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "type": "integer"
+          },
+          "changeNote": {
+            "type": "string",
+            "maxLength": 200,
+            "nullable": true
+          },
+          "applyToExisting": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "PutSuperadminMastersTypeRequest": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "maxLength": 200,
+              "nullable": true
+            },
+            "label": {
+              "type": "string",
+              "maxLength": 200,
+              "nullable": true
+            },
+            "description": {
+              "type": "string",
+              "maxLength": 5000,
+              "nullable": true
+            },
+            "rate": {
+              "type": "number",
+              "nullable": true
+            },
+            "active": {
+              "type": "boolean"
+            },
+            "sortOrder": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "maxItems": 500
+      },
+      "PutSuperadminRemindersIdRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "daysAfterDue": {
+            "type": "integer"
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 5000,
+            "nullable": true
+          },
+          "template": {
+            "type": "string",
+            "maxLength": 5000,
+            "nullable": true
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
       "Error": {
         "type": "object",
         "properties": {
@@ -10872,13 +11348,24 @@
             "description": "Document id"
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSuperadminOrganisationsIdLimitsRequest"
+              }
+            }
+          }
+        },
         "security": [
           {
             "bearerAuth": []
           }
         ],
         "x-guards": [
-          "superadminIpAllowlist"
+          "superadminIpAllowlist",
+          "middleware"
         ],
         "responses": {
           "200": {
@@ -10920,13 +11407,24 @@
             "description": "Document id"
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSuperadminOrganisationsIdFlagsRequest"
+              }
+            }
+          }
+        },
         "security": [
           {
             "bearerAuth": []
           }
         ],
         "x-guards": [
-          "superadminIpAllowlist"
+          "superadminIpAllowlist",
+          "middleware"
         ],
         "responses": {
           "200": {
@@ -11016,13 +11514,24 @@
             "description": "Document id"
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSuperadminOrganisationsIdNoticeRequest"
+              }
+            }
+          }
+        },
         "security": [
           {
             "bearerAuth": []
           }
         ],
         "x-guards": [
-          "superadminIpAllowlist"
+          "superadminIpAllowlist",
+          "middleware"
         ],
         "responses": {
           "200": {
@@ -11064,13 +11573,24 @@
             "description": "Document id"
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSuperadminOrganisationsIdSupportRequest"
+              }
+            }
+          }
+        },
         "security": [
           {
             "bearerAuth": []
           }
         ],
         "x-guards": [
-          "superadminIpAllowlist"
+          "superadminIpAllowlist",
+          "middleware"
         ],
         "responses": {
           "200": {
@@ -11254,13 +11774,24 @@
             "description": "Document id"
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSuperadminOrganisationsIdRequest"
+              }
+            }
+          }
+        },
         "security": [
           {
             "bearerAuth": []
           }
         ],
         "x-guards": [
-          "superadminIpAllowlist"
+          "superadminIpAllowlist",
+          "middleware"
         ],
         "responses": {
           "200": {
@@ -11505,13 +12036,24 @@
             "description": "Document id"
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSuperadminUsersIdRequest"
+              }
+            }
+          }
+        },
         "security": [
           {
             "bearerAuth": []
           }
         ],
         "x-guards": [
-          "superadminIpAllowlist"
+          "superadminIpAllowlist",
+          "middleware"
         ],
         "responses": {
           "200": {
@@ -11734,13 +12276,24 @@
             "description": "Document id"
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSuperadminPlatformUsersIdRoleRequest"
+              }
+            }
+          }
+        },
         "security": [
           {
             "bearerAuth": []
           }
         ],
         "x-guards": [
-          "superadminIpAllowlist"
+          "superadminIpAllowlist",
+          "middleware"
         ],
         "responses": {
           "200": {
@@ -11771,13 +12324,24 @@
         "tags": [
           "superadmin"
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSuperadminBroadcastRequest"
+              }
+            }
+          }
+        },
         "security": [
           {
             "bearerAuth": []
           }
         ],
         "x-guards": [
-          "superadminIpAllowlist"
+          "superadminIpAllowlist",
+          "middleware"
         ],
         "responses": {
           "200": {
@@ -11843,13 +12407,24 @@
         "tags": [
           "superadmin"
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostSuperadminPlansRequest"
+              }
+            }
+          }
+        },
         "security": [
           {
             "bearerAuth": []
           }
         ],
         "x-guards": [
-          "superadminIpAllowlist"
+          "superadminIpAllowlist",
+          "middleware"
         ],
         "responses": {
           "200": {
@@ -11890,13 +12465,24 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSuperadminPlansCodeRequest"
+              }
+            }
+          }
+        },
         "security": [
           {
             "bearerAuth": []
           }
         ],
         "x-guards": [
-          "superadminIpAllowlist"
+          "superadminIpAllowlist",
+          "middleware"
         ],
         "responses": {
           "200": {
@@ -12021,13 +12607,24 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSuperadminMastersTypeRequest"
+              }
+            }
+          }
+        },
         "security": [
           {
             "bearerAuth": []
           }
         ],
         "x-guards": [
-          "superadminIpAllowlist"
+          "superadminIpAllowlist",
+          "middleware"
         ],
         "responses": {
           "200": {
@@ -12069,13 +12666,24 @@
             "description": "Document id"
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSuperadminRemindersIdRequest"
+              }
+            }
+          }
+        },
         "security": [
           {
             "bearerAuth": []
           }
         ],
         "x-guards": [
-          "superadminIpAllowlist"
+          "superadminIpAllowlist",
+          "middleware"
         ],
         "responses": {
           "200": {
@@ -12159,7 +12767,8 @@
           }
         ],
         "x-guards": [
-          "superadminIpAllowlist"
+          "superadminIpAllowlist",
+          "middleware"
         ],
         "responses": {
           "200": {
@@ -12532,21 +13141,8 @@
     }
   },
   "x-undocumented": {
-    "count": 56,
-    "likelyGaps": [
-      "PUT /api/v1/superadmin/broadcast",
-      "PUT /api/v1/superadmin/masters/{type}",
-      "PUT /api/v1/superadmin/organisations/{id}",
-      "PUT /api/v1/superadmin/organisations/{id}/flags",
-      "PUT /api/v1/superadmin/organisations/{id}/limits",
-      "PUT /api/v1/superadmin/organisations/{id}/notice",
-      "PUT /api/v1/superadmin/organisations/{id}/support",
-      "PUT /api/v1/superadmin/plans/{code}",
-      "PUT /api/v1/superadmin/platform-users/{id}/role",
-      "PUT /api/v1/superadmin/reminders/{id}",
-      "PUT /api/v1/superadmin/settings/{key}",
-      "PUT /api/v1/superadmin/users/{id}"
-    ],
+    "count": 43,
+    "likelyGaps": [],
     "actions": [
       "POST /api/v1/auth/mfa/setup",
       "POST /api/v1/auth/resend-verification",
@@ -12584,7 +13180,6 @@
       "POST /api/v1/superadmin/organisations/{id}/impersonate",
       "POST /api/v1/superadmin/organisations/{id}/status",
       "POST /api/v1/superadmin/organisations/{id}/trial",
-      "POST /api/v1/superadmin/plans",
       "POST /api/v1/superadmin/users/{id}/force-logout",
       "POST /api/v1/superadmin/users/{id}/reset-password",
       "POST /api/v1/superadmin/users/{id}/unlock",
@@ -12592,6 +13187,12 @@
       "POST /api/v1/webhooks/razorpay",
       "POST /api/v1/webhooks/sendgrid/events",
       "POST /api/v1/webhooks/tenant-gateway"
+    ],
+    "validatedElsewhere": [
+      {
+        "endpoint": "PUT /api/v1/superadmin/settings/{key}",
+        "by": "validators/settings.js assertValidSetting — the body shape depends on :key"
+      }
     ],
     "note": "These accept a request body with no zod schema, so their shape is enforced only by the controller. `likelyGaps` are PUT/PATCH routes, which almost always carry a body — adding validate(schema) documents and validates them at once. `actions` are POSTs, many of which take no body and need nothing."
   }

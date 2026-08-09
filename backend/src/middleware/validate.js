@@ -50,4 +50,23 @@ function validate(schema, source = 'body') {
   return middleware;
 }
 
-module.exports = { validate };
+/**
+ * Marks a route whose body is validated by something other than a zod schema.
+ *
+ * There is exactly one today: `PUT /superadmin/settings/:key`, whose shape
+ * depends on the *path parameter* — `assertValidSetting` dispatches to a
+ * per-setting schema, and no single zod object can express "the body is whatever
+ * this key says it is".
+ *
+ * Rather than leave it sitting in the generated document's gap list, where it
+ * would read as an unvalidated route forever and train people to ignore that
+ * list, it is tagged with the reason. The document then says what is true: this
+ * is validated, by a different mechanism, and here is which one.
+ */
+function validatedElsewhere(by) {
+  const middleware = (req, res, next) => next();
+  middleware.validatedElsewhere = by;
+  return middleware;
+}
+
+module.exports = { validate, validatedElsewhere };
