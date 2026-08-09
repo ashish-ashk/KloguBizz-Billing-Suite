@@ -20,7 +20,8 @@ import {
   StockValuationReport, ExpiringStockReport, StockLayerRow,
   Expense, ProfitLossReport, MasterOption, PlanVersion,
   StockMovement, TenantActivityEntry,
-  BillingCredit, CouponQuote, PlanChangePreview, AdminCoupon, AdminCredit
+  BillingCredit, CouponQuote, PlanChangePreview, AdminCoupon, AdminCredit,
+  StockLocation, StockLocationBalance
 } from './models';
 
 /**
@@ -569,6 +570,8 @@ export class ApiService {
   adjustStock(itemId: string, payload: {
     quantity: number; note: string; reason?: string;
     unitCost?: number | null; batchNumber?: string; expiryDate?: string;
+    /** Which warehouse is being corrected — a recount is a fact about one shelf. */
+    locationId?: string | null;
   }) {
     return this.afterWrite(
       this.http.post<{ stockQty: number; unitCost: number | null; value: number | null }>(
@@ -577,6 +580,42 @@ export class ApiService {
       NS.items
     );
   }
+  // ── Warehouses and transfers (2.5 #42) ───────
+
+  stockLocations() {
+    return this.cache.through(
+      `${NS.items}:locations`,
+      () => this.http.get<{ locations: StockLocation[] }>(`${this.api}/reports/stock/locations`)
+    );
+  }
+  createStockLocation(payload: Partial<StockLocation>) {
+    return this.afterWrite(this.http.post<StockLocation>(`${this.api}/reports/stock/locations`, payload), NS.items);
+  }
+  updateStockLocation(id: string, payload: Partial<StockLocation>) {
+    return this.afterWrite(this.http.put<StockLocation>(`${this.api}/reports/stock/locations/${id}`, payload), NS.items);
+  }
+  /** Which warehouse holds how much of one item. */
+  itemStockLocations(itemId: string) {
+    return this.http.get<{ balances: StockLocationBalance[] }>(`${this.api}/reports/stock/${itemId}/locations`);
+  }
+  /**
+   * Moves stock between warehouses.
+   *
+   * Invalidates valuation as well as items even though the total value does not
+   * change — the *per-warehouse* figures do, and they are what this page shows.
+   */
+  transferStock(payload: {
+    fromLocationId: string; toLocationId: string; note?: string;
+    lines: Array<{ itemId: string; quantity: number }>;
+  }) {
+    return this.afterWrite(
+      this.http.post<{ message: string; lines: Array<{ name: string; quantity: number }> }>(
+        `${this.api}/reports/stock/transfer`, payload
+      ),
+      NS.items, NS.reports
+    );
+  }
+
   recomputeStock(itemId: string) {
     return this.afterWrite(
       this.http.post<{ ok: boolean; stockQty: number; stockValue: number }>(

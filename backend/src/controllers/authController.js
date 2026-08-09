@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { env } = require('../config/env');
 const { Organisation } = require('../models/Organisation');
+const stockLocations = require('../services/stockLocationService');
 const { User } = require('../models/User');
 const { Membership } = require('../models/Membership');
 const { Subscription } = require('../models/Subscription');
@@ -145,6 +146,9 @@ const register = asyncHandler(async (req, res) => {
     // Nothing auto-suspends on it — see models/Organisation.js.
     trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 86400000)
   });
+  // The default warehouse every stock movement falls back to (2.5 #42).
+  await stockLocations.ensureDefault(organisation._id, stateCode);
+
   const user = await User.create({
     orgId: organisation._id, // legacy "home org" only — see models/User.js
     lastActiveOrgId: organisation._id,

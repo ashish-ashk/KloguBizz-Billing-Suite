@@ -106,6 +106,14 @@ const purchaseSchema = new mongoose.Schema({
    */
   billNumber: { type: String, required: true, trim: true },
   billDate: { type: Date, required: true },
+
+  /**
+   * The warehouse the goods were delivered to (2.5 #42).
+   *
+   * Stored so a deletion takes the stock back out of the same place it went in.
+   * Null means the tenant's default.
+   */
+  locationId: { type: mongoose.Schema.Types.ObjectId, ref: 'StockLocation', default: null },
   dueDate: Date,
   /**
    * Snapshotted supplier identity.

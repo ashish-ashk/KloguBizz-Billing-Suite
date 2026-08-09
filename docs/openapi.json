@@ -777,6 +777,11 @@
             "pattern": "^[0-9a-fA-F]{24}$",
             "nullable": true
           },
+          "locationId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{24}$",
+            "nullable": true
+          },
           "billTo": {
             "type": "object",
             "properties": {
@@ -1080,6 +1085,11 @@
         "type": "object",
         "properties": {
           "clientId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{24}$",
+            "nullable": true
+          },
+          "locationId": {
             "type": "string",
             "pattern": "^[0-9a-fA-F]{24}$",
             "nullable": true
@@ -2755,6 +2765,11 @@
       "PostReportsStockIdAdjustRequest": {
         "type": "object",
         "properties": {
+          "locationId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{24}$",
+            "nullable": true
+          },
           "quantity": {
             "type": "number"
           },
@@ -2790,6 +2805,128 @@
         },
         "required": [
           "quantity"
+        ],
+        "additionalProperties": false
+      },
+      "PostReportsStockLocationsRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 2
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 200,
+            "nullable": true
+          },
+          "address": {
+            "type": "string",
+            "maxLength": 5000,
+            "nullable": true
+          },
+          "stateCode": {
+            "type": "string",
+            "pattern": "^(0[1-9]|[12][0-9]|3[0-8]|97|99)$"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 5000,
+            "nullable": true
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "PutReportsStockLocationsIdRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 2
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 200,
+            "nullable": true
+          },
+          "address": {
+            "type": "string",
+            "maxLength": 5000,
+            "nullable": true
+          },
+          "stateCode": {
+            "type": "string",
+            "pattern": "^(0[1-9]|[12][0-9]|3[0-8]|97|99)$"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 5000,
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "PostReportsStockTransferRequest": {
+        "type": "object",
+        "properties": {
+          "fromLocationId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{24}$"
+          },
+          "toLocationId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{24}$"
+          },
+          "date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 5000,
+            "nullable": true
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "itemId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{24}$"
+                },
+                "quantity": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1000000000000
+                }
+              },
+              "required": [
+                "itemId",
+                "quantity"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 200
+          }
+        },
+        "required": [
+          "fromLocationId",
+          "toLocationId",
+          "lines"
         ],
         "additionalProperties": false
       },
@@ -3016,6 +3153,11 @@
             "type": "string",
             "pattern": "^[0-9a-fA-F]{24}$"
           },
+          "locationId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{24}$",
+            "nullable": true
+          },
           "billNumber": {
             "type": "string",
             "maxLength": 200,
@@ -3192,6 +3334,11 @@
           "vendorId": {
             "type": "string",
             "pattern": "^[0-9a-fA-F]{24}$"
+          },
+          "locationId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{24}$",
+            "nullable": true
           },
           "billNumber": {
             "type": "string",
@@ -9838,6 +9985,244 @@
     "/api/v1/reports/stock/{id}/layers": {
       "get": {
         "summary": "GET /api/v1/reports/stock/{id}/layers",
+        "tags": [
+          "reports"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Document id"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/reports/stock/locations": {
+      "get": {
+        "summary": "GET /api/v1/reports/stock/locations",
+        "tags": [
+          "reports"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      },
+      "post": {
+        "summary": "POST /api/v1/reports/stock/locations",
+        "tags": [
+          "reports"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostReportsStockLocationsRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant",
+          "middleware"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/reports/stock/locations/{id}": {
+      "put": {
+        "summary": "PUT /api/v1/reports/stock/locations/{id}",
+        "tags": [
+          "reports"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Document id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutReportsStockLocationsIdRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant",
+          "middleware"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/reports/stock/transfer": {
+      "post": {
+        "summary": "POST /api/v1/reports/stock/transfer",
+        "tags": [
+          "reports"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostReportsStockTransferRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant",
+          "middleware"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/reports/stock/{id}/locations": {
+      "get": {
+        "summary": "GET /api/v1/reports/stock/{id}/locations",
         "tags": [
           "reports"
         ],

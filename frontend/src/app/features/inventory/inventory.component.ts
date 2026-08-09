@@ -9,11 +9,12 @@ import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
 import { ServerList } from '../../core/server-list';
 import {
-  ExpiringStockReport, Item, LowStockReport, StockLayerRow, StockMovement, StockValuationReport
+  ExpiringStockReport, Item, LowStockReport, StockLayerRow, StockMovement, StockValuationReport,
+  StockLocation
 } from '../../core/models';
 import { fmtDate, fmtINR } from '../../core/format';
 
-type Tab = 'valuation' | 'ledger' | 'low' | 'expiring';
+type Tab = 'valuation' | 'ledger' | 'locations' | 'low' | 'expiring';
 
 const REASON_LABELS: Record<string, string> = {
   sale: 'Sold',
@@ -23,7 +24,9 @@ const REASON_LABELS: Record<string, string> = {
   opening: 'Opening balance',
   adjustment: 'Adjustment',
   damage: 'Damage / write-off',
-  return: 'Customer return'
+  return: 'Customer return',
+  'transfer-out': 'Transferred out',
+  'transfer-in': 'Transferred in'
 };
 
 /**
@@ -41,6 +44,7 @@ const REASON_LABELS: Record<string, string> = {
  *
  *   - **Valuation** — what is my stock worth, and does it reconcile?
  *   - **Ledger** — why is this number what it is?
+ *   - **Warehouses** — where is it, and how do I move it? (2.5 #42)
  *   - **Low stock** — what do I need to reorder?
  *   - **Expiring** — what am I about to lose?
  *
@@ -240,6 +244,63 @@ const REASON_LABELS: Record<string, string> = {
       }
 
       <!-- ── Low stock ───────────────────────────── -->
+      <!-- ── Warehouses (2.5 #42) ────────────────── -->
+      @if (tab() === 'locations') {
+        <div class="toolbar">
+          <button class="btn secondary" type="button" (click)="openLocation()">
+            <app-icon name="plus" [size]="14" /> New warehouse
+          </button>
+          <button class="btn primary" type="button" [disabled]="locations().length < 2" (click)="openTransfer()">
+            <app-icon name="box" [size]="14" /> Transfer stock
+          </button>
+          @if (locations().length < 2) {
+            <span class="muted" style="font-size:12px">Add a second warehouse to move stock between them.</span>
+          }
+        </div>
+
+        @if (loadingLocations()) {
+          <app-skeleton-rows [count]="3" />
+        } @else {
+          <div class="table-wrap">
+            <table class="table stack-mobile">
+              <thead>
+                <tr><th>Warehouse</th><th>Code</th><th style="text-align:right">Items</th><th style="text-align:right">Quantity</th><th style="text-align:right">Value</th><th></th></tr>
+              </thead>
+              <tbody>
+                @for (l of locations(); track l._id) {
+                  <tr [style.opacity]="l.status === 'archived' ? 0.55 : 1">
+                    <td data-label="Warehouse">
+                      <div class="strong">{{ l.name }}</div>
+                      @if (l.isDefault) {
+                        <!-- Everything that names no warehouse lands here, which is
+                             why it cannot be archived. -->
+                        <span class="pill">Default</span>
+                      }
+                      @if (l.status === 'archived') { <span class="pill">Archived</span> }
+                      @if (l.address) { <div class="muted" style="font-size:11.5px">{{ l.address }}</div> }
+                    </td>
+                    <td data-label="Code" class="mono">{{ l.code || '—' }}</td>
+                    <td data-label="Items" style="text-align:right">{{ l.itemCount }}</td>
+                    <td data-label="Quantity" style="text-align:right">{{ l.quantity }}</td>
+                    <td data-label="Value" style="text-align:right" class="strong">{{ fmtINR(l.value) }}</td>
+                    <td data-label="">
+                      @if (!l.isDefault && l.status === 'active') {
+                        <button class="btn ghost sm" type="button" (click)="archiveLocation(l)">Archive</button>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          <p class="muted" style="font-size:12px;line-height:1.7;margin-top:12px">
+            A warehouse is a place within one GST registration. Stock held in another state needs
+            its own registration, and moving goods there is a taxable supply rather than an
+            internal transfer — so warehouses in other states are not supported yet.
+          </p>
+        }
+      }
+
       @if (tab() === 'low') {
         @if (loadingLow()) {
           <app-skeleton-rows [count]="4" />
@@ -449,6 +510,89 @@ const REASON_LABELS: Record<string, string> = {
           <button class="btn primary" type="button" [disabled]="!scanCode.trim()" (click)="scan()">Look up</button>
         </div>
       </app-modal>
+
+      <!-- ── New warehouse (2.5 #42) ─────────────── -->
+      <app-modal [open]="locationOpen()" title="New warehouse" [width]="480" (close)="locationOpen.set(false)">
+        <div class="field">
+          <label for="wh-name">Name</label>
+          <input id="wh-name" name="wh-name" [(ngModel)]="locationName" placeholder="e.g. Andheri Godown" />
+        </div>
+        <div class="field">
+          <label for="wh-code">Short code <span class="muted">(optional)</span></label>
+          <input id="wh-code" name="wh-code" [(ngModel)]="locationCode" placeholder="e.g. AND" />
+        </div>
+        <div class="field">
+          <label for="wh-address">Address <span class="muted">(optional)</span></label>
+          <input id="wh-address" name="wh-address" [(ngModel)]="locationAddress" />
+        </div>
+        <p class="muted" style="font-size:12px;line-height:1.7;margin:4px 0 0">
+          It will hold nothing until you transfer stock into it or record a purchase against it.
+        </p>
+        <div class="modal-foot">
+          <button class="btn ghost" type="button" (click)="locationOpen.set(false)">Cancel</button>
+          <button class="btn primary" type="button" [disabled]="busy() || !locationName.trim()" (click)="saveLocation()">
+            @if (busy()) { <span class="spinner"></span> }
+            Create
+          </button>
+        </div>
+      </app-modal>
+
+      <!-- ── Transfer stock ──────────────────────── -->
+      <app-modal [open]="transferOpen()" title="Transfer stock" [width]="560" (close)="transferOpen.set(false)">
+        <p style="margin:0 0 14px;font-size:13px;line-height:1.7;color:var(--text-mid)">
+          Moving goods between your own warehouses does not change what they cost or what your
+          stock is worth — the cost travels with them.
+        </p>
+        <div class="grid grid-2">
+          <div class="field">
+            <label for="tr-from">From</label>
+            <select id="tr-from" name="tr-from" [(ngModel)]="transferFrom">
+              @for (l of activeLocations(); track l._id) {
+                <option [value]="l._id">{{ l.name }} ({{ l.quantity }} on hand)</option>
+              }
+            </select>
+          </div>
+          <div class="field">
+            <label for="tr-to">To</label>
+            <select id="tr-to" name="tr-to" [(ngModel)]="transferTo">
+              @for (l of activeLocations(); track l._id) {
+                <option [value]="l._id">{{ l.name }}</option>
+              }
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="tr-item">Item</label>
+          <select id="tr-item" name="tr-item" [(ngModel)]="transferItemId" (ngModelChange)="onTransferItem()">
+            <option value="">Select an item…</option>
+            @for (i of stockedItems(); track i._id) {
+              <option [value]="i._id">{{ i.name }}</option>
+            }
+          </select>
+        </div>
+        @if (transferAvailable() !== null) {
+          <!-- What that warehouse actually holds, before they type a quantity —
+               a transfer of stock you do not have is refused, not short-drawn. -->
+          <p class="muted" style="font-size:12px;margin:-6px 0 12px">
+            {{ fromName() }} holds {{ transferAvailable() }}.
+          </p>
+        }
+        <div class="field">
+          <label for="tr-qty">Quantity</label>
+          <input id="tr-qty" name="tr-qty" type="number" [(ngModel)]="transferQty" min="0" />
+        </div>
+        <div class="field">
+          <label for="tr-note">Note <span class="muted">(optional)</span></label>
+          <input id="tr-note" name="tr-note" [(ngModel)]="transferNote" placeholder="e.g. restocking the shop" />
+        </div>
+        <div class="modal-foot">
+          <button class="btn ghost" type="button" (click)="transferOpen.set(false)">Cancel</button>
+          <button class="btn primary" type="button" [disabled]="busy() || !transferItemId || !transferQty" (click)="saveTransfer()">
+            @if (busy()) { <span class="spinner"></span> }
+            Move stock
+          </button>
+        </div>
+      </app-modal>
     </app-shell>
   `
 })
@@ -456,6 +600,7 @@ export class InventoryComponent implements OnInit {
   readonly tabs: Array<{ key: Tab; label: string }> = [
     { key: 'valuation', label: 'Stock & value' },
     { key: 'ledger', label: 'Ledger' },
+    { key: 'locations', label: 'Warehouses' },
     { key: 'low', label: 'Low stock' },
     { key: 'expiring', label: 'Expiring' }
   ];
@@ -497,6 +642,24 @@ export class InventoryComponent implements OnInit {
   layersItemName = signal('');
   layers = signal<StockLayerRow[]>([]);
 
+  // ── Warehouses (2.5 #42) ──
+  locations = signal<StockLocation[]>([]);
+  loadingLocations = signal(false);
+  locationOpen = signal(false);
+  locationName = '';
+  locationCode = '';
+  locationAddress = '';
+
+  transferOpen = signal(false);
+  transferFrom = '';
+  transferTo = '';
+  transferItemId = '';
+  transferQty: number | null = null;
+  transferNote = '';
+  /** What the source warehouse holds of the chosen item, so a refusal is
+   *  avoidable rather than discovered on submit. */
+  transferAvailable = signal<number | null>(null);
+
   scanOpen = signal(false);
   scanCode = '';
   scanResult = signal<Item | null>(null);
@@ -535,6 +698,111 @@ export class InventoryComponent implements OnInit {
   setTab(tab: Tab) {
     this.tab.set(tab);
     if (tab === 'ledger' && !this.ledger.rows().length) this.ledger.refresh();
+    if (tab === 'locations' && !this.locations().length) this.loadLocations();
+  }
+
+  // ── Warehouses (2.5 #42) ──
+
+  activeLocations = computed(() => this.locations().filter(l => l.status === 'active'));
+
+  fromName(): string {
+    return this.locations().find(l => l._id === this.transferFrom)?.name || 'That warehouse';
+  }
+
+  loadLocations() {
+    this.loadingLocations.set(true);
+    this.api.stockLocations().subscribe({
+      next: res => { this.locations.set(res.locations); this.loadingLocations.set(false); },
+      error: err => { this.loadingLocations.set(false); this.toast.httpError(err); }
+    });
+  }
+
+  openLocation() {
+    this.locationName = '';
+    this.locationCode = '';
+    this.locationAddress = '';
+    this.locationOpen.set(true);
+  }
+
+  saveLocation() {
+    if (this.busy()) return;
+    this.busy.set(true);
+    this.api.createStockLocation({
+      name: this.locationName.trim(),
+      code: this.locationCode.trim() || undefined,
+      address: this.locationAddress.trim() || undefined
+    }).subscribe({
+      next: created => {
+        this.busy.set(false);
+        this.locationOpen.set(false);
+        this.toast.success(`${created.name} added`);
+        this.loadLocations();
+      },
+      // The server names the actual reason — a duplicate name, or a warehouse in
+      // another state, which needs its own GST registration.
+      error: err => { this.busy.set(false); this.toast.httpError(err); }
+    });
+  }
+
+  archiveLocation(location: StockLocation) {
+    if (this.busy()) return;
+    this.busy.set(true);
+    this.api.updateStockLocation(location._id, { status: 'archived' }).subscribe({
+      next: () => {
+        this.busy.set(false);
+        this.toast.success(`${location.name} archived`);
+        this.loadLocations();
+      },
+      // Refused while it still holds stock, because archiving it would leave
+      // those goods unreachable — the message says so and says what to do.
+      error: err => { this.busy.set(false); this.toast.httpError(err); }
+    });
+  }
+
+  openTransfer() {
+    const active = this.activeLocations();
+    this.transferFrom = active[0]?._id || '';
+    this.transferTo = active[1]?._id || '';
+    this.transferItemId = '';
+    this.transferQty = null;
+    this.transferNote = '';
+    this.transferAvailable.set(null);
+    this.transferOpen.set(true);
+  }
+
+  onTransferItem() {
+    this.transferAvailable.set(null);
+    if (!this.transferItemId) return;
+    this.api.itemStockLocations(this.transferItemId).subscribe({
+      next: res => {
+        const here = res.balances.find(b => b.locationId === this.transferFrom);
+        this.transferAvailable.set(here?.quantity ?? 0);
+      },
+      // Silent: it is a convenience, and the server refuses an over-transfer
+      // anyway with a message naming the quantity actually held.
+      error: () => {}
+    });
+  }
+
+  saveTransfer() {
+    if (this.busy() || !this.transferItemId || !this.transferQty) return;
+    this.busy.set(true);
+    this.api.transferStock({
+      fromLocationId: this.transferFrom,
+      toLocationId: this.transferTo,
+      note: this.transferNote.trim() || undefined,
+      lines: [{ itemId: this.transferItemId, quantity: Number(this.transferQty) }]
+    }).subscribe({
+      next: res => {
+        this.busy.set(false);
+        this.transferOpen.set(false);
+        this.toast.success(res.message);
+        this.loadLocations();
+        this.loadValuation();
+        if (this.ledger.rows().length) this.ledger.refresh();
+      },
+      error: err => { this.busy.set(false); this.toast.httpError(err); }
+    });
   }
 
   label(reason: string) {

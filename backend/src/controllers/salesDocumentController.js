@@ -16,6 +16,7 @@ const { renderInvoicePdf } = require('../services/pdfService');
 const { getPlatformDefaults } = require('../services/platformSettingsService');
 const { totalsFor, normalizeBuyer } = require('./invoiceController');
 const stock = require('../services/stockService');
+const stockLocations = require('../services/stockLocationService');
 const { logger } = require('../utils/logger');
 
 /**
@@ -360,7 +361,8 @@ const convertToInvoice = asyncHandler(async (req, res) => {
     // Stock moves now, at the point ownership changes — not when the challan
     // was raised. See the model's note on why the challan deliberately moves
     // nothing itself.
-    await stock.applyInvoice(req, invoice).catch(error => {
+    const location = await stockLocations.resolveLocationSafely(req.orgId, invoice.locationId);
+    await stock.applyInvoice(req, invoice, location).catch(error => {
       // Consistent with the invoice path: a stock-ledger problem must not
       // invalidate a tax document that has already been issued.
       logger.error('stock movement failed after conversion', { invoiceId: String(invoice._id), err: error });

@@ -48,13 +48,15 @@ cd backend && npm run migrate
 npm run migrate:status   # confirm every version is applied
 ```
 
-Ten migrations, applied in filename order, recorded in a `migrations` collection
-so a re-run is a no-op. Two are **deployment-blocking** rather than tidying:
+Eleven migrations, applied in filename order, recorded in a `migrations`
+collection so a re-run is a no-op. Three are **deployment-blocking** rather than
+tidying:
 
 | Migration | Why it blocks |
 |---|---|
 | `006-introduce-memberships` | `protect` resolves a `Membership` on **every request**. Without it, no user has one, and every authenticated request fails with `MEMBERSHIP_REVOKED`. The application does not work at all |
 | `010-pin-plan-versions` | Pins each live subscription to the plan version it was sold on. The code falls back gracefully without it — but "falls back" is not "is grandfathered", and the first price change would silently reprice everyone |
+| `011-seed-stock-locations` | Gives every tenant one warehouse and puts their existing stock in it. Without it, cost layers carry no location while consumption filters on one, so **the first sale after deploying reports a cost of goods sold of zero** and drives stock negative against a location that owns nothing. Silent, immediate, and wrong in the flattering direction |
 
 The other eight are safe to run late but there is no reason to.
 
@@ -282,7 +284,7 @@ Not defects. Deliberate gaps, with the reasoning recorded in the improvement pla
 
 | Gap | Blocks launch if… |
 |---|---|
-| **Warehouses** (2.5 #43) | A customer holds stock in more than one location |
+| ~~Warehouses~~ | **Built.** Every tenant gets one by migration; a customer with two moves stock between them with a transfer. Warehouses in *other states* still need multi-GSTIN below |
 | ~~Coupons, proration~~ | **Built.** But a coupon needs a matching **Razorpay offer id** before it can discount a card payment — without one it is refused at checkout rather than applied. See §3 |
 | ~~The platform's own GST invoices~~ | **Built.** But it issues nothing until the `platformBilling` setting has a legal name, GSTIN, address and state code — see §1 |
 | **Multi-GSTIN / branches** (2.1 #9) | A customer operates in more than one state under one business |
@@ -296,7 +298,7 @@ Not defects. Deliberate gaps, with the reasoning recorded in the improvement pla
 ## 7. The pre-launch command
 
 ```
-cd backend  && npm run check   # lint + 454 tests
+cd backend  && npm run check   # lint + 469 tests
 cd frontend && npm run check   # lint + 18 unit tests + production build
 cd frontend && npm run test:e2e   # against a running stack
 ```
@@ -310,10 +312,14 @@ Before a release, confirm the count rather than the exit code:
 
 ```
 cd backend && npm test 2>&1 | grep -E "^# (pass|skipped)"
-# expect ~454 passing and 0 skipped
+# expect ~469 passing and 0 skipped
 ```
 
 A run reporting hundreds of skips is a run that proved nothing.
+
+**Run it once at a time.** The suites share fixed test database names, so two
+concurrent `npm test` runs drop each other's data and produce a scattering of
+failures that look like real regressions and are not.
 
 The frontend's check needs no services at all — its unit tests are pure logic and
 the build is offline. The end-to-end test is separate because it does need a live

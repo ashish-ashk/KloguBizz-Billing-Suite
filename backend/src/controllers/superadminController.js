@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { Organisation } = require('../models/Organisation');
+const stockLocations = require('../services/stockLocationService');
 const { Plan } = require('../models/Plan');
 const { Reminder, AuditLog, Master, GlobalSetting } = require('../models/Settings');
 const { User } = require('../models/User');
@@ -165,6 +166,8 @@ const createOrganisation = asyncHandler(async (req, res) => {
   if (existing) throw httpError(409, 'A user with this email already exists');
 
   const org = await Organisation.create({ name, adminEmail, gstin, phone, address, state, stateCode, plan, status: 'active' });
+  // Same default warehouse a self-service registration gets (2.5 #42).
+  await stockLocations.ensureDefault(org._id, stateCode);
   const tempPassword = crypto.randomBytes(6).toString('base64url');
   const admin = await User.create({
     orgId: org._id,

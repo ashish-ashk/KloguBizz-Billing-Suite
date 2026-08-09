@@ -9,6 +9,7 @@ const { Item } = require('../models/Item');
 const { StockLayer } = require('../models/StockLayer');
 const receivables = require('../services/receivablesService');
 const stock = require('../services/stockService');
+const stockLocations = require('../services/stockLocationService');
 const valuation = require('../services/stockValuationService');
 const { streamWorkbook } = require('../services/excelService');
 const { paginate, escapeRegex } = require('../utils/pagination');
@@ -260,7 +261,10 @@ const adjustStock = asyncHandler(async (req, res) => {
     // profit and drift the item's value away from its quantity for good.
     unitCost: req.body?.unitCost,
     batchNumber: req.body?.batchNumber ? String(req.body.batchNumber).trim() : undefined,
-    expiryDate: req.body?.expiryDate ? new Date(req.body.expiryDate) : undefined
+    expiryDate: req.body?.expiryDate ? new Date(req.body.expiryDate) : undefined,
+    // A recount is a fact about one shelf; applying it to the tenant-wide pool
+    // would move stock nobody counted (2.5 #42).
+    location: await stockLocations.resolveLocation(req.orgId, req.body?.locationId)
   });
   logAudit({
     req,

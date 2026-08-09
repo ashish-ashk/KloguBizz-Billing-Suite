@@ -91,7 +91,8 @@ function escapeRegex(value) {
 async function postMovement({
   orgId, item, quantity, reason, documentType, documentId, documentNumber, note, actorName,
   unitCost = null, value = null, consumed, layerId = null, valuationMethod = null,
-  batchNumber, expiryDate
+  batchNumber, expiryDate,
+  location = null, transferPairId = null, transferLocation = null
 }) {
   const updated = await Item.findOneAndUpdate(
     { _id: item._id, orgId },
@@ -117,7 +118,15 @@ async function postMovement({
     layerId,
     valuationMethod,
     batchNumber,
-    expiryDate
+    expiryDate,
+    // Name snapshotted beside the id for the same reason `itemName` is: a ledger
+    // that needs a join to be readable stops being readable when the thing it
+    // joins to is archived.
+    locationId: location?._id || null,
+    locationName: location?.name,
+    transferPairId,
+    transferLocationId: transferLocation?._id || null,
+    transferLocationName: transferLocation?.name
   });
 
   return updated;
@@ -141,7 +150,10 @@ async function applyDocument({
   /** The document whose consumption a restore should unwind — the invoice, for
    *  both a cancellation and a credit note against it. */
   restoreFromDocumentId = null,
-  receivedAt = null
+  receivedAt = null,
+  /** Which warehouse the document acts on (2.5 #42). Absent means the tenant's
+   *  default, resolved by the caller — see `resolveLocation`. */
+  location = null
 }) {
   try {
     const { matched, unmatched } = await matchLinesToItems(orgId, lines);
@@ -168,7 +180,8 @@ async function applyDocument({
     for (const { item, quantity, line } of matched) {
       const costed = await costMovement({
         orgId, item, quantity, line, costing, policy,
-        documentId, documentNumber, receivedAt, priorConsumption
+        documentId, documentNumber, receivedAt, priorConsumption,
+        locationId: location?._id || null
       });
       if (costed.shortfall) shortfalls.push({ itemId: item._id, name: item.name, quantity: costed.shortfall });
 
@@ -187,7 +200,8 @@ async function applyDocument({
         layerId: costed.layerId,
         valuationMethod: costing === 'none' ? null : policy.valuationMethod,
         batchNumber: costed.batchNumber,
-        expiryDate: costed.expiryDate
+        expiryDate: costed.expiryDate,
+        location
       });
 
       if (costed.value !== null) {
@@ -219,7 +233,8 @@ async function applyDocument({
  * same shape so the caller does not care which ran.
  */
 async function costMovement({
-  orgId, item, quantity, line, costing, policy, documentId, documentNumber, receivedAt, priorConsumption
+  orgId, item, quantity, line, costing, policy, documentId, documentNumber, receivedAt, priorConsumption,
+  locationId = null
 }) {
   const empty = { unitCost: null, value: null, consumed: undefined, layerId: null, shortfall: 0 };
 
@@ -228,6 +243,7 @@ async function costMovement({
     const layer = await valuation.receive({
       orgId,
       itemId: item._id,
+      locationId,
       quantity,
       unitCost,
       sourceType: 'purchase',
@@ -251,7 +267,7 @@ async function costMovement({
 
   if (costing === 'consume') {
     const drawn = await valuation.consume({
-      orgId, itemId: item._id, quantity, consumeByExpiry: policy.consumeByExpiry
+      orgId, itemId: item._id, locationId, quantity, consumeByExpiry: policy.consumeByExpiry
     });
     return {
       unitCost: drawn.unitCost,
@@ -278,7 +294,8 @@ async function costMovement({
         .map(entry => ({ ...entry, quantity: valuation.round(entry.quantity * share) }))
         .filter(entry => entry.quantity > 0);
       const restored = await valuation.restore({
-        orgId, itemId: item._id, consumed: slice, sourceType: 'return', sourceId: documentId, sourceNumber: documentNumber
+        orgId, itemId: item._id, locationId, consumed: slice,
+        sourceType: 'return', sourceId: documentId, sourceNumber: documentNumber
       });
       return { ...empty, unitCost: restored.unitCost, value: restored.value, consumed: undefined };
     }
@@ -287,10 +304,11 @@ async function costMovement({
     // valuation existed, or against a line that never matched. Value it at what
     // the item last cost rather than at nothing, and let it become a real layer
     // so it can be sold again.
-    const unitCost = await valuation.lastKnownCost(orgId, item._id);
+    const unitCost = await valuation.lastKnownCost(orgId, item._id, locationId);
     const layer = await valuation.receive({
       orgId,
       itemId: item._id,
+      locationId,
       quantity,
       unitCost,
       sourceType: 'return',
@@ -329,9 +347,16 @@ async function loadConsumption(orgId, documentId) {
   return byItem;
 }
 
-/** An issued invoice takes stock out. */
-function applyInvoice(req, invoice) {
+/**
+ * An issued invoice takes stock out — of the warehouse it names (2.5 #42).
+ *
+ * `location` is resolved by the caller and handed in, rather than looked up
+ * here, so an invoice, its cancellation and any credit note against it all act
+ * on the same warehouse without each re-deriving it and risking disagreement.
+ */
+function applyInvoice(req, invoice, location = null) {
   return applyDocument({
+    location,
     req,
     orgId: invoice.orgId,
     lines: invoice.items,
@@ -346,9 +371,10 @@ function applyInvoice(req, invoice) {
   });
 }
 
-/** Cancelling it puts the stock back. */
-function reverseInvoice(req, invoice) {
+/** Cancelling it puts the stock back, where it came from. */
+function reverseInvoice(req, invoice, location = null) {
   return applyDocument({
+    location,
     req,
     orgId: invoice.orgId,
     lines: invoice.items,
@@ -371,8 +397,9 @@ function reverseInvoice(req, invoice) {
  * part of the goods, and treating it as a full reversal would inflate stock by the
  * difference.
  */
-function applyCreditNote(req, note) {
+function applyCreditNote(req, note, location = null) {
   return applyDocument({
+    location,
     req,
     orgId: note.orgId,
     lines: note.items,
@@ -388,9 +415,10 @@ function applyCreditNote(req, note) {
   });
 }
 
-/** A purchase brings stock in. */
-function applyPurchase(req, purchase) {
+/** A purchase brings stock in, to the warehouse it was delivered to. */
+function applyPurchase(req, purchase, location = null) {
   return applyDocument({
+    location,
     req,
     orgId: purchase.orgId,
     lines: purchase.items,
@@ -418,7 +446,11 @@ function applyPurchase(req, purchase) {
 async function adjust({
   req, orgId, itemId, quantity, reason = 'adjustment', note,
   /** What the added goods cost. Only meaningful when adding. */
-  unitCost, batchNumber, expiryDate
+  unitCost, batchNumber, expiryDate,
+  /** Which warehouse is being corrected (2.5 #42). A recount is a fact about one
+   *  shelf, and applying it to the tenant-wide pool would move stock that was
+   *  never counted. */
+  location = null
 }) {
   const item = await Item.findOne({ _id: itemId, orgId, deletedAt: null })
     .select('_id name type purchasePrice trackBatches').lean();
@@ -450,10 +482,11 @@ async function adjust({
      */
     const cost = Number.isFinite(Number(unitCost)) && Number(unitCost) >= 0
       ? valuation.round(unitCost)
-      : await valuation.lastKnownCost(orgId, item._id);
+      : await valuation.lastKnownCost(orgId, item._id, location?._id || null);
     const layer = await valuation.receive({
       orgId,
       itemId: item._id,
+      locationId: location?._id || null,
       quantity: delta,
       unitCost: cost,
       sourceType: reason === 'opening' ? 'opening' : 'adjustment',
@@ -469,7 +502,8 @@ async function adjust({
     // cost, so the loss lands in the right place rather than as an unexplained
     // quantity change.
     const drawn = await valuation.consume({
-      orgId, itemId: item._id, quantity: Math.abs(delta), consumeByExpiry: policy.consumeByExpiry
+      orgId, itemId: item._id, locationId: location?._id || null,
+      quantity: Math.abs(delta), consumeByExpiry: policy.consumeByExpiry
     });
     costed = { unitCost: drawn.unitCost, value: drawn.value, consumed: drawn.consumed, layerId: null };
   }
@@ -488,7 +522,8 @@ async function adjust({
     layerId: costed.layerId,
     valuationMethod: policy.valuationMethod,
     batchNumber,
-    expiryDate
+    expiryDate,
+    location
   });
 
   if (costed.value !== null) {
@@ -512,7 +547,7 @@ async function adjust({
  * consumed portion is reported instead, so the caller can say what could not be
  * undone rather than quietly under-reversing.
  */
-async function reversePurchase(req, purchase) {
+async function reversePurchase(req, purchase, location = null) {
   try {
     const orgId = purchase.orgId;
     const existing = await StockMovement.findOne({ orgId, documentId: purchase._id, reason: 'purchase-reversed' })
@@ -547,6 +582,13 @@ async function reversePurchase(req, purchase) {
         actorName: req?.user?.name,
         unitCost: unwound.quantity > 0 ? valuation.round(unwound.value / unwound.quantity) : null,
         value: -unwound.value,
+        /**
+         * The layers themselves are found by `sourceId`, so they are already the
+         * right ones wherever they sit. This is only so the ledger row reads
+         * correctly — a reversal filed against no location, beside a purchase
+         * filed against Mumbai, would look like two unrelated events.
+         */
+        location,
         note: unwound.alreadyConsumed > 0
           ? `${unwound.alreadyConsumed} already sold and could not be reversed`
           : undefined

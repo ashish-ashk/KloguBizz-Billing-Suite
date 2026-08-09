@@ -1357,3 +1357,429 @@ test('the activity log is admin-only', maybe(async () => {
   const refused = await call('GET', '/reports/activity', { token: accepted.body.token });
   assert.equal(refused.status, 403);
 }));
+
+// ── Warehouses and transfers (2.5 #42) ───────────
+
+const { StockLocation } = require('../src/models/StockLocation');
+
+async function locations(token) {
+  const { status, body } = await call('GET', '/reports/stock/locations', { token });
+  assert.equal(status, 200, JSON.stringify(body));
+  return body.locations;
+}
+
+async function makeLocation(token, name, overrides = {}) {
+  const { status, body } = await call('POST', '/reports/stock/locations', {
+    token, body: { name, ...overrides }
+  });
+  assert.equal(status, 201, `location create failed: ${JSON.stringify(body)}`);
+  return body;
+}
+
+async function transfer(token, body) {
+  return call('POST', '/reports/stock/transfer', { token, body });
+}
+
+async function heldAt(orgId, itemId, locationId) {
+  const rows = await StockLayer.aggregate([
+    {
+      $match: {
+        orgId: new mongoose.Types.ObjectId(String(orgId)),
+        itemId: new mongoose.Types.ObjectId(String(itemId)),
+        locationId: new mongoose.Types.ObjectId(String(locationId)),
+        remaining: { $gt: 0 }
+      }
+    },
+    { $group: { _id: null, quantity: { $sum: '$remaining' }, value: { $sum: { $multiply: ['$remaining', '$unitCost'] } } } }
+  ]);
+  return { quantity: rows[0]?.quantity || 0, value: Math.round((rows[0]?.value || 0) * 100) / 100 };
+}
+
+test('a new tenant gets a default warehouse, and its stock lands in it', maybe(async () => {
+  const tenant = await registerOrg();
+  const list = await locations(tenant.token);
+
+  /**
+   * Without this a new tenant would have no location at all, so every layer
+   * would be stamped `null` — invisible to per-location balances and impossible
+   * to transfer. They would find out only after building up stock they then
+   * could not move.
+   */
+  assert.equal(list.length, 1);
+  assert.equal(list[0].isDefault, true);
+
+  const item = await createItem(tenant.token, { name: 'Located Rod', itemCode: 'LOC-1', stockQty: 40 });
+  const held = await heldAt(tenant.org._id, item._id, list[0]._id);
+  assert.equal(held.quantity, 40, 'opening stock goes to the default warehouse');
+}));
+
+test('selling from one warehouse does not draw down another', maybe(async () => {
+  const tenant = await registerOrg();
+  const [main] = await locations(tenant.token);
+  const second = await makeLocation(tenant.token, 'Second Godown');
+  const client = await createClient(tenant.token);
+  const item = await createItem(tenant.token, { name: 'Split Rod', itemCode: 'SPLIT-1', stockQty: 0 });
+
+  // 10 in each, at different costs, so the cost drawn says which warehouse the
+  // sale actually came from.
+  await call('POST', `/reports/stock/${item._id}/adjust`, {
+    token: tenant.token,
+    body: { quantity: 10, note: 'stocking main', unitCost: 100, locationId: main._id }
+  });
+  await call('POST', `/reports/stock/${item._id}/adjust`, {
+    token: tenant.token,
+    body: { quantity: 10, note: 'stocking second', unitCost: 300, locationId: second._id }
+  });
+
+  await createInvoice(tenant.token, {
+    clientId: client._id,
+    locationId: second._id,
+    items: [{ desc: 'Split Rod', hsn: '7213', qty: 4, rate: 500, gstRate: 18 }]
+  });
+
+  /**
+   * The whole feature in one assertion. Without the location filter on
+   * consumption the sale would have taken Main's older, cheaper layer — the
+   * books would still balance in total while both warehouses' physical counts
+   * drifted from the system, and nothing would say so.
+   */
+  assert.equal((await heldAt(tenant.org._id, item._id, main._id)).quantity, 10, 'Main is untouched');
+  assert.equal((await heldAt(tenant.org._id, item._id, second._id)).quantity, 6);
+
+  const movement = await StockMovement.findOne({ orgId: tenant.org._id, itemId: item._id, reason: 'sale' }).lean();
+  assert.equal(movement.unitCost, 300, 'and it cost what the *second* godown paid');
+  assert.equal(String(movement.locationId), String(second._id));
+}));
+
+test('a transfer moves the goods without changing what they are worth', maybe(async () => {
+  const tenant = await registerOrg();
+  const [main] = await locations(tenant.token);
+  const second = await makeLocation(tenant.token, 'Transfer Target');
+  const item = await createItem(tenant.token, { name: 'Moving Rod', itemCode: 'MOVE-1', stockQty: 0 });
+
+  await call('POST', `/reports/stock/${item._id}/adjust`, {
+    token: tenant.token, body: { quantity: 10, note: 'in', unitCost: 250, locationId: main._id }
+  });
+
+  const before = await Item.findById(item._id).select('stockQty stockValue').lean();
+  const { status, body } = await transfer(tenant.token, {
+    fromLocationId: main._id, toLocationId: second._id,
+    lines: [{ itemId: item._id, quantity: 6 }], note: 'van run'
+  });
+  assert.equal(status, 201, JSON.stringify(body));
+
+  /**
+   * The rule the whole transfer is built around. Nothing was bought or sold and
+   * no profit has moved — the goods are simply somewhere else. The naive
+   * implementation receives them at *today's* cost, which would let a business
+   * change its reported profit by driving a van between its own godowns.
+   */
+  const after = await Item.findById(item._id).select('stockQty stockValue').lean();
+  assert.equal(after.stockQty, before.stockQty, 'the total on hand is unchanged');
+  assert.equal(after.stockValue, before.stockValue, 'and so is what it is worth');
+
+  assert.equal((await heldAt(tenant.org._id, item._id, main._id)).quantity, 4);
+  assert.equal((await heldAt(tenant.org._id, item._id, second._id)).quantity, 6);
+  assert.equal((await heldAt(tenant.org._id, item._id, second._id)).value, 1500, 'at the cost it left at');
+}));
+
+test('a transfer keeps the goods in their place in the FIFO queue', maybe(async () => {
+  const tenant = await registerOrg();
+  const [main] = await locations(tenant.token);
+  const second = await makeLocation(tenant.token, 'Round Trip');
+  const item = await createItem(tenant.token, { name: 'Queue Rod', itemCode: 'QUEUE-1', stockQty: 0 });
+
+  // Two consignments at different costs, the cheap one older.
+  const old = await StockLayer.create({
+    orgId: tenant.org._id, itemId: item._id, locationId: main._id,
+    unitCost: 100, quantity: 5, remaining: 5, sourceType: 'opening',
+    receivedAt: new Date('2026-01-01')
+  });
+  await StockLayer.create({
+    orgId: tenant.org._id, itemId: item._id, locationId: main._id,
+    unitCost: 400, quantity: 5, remaining: 5, sourceType: 'opening',
+    receivedAt: new Date('2026-06-01')
+  });
+  await Item.updateOne({ _id: item._id }, { stockQty: 10, stockValue: 2500 });
+
+  // Send the old one to the other godown and straight back.
+  await transfer(tenant.token, {
+    fromLocationId: main._id, toLocationId: second._id, lines: [{ itemId: item._id, quantity: 5 }]
+  });
+  await transfer(tenant.token, {
+    fromLocationId: second._id, toLocationId: main._id, lines: [{ itemId: item._id, quantity: 5 }]
+  });
+
+  const client = await createClient(tenant.token);
+  await createInvoice(tenant.token, {
+    clientId: client._id, locationId: main._id,
+    items: [{ desc: 'Queue Rod', hsn: '7213', qty: 5, rate: 900, gstRate: 18 }]
+  });
+
+  /**
+   * Stamping the arriving layers with today's date would have made the oldest
+   * goods in the business the newest, so this sale would report ₹400 a unit
+   * instead of ₹100 — and expiry-first ordering would silently reverse for
+   * anyone using it.
+   */
+  const sale = await StockMovement.findOne({ orgId: tenant.org._id, itemId: item._id, reason: 'sale' }).lean();
+  assert.equal(sale.unitCost, 100, 'a round trip must not reorder the queue');
+  assert.equal(String(old.receivedAt.toISOString()).slice(0, 10), '2026-01-01');
+}));
+
+test('a transfer of stock you do not have is refused, not short-drawn', maybe(async () => {
+  const tenant = await registerOrg();
+  const [main] = await locations(tenant.token);
+  const second = await makeLocation(tenant.token, 'Empty Godown');
+  const item = await createItem(tenant.token, { name: 'Scarce Rod', itemCode: 'SCARCE-1', stockQty: 0 });
+  await call('POST', `/reports/stock/${item._id}/adjust`, {
+    token: tenant.token, body: { quantity: 3, note: 'in', unitCost: 100, locationId: main._id }
+  });
+
+  const { status, body } = await transfer(tenant.token, {
+    fromLocationId: main._id, toLocationId: second._id, lines: [{ itemId: item._id, quantity: 8 }]
+  });
+
+  /**
+   * Unlike a sale, which is allowed to go short — goods sold before the bill was
+   * entered is the most common thing that happens in a real shop. Moving goods
+   * you do not have is not a thing that happens at all, and allowing it would
+   * create value out of nothing at the destination.
+   */
+  assert.equal(status, 400);
+  assert.equal(body.code, 'TRANSFER_INSUFFICIENT');
+  assert.match(body.message, /holds 3/);
+  assert.equal((await heldAt(tenant.org._id, item._id, main._id)).quantity, 3, 'and nothing moved');
+}));
+
+test('a multi-line transfer moves all of it or none of it', maybe(async () => {
+  const tenant = await registerOrg();
+  const [main] = await locations(tenant.token);
+  const second = await makeLocation(tenant.token, 'All Or Nothing');
+  const ok = await createItem(tenant.token, { name: 'Fine Rod', itemCode: 'FINE-1', stockQty: 0 });
+  const short = await createItem(tenant.token, { name: 'Short Rod', itemCode: 'SHORT-1', stockQty: 0 });
+  await call('POST', `/reports/stock/${ok._id}/adjust`, {
+    token: tenant.token, body: { quantity: 10, note: 'in', unitCost: 100, locationId: main._id }
+  });
+
+  const { status } = await transfer(tenant.token, {
+    fromLocationId: main._id, toLocationId: second._id,
+    lines: [{ itemId: ok._id, quantity: 5 }, { itemId: short._id, quantity: 1 }]
+  });
+
+  // Everything is checked before anything moves: a partial transfer leaves the
+  // warehouse in a state nobody asked for.
+  assert.equal(status, 400);
+  assert.equal((await heldAt(tenant.org._id, ok._id, main._id)).quantity, 10, 'the good line did not move either');
+}));
+
+test('a warehouse in another state is refused, and says why', maybe(async () => {
+  const tenant = await registerOrg();
+  const { status, body } = await call('POST', '/reports/stock/locations', {
+    token: tenant.token, body: { name: 'Bengaluru Godown', stateCode: '29' }
+  });
+
+  /**
+   * Not a nicety. Storing goods in another state needs a separate GST
+   * registration, and moving stock there is a supply between distinct persons —
+   * a tax invoice, an entry in GSTR-1 and IGST. Treating it as an internal
+   * transfer would understate output tax, which surfaces as a demand years later
+   * rather than as an error today. That is the multi-GSTIN work deferred in
+   * 2.1 #9.
+   */
+  assert.equal(status, 400);
+  assert.equal(body.code, 'LOCATION_OTHER_STATE');
+  assert.match(body.message, /own GST registration/);
+}));
+
+test('a warehouse holding stock cannot be archived', maybe(async () => {
+  const tenant = await registerOrg();
+  const [main] = await locations(tenant.token);
+  const second = await makeLocation(tenant.token, 'Closing Down');
+  const item = await createItem(tenant.token, { name: 'Stranded Rod', itemCode: 'STRAND-1', stockQty: 0 });
+  await call('POST', `/reports/stock/${item._id}/adjust`, {
+    token: tenant.token, body: { quantity: 5, note: 'in', unitCost: 100, locationId: second._id }
+  });
+
+  const refused = await call('PUT', `/reports/stock/locations/${second._id}`, {
+    token: tenant.token, body: { status: 'archived' }
+  });
+  /**
+   * Otherwise the goods become unreachable: nothing can be sold or transferred
+   * out of an archived location, so the quantity stays on the books, keeps
+   * counting towards the valuation, and cannot be touched.
+   */
+  assert.equal(refused.status, 409);
+  assert.equal(refused.body.code, 'LOCATION_NOT_EMPTY');
+
+  await transfer(tenant.token, {
+    fromLocationId: second._id, toLocationId: main._id, lines: [{ itemId: item._id, quantity: 5 }]
+  });
+  const allowed = await call('PUT', `/reports/stock/locations/${second._id}`, {
+    token: tenant.token, body: { status: 'archived' }
+  });
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.body.status, 'archived');
+}));
+
+test('the default warehouse cannot be archived at all', maybe(async () => {
+  const tenant = await registerOrg();
+  const [main] = await locations(tenant.token);
+  const { status, body } = await call('PUT', `/reports/stock/locations/${main._id}`, {
+    token: tenant.token, body: { status: 'archived' }
+  });
+  // Everything that names no location falls back to it, so archiving it would
+  // leave those movements with nowhere to go.
+  assert.equal(status, 409);
+  assert.equal(body.code, 'LOCATION_IS_DEFAULT');
+}));
+
+test('a cancelled invoice returns the stock to the warehouse it left', maybe(async () => {
+  const tenant = await registerOrg();
+  const [main] = await locations(tenant.token);
+  const second = await makeLocation(tenant.token, 'Return Target');
+  const client = await createClient(tenant.token);
+  const item = await createItem(tenant.token, { name: 'Returning Rod', itemCode: 'RET-1', stockQty: 0 });
+  await call('POST', `/reports/stock/${item._id}/adjust`, {
+    token: tenant.token, body: { quantity: 10, note: 'in', unitCost: 120, locationId: second._id }
+  });
+
+  const invoice = await createInvoice(tenant.token, {
+    clientId: client._id, locationId: second._id,
+    items: [{ desc: 'Returning Rod', hsn: '7213', qty: 4, rate: 500, gstRate: 18 }]
+  });
+  assert.equal((await heldAt(tenant.org._id, item._id, second._id)).quantity, 6);
+
+  // Cancelled, not deleted: an issued invoice has reached a customer and been
+  // counted in a return, so it is reversed rather than erased.
+  const cancelled = await call('POST', `/invoices/${invoice._id}/cancel`, {
+    token: tenant.token, body: { reason: 'customer changed their mind' }
+  });
+  assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
+
+  /**
+   * The invoice records where the goods went out from, so a cancellation months
+   * later puts them back there even if the tenant's default has changed since.
+   */
+  assert.equal((await heldAt(tenant.org._id, item._id, second._id)).quantity, 10);
+  assert.equal((await heldAt(tenant.org._id, item._id, main._id)).quantity, 0);
+}));
+
+test('two warehouses that paid different prices are valued separately', maybe(async () => {
+  const tenant = await registerOrg();
+  const [main] = await locations(tenant.token);
+  const second = await makeLocation(tenant.token, 'Dearer Godown');
+  const item = await createItem(tenant.token, { name: 'Blend Rod', itemCode: 'BLEND-1', stockQty: 0 });
+
+  // Weighted average is the case that would blend them if the blend were not
+  // scoped per location.
+  await call('PUT', '/organisations/current', {
+    token: tenant.token, body: { inventorySettings: { valuationMethod: 'weighted-average' } }
+  });
+
+  await call('POST', `/reports/stock/${item._id}/adjust`, {
+    token: tenant.token, body: { quantity: 10, note: 'cheap', unitCost: 100, locationId: main._id }
+  });
+  await call('POST', `/reports/stock/${item._id}/adjust`, {
+    token: tenant.token, body: { quantity: 10, note: 'dear', unitCost: 300, locationId: second._id }
+  });
+
+  /**
+   * Merging them would make each warehouse's valuation wrong in opposite
+   * directions while the total stayed right — the kind of error that survives
+   * every check anyone thinks to run.
+   */
+  assert.equal((await heldAt(tenant.org._id, item._id, main._id)).value, 1000);
+  assert.equal((await heldAt(tenant.org._id, item._id, second._id)).value, 3000);
+}));
+
+test('the ledger says where a transfer went, from both ends', maybe(async () => {
+  const tenant = await registerOrg();
+  const [main] = await locations(tenant.token);
+  const second = await makeLocation(tenant.token, 'Readable Godown');
+  const item = await createItem(tenant.token, { name: 'Legible Rod', itemCode: 'LEG-1', stockQty: 0 });
+  await call('POST', `/reports/stock/${item._id}/adjust`, {
+    token: tenant.token, body: { quantity: 8, note: 'in', unitCost: 50, locationId: main._id }
+  });
+
+  await transfer(tenant.token, {
+    fromLocationId: main._id, toLocationId: second._id,
+    lines: [{ itemId: item._id, quantity: 3 }], note: 'restocking the shop'
+  });
+
+  const rows = await StockMovement.find({
+    orgId: tenant.org._id, itemId: item._id, reason: { $in: ['transfer-out', 'transfer-in'] }
+  }).lean();
+  assert.equal(rows.length, 2);
+
+  const out = rows.find(r => r.reason === 'transfer-out');
+  const incoming = rows.find(r => r.reason === 'transfer-in');
+  /**
+   * Their own reasons rather than a pair of adjustments: nothing was wrong,
+   * nothing changed in total, and filing it as an adjustment would make every
+   * transfer look like a stock discrepancy in the one report people read to find
+   * stock discrepancies.
+   */
+  assert.equal(out.locationName, main.name);
+  assert.equal(out.transferLocationName, second.name);
+  assert.equal(incoming.locationName, second.name);
+  assert.equal(String(incoming.transferPairId), String(out._id));
+  assert.equal(String(out.transferPairId), String(incoming._id));
+  // Signed like everything else in this ledger, so a balance is a $sum.
+  assert.equal(out.quantity, -3);
+  assert.equal(incoming.quantity, 3);
+}));
+
+test('a location list says what each warehouse holds', maybe(async () => {
+  const tenant = await registerOrg();
+  const [main] = await locations(tenant.token);
+  const second = await makeLocation(tenant.token, 'Counted Godown', { code: 'CNT' });
+  const item = await createItem(tenant.token, { name: 'Counted Rod', itemCode: 'CNT-1', stockQty: 0 });
+  await call('POST', `/reports/stock/${item._id}/adjust`, {
+    token: tenant.token, body: { quantity: 7, note: 'in', unitCost: 200, locationId: second._id }
+  });
+
+  const list = await locations(tenant.token);
+  const row = list.find(l => String(l._id) === String(second._id));
+  assert.equal(row.quantity, 7);
+  assert.equal(row.value, 1400);
+  assert.equal(row.itemCount, 1);
+  assert.equal(list.find(l => String(l._id) === String(main._id)).quantity, 0);
+
+  const perItem = await call('GET', `/reports/stock/${item._id}/locations`, { token: tenant.token });
+  assert.equal(perItem.status, 200);
+  assert.equal(perItem.body.balances.length, 1);
+  assert.equal(perItem.body.balances[0].locationName, 'Counted Godown');
+}));
+
+test('two warehouses cannot share a name', maybe(async () => {
+  const tenant = await registerOrg();
+  await makeLocation(tenant.token, 'Duplicate Godown');
+  const { status, body } = await call('POST', '/reports/stock/locations', {
+    token: tenant.token, body: { name: 'Duplicate Godown' }
+  });
+  // Otherwise a transfer form offers two identical options and the operator has
+  // no way to tell which is which.
+  assert.equal(status, 409);
+  assert.equal(body.code, 'LOCATION_EXISTS');
+}));
+
+test('one tenant cannot transfer into another tenant warehouse', maybe(async () => {
+  const mine = await registerOrg();
+  const theirs = await registerOrg();
+  const [myMain] = await locations(mine.token);
+  const theirGodown = await makeLocation(theirs.token, 'Their Godown');
+  const item = await createItem(mine.token, { name: 'Isolated Rod', itemCode: 'ISO-1', stockQty: 0 });
+  await call('POST', `/reports/stock/${item._id}/adjust`, {
+    token: mine.token, body: { quantity: 5, note: 'in', unitCost: 100, locationId: myMain._id }
+  });
+
+  const { status, body } = await transfer(mine.token, {
+    fromLocationId: myMain._id, toLocationId: theirGodown._id, lines: [{ itemId: item._id, quantity: 2 }]
+  });
+  // Resolution is scoped by orgId, so another tenant's warehouse simply does not
+  // exist from here.
+  assert.equal(status, 400);
+  assert.equal(body.code, 'LOCATION_NOT_FOUND');
+  assert.equal(await StockLocation.countDocuments({ orgId: mine.org._id }), 1);
+}));

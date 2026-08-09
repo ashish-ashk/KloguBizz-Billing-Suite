@@ -33,6 +33,20 @@ const stockLayerSchema = new mongoose.Schema({
   itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item', required: true, index: true },
 
   /**
+   * Where these goods physically are (2.5 #42).
+   *
+   * The dimension that made this feature worth doing last. Consumption filters
+   * on it, so selling from one warehouse cannot draw down another's stock —
+   * which sounds obvious and is the whole feature: without it, an invoice raised
+   * in Mumbai would silently consume the Delhi godown's oldest layer and report
+   * its cost, and the physical count at both would stop matching the system.
+   *
+   * Backfilled to each tenant's default location by migration 011, so every
+   * layer that predates locations has one.
+   */
+  locationId: { type: mongoose.Schema.Types.ObjectId, ref: 'StockLocation', default: null, index: true },
+
+  /**
    * Cost per unit, exclusive of recoverable tax.
    *
    * GST on a purchase is an input tax credit, not a cost — capitalising it would
@@ -81,6 +95,8 @@ const stockLayerSchema = new mongoose.Schema({
  * sale is the difference between this being free and this being the slowest part
  * of issuing an invoice.
  */
+stockLayerSchema.index({ orgId: 1, itemId: 1, locationId: 1, remaining: 1, receivedAt: 1 });
+/** The same query without a location, for a valuation across every warehouse. */
 stockLayerSchema.index({ orgId: 1, itemId: 1, remaining: 1, receivedAt: 1 });
 /** Expiry reporting, and first-expiry-first-out consumption. */
 stockLayerSchema.index({ orgId: 1, expiryDate: 1, remaining: 1 });

@@ -14,6 +14,7 @@ const { notDeleted, scopeFilter, deletionPatch, RESTORE_PATCH } = require('../ut
 const { recordEvent, EVENT } = require('../services/usageEventService');
 const { assertValidMaster } = require('../services/masterService');
 const stock = require('../services/stockService');
+const stockLocations = require('../services/stockLocationService');
 
 /**
  * Vendors and purchase invoices — the inward side of the ledger, and with it input
@@ -307,7 +308,8 @@ const createPurchase = asyncHandler(async (req, res) => {
     recordEvent({ req, type: EVENT.purchaseRecorded, value: totals.total, meta: { billNumber: purchase.billNumber } });
     // Goods in. A draft purchase moves nothing, for the same reason a draft invoice
     // does not: nothing has been received yet.
-    const stockResult = purchase.status === 'draft' ? null : await stock.applyPurchase(req, purchase);
+    const location = await stockLocations.resolveLocationSafely(req.orgId, purchase.locationId);
+    const stockResult = purchase.status === 'draft' ? null : await stock.applyPurchase(req, purchase, location);
     res.status(201).json({
       ...purchase.toObject(),
       stock: stockResult ? { moved: stockResult.moved, unmatched: stockResult.unmatched } : undefined
@@ -409,7 +411,7 @@ const deletePurchase = asyncHandler(async (req, res) => {
    * un-receiving it would rewrite that invoice's margin — so it is reported
    * instead, and the response says so rather than implying a clean reversal.
    */
-  const reversal = purchase.status === 'draft' ? { moved: 0 } : await stock.reversePurchase(req, purchase);
+  const reversal = purchase.status === 'draft' ? { moved: 0 } : await stock.reversePurchase(req, purchase, await stockLocations.resolveLocationSafely(req.orgId, purchase.locationId));
 
   logAudit({
     req,

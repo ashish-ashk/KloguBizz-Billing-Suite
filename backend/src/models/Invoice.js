@@ -154,6 +154,16 @@ const invoiceSchema = new mongoose.Schema({
    * Falls back to the buyer's state when not set, so existing invoices are
    * unaffected.
    */
+  /**
+   * The warehouse the goods ship from (2.5 #42).
+   *
+   * Stored on the document, not resolved at read time, so a cancellation or a
+   * credit note months later puts the stock back where it came from even if the
+   * tenant's default has changed since. Null means the default, which is what
+   * every invoice raised before locations existed means.
+   */
+  locationId: { type: mongoose.Schema.Types.ObjectId, ref: 'StockLocation', default: null },
+
   placeOfSupply: String,
   /** taxable | exempt | nil-rated | non-gst | zero-rated — see gstService. */
   taxTreatment: { type: String, default: 'taxable' },

@@ -1088,7 +1088,7 @@ and confirm the webhook arrives (Razorpay's dashboard shows delivery attempts).
 ### 7. Inventory depth (2.5 #40-#44) - **MOSTLY DONE (2026-08-07)**
 
 **Done: valuation (#41), batch and expiry (#42), barcodes (#44), and the UI for all of
-it. Warehouses (#43) remain, deliberately last.**
+it. Warehouses (#42) came last, deliberately - see 7a.**
 
 The plan said valuation would be "a pass over `StockMovement` once `unitCost` is added to
 the row". That was wrong in a way worth recording: `StockMovement` is **append-only** by
@@ -1154,13 +1154,83 @@ pass**, clean lint on both packages, clean production build.
 catalogue price, then zero - and *names* the items it could not cost rather than hiding
 them. Verified end to end including an idempotent re-run.
 
-### 7a. Warehouses (2.5 #43) - still open
+### 7a. Warehouses (2.5 #42) - **DONE (2026-08-09)**
 
-**Why last, unchanged from the original reasoning:** they turn every balance query from
-"per item" into "per item per location", and every layer and movement gains a dimension.
-Doing them before valuation would have meant designing the layer model twice. The seam is
-now obvious: `StockLayer` and `StockMovement` each take a `locationId`, consumption filters
-on it, and a transfer becomes a paired movement out and in.
+**Built last, and the reasoning held all the way through:** locations turn every balance
+question from "per item" into "per item per location", and give every cost layer and every
+ledger row another dimension. Building them before valuation would have meant designing the
+layer model twice. The seam the plan predicted was exactly right - `StockLayer` and
+`StockMovement` each take a `locationId`, consumption filters on it, and a transfer is a
+paired movement out and in.
+
+**The feature is one filter.** Consumption scoped to a location is what warehouses *are*.
+Without it, an invoice raised against the Mumbai godown draws down Delhi's oldest layer and
+reports Delhi's cost - the books balance in total while both locations' physical counts
+drift from the system, and nothing anywhere says so. It is the kind of wrong that survives
+every check anyone thinks to run, because every total is still right.
+
+**A transfer must not change what the inventory is worth**, and that is the part with a
+trap in it. Nothing was bought or sold and no profit has moved - the goods are simply
+somewhere else. The naive implementation takes stock out here and receives it there at
+today's cost, so a business could change its reported profit by driving a van between its
+own godowns. The cost travels with the goods instead: the outbound half consumes real
+layers and reports exactly what it drew, and the inbound half recreates those layers at
+exactly those costs.
+
+**And `receivedAt` is carried across, which is the subtler half of the same problem.**
+Stamping the arriving layers with today's date puts them at the back of the destination's
+FIFO queue. Transfer stock out and back and the oldest goods in the business have become
+the newest - the next sale reports the wrong cost of goods sold, and first-expiry-first-out
+silently reverses for anyone relying on it. There is a test that does exactly that round
+trip.
+
+Decisions that each close one specific way of getting this wrong:
+
+- **A migration gives every existing tenant one warehouse holding everything**, and
+  registration gives every new one the same. This is what makes the change safe rather than
+  risky, and it is the trick migration 006 used for memberships. Without it the first sale
+  after deploying would find no layers, report a cost of goods sold of zero and drive stock
+  negative against a location that owns nothing.
+- **A transfer is refused rather than short-drawn**, unlike a sale. Selling goods before the
+  purchase bill is entered is the most common thing that happens in a real shop; moving
+  goods you do not have is not a thing that happens at all, and allowing it would create
+  value out of nothing at the destination. A multi-line transfer checks everything before
+  moving anything, so it happens or it does not.
+- **The weighted-average blend is per location.** Two warehouses that bought the same goods
+  at different prices hold genuinely different value, and merging them makes each one's
+  valuation wrong in opposite directions while the total stays right.
+- **`transfer-out` and `transfer-in` are their own ledger reasons**, not a pair of
+  adjustments. Nothing was wrong and nothing changed in total, and filing it as an
+  adjustment would make every transfer look like a stock discrepancy in the one report
+  people read to find stock discrepancies. Each row names the other end.
+- **A warehouse holding stock cannot be archived**, and the default never can. Otherwise the
+  goods become unreachable: nothing can be sold or transferred out of an archived location,
+  so the quantity stays on the books, keeps counting towards the valuation, and cannot be
+  touched.
+- **The invoice stores which warehouse it shipped from**, so a cancellation or a credit note
+  months later returns the goods there rather than to whatever the default has become.
+
+**The boundary, stated rather than fudged: a warehouse is a place within one GST
+registration, not a branch.** Storing goods in another state needs a separate registration
+there, and moving stock to it is a supply between distinct persons - a tax invoice, an entry
+in GSTR-1, and IGST. Treating that as an internal transfer would understate output tax,
+which surfaces as a demand years later rather than as an error today. That is the
+multi-GSTIN work deferred in 2.1 #9, so a location in another state is **refused with an
+explanation** rather than accepted and mis-taxed.
+
+**A regression I introduced and then had to undo.** Resolving the warehouse before applying
+a document's stock put a *throwing* call one line above the `.catch()` blocks that exist so
+a ledger problem can never invalidate a tax document already issued - so a bad `locationId`
+would have returned a 500 for an invoice that had already been created and numbered. There
+are now two resolvers: the throwing one runs **before** a document exists, where refusing is
+right, and a non-throwing one runs after, where it never is.
+
+**Two more things fixed because the ledger and the browser each caught one.** The transfer
+originally wrote one row and patched the back-link into the other - which the ledger's own
+append-only guard refused, correctly, and which would have failed every transfer. Both ids
+are now minted up front so neither posted row is ever mutated. And the new form's inputs
+had labels that were not programmatically associated with them, found by trying to drive
+them; they carry `for`/`id` now.
 
 ### 8. P&L and expense reporting (2.4 #32) - **DONE (2026-08-07)**
 

@@ -10,6 +10,7 @@ const { nextCreditNoteNumber } = require('../services/invoiceNumberService');
 const { logAudit } = require('../services/auditService');
 const { recordEvent, EVENT } = require('../services/usageEventService');
 const stock = require('../services/stockService');
+const stockLocations = require('../services/stockLocationService');
 const { streamCsv } = require('../services/csvService');
 const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
 const { recalculateSettlement } = require('./invoiceController');
@@ -170,7 +171,13 @@ const createCreditNote = asyncHandler(async (req, res) => {
   recordEvent({ req, type: EVENT.creditNote, value: totals.total, meta: { creditNoteNumber: note.creditNoteNumber } });
   // Only the quantities on the note. A partial credit returns part of the goods, and
   // treating it as a full reversal of the invoice would inflate stock by the difference.
-  await stock.applyCreditNote(req, note);
+  /**
+   * Back into the warehouse the invoice shipped from, not the tenant's default.
+   * The invoice recorded where the goods went out from, and that is where a
+   * return belongs (2.5 #42).
+   */
+  const invoiceDoc = await Invoice.findOne({ _id: note.invoiceId, orgId: note.orgId }).select('locationId').lean();
+  await stock.applyCreditNote(req, note, await stockLocations.resolveLocationSafely(note.orgId, invoiceDoc?.locationId));
 
   res.status(201).json({ creditNote: note, invoice });
 });

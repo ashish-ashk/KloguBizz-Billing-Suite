@@ -10,7 +10,10 @@ const { requireRole } = require('../middleware/roleMiddleware');
 const { requireTenant } = require('../middleware/tenantMiddleware');
 const { requireFlag } = require('../services/featureFlagService');
 const { validate } = require('../middleware/validate');
-const { stockAdjustSchema } = require('../validators/schemas');
+const {
+  stockAdjustSchema, stockLocationCreateSchema, stockLocationUpdateSchema, stockTransferSchema
+} = require('../validators/schemas');
+const stockLocations = require('../controllers/stockLocationController');
 const {
   ageingReport, ageingExcel,
   customerStatement, customerStatementExcel,
@@ -74,6 +77,21 @@ router.post('/stock/:id/recompute', requireRole('admin'), recomputeStock);
 router.get('/stock/valuation', stockValuation);
 router.get('/stock/expiring', expiringStock);
 router.get('/stock/:id/layers', itemStockLayers);
+
+/**
+ * Warehouses and transfers (2.5 #42).
+ *
+ * Declared before `/stock/:id/...` would be reached for the literal path, and
+ * kept on the reports router because everything else about stock already lives
+ * here. Creating a location and moving stock are admin: both change balances
+ * with no customer document behind them, which is exactly what needs a name
+ * against it.
+ */
+router.get('/stock/locations', stockLocations.listLocations);
+router.post('/stock/locations', requireRole('admin'), validate(stockLocationCreateSchema), stockLocations.createLocation);
+router.put('/stock/locations/:id', requireRole('admin'), validate(stockLocationUpdateSchema), stockLocations.updateLocation);
+router.post('/stock/transfer', requireRole('admin'), validate(stockTransferSchema), stockLocations.transferStock);
+router.get('/stock/:id/locations', stockLocations.itemLocations);
 
 /**
  * The tenant's own audit trail (2.6 #50).

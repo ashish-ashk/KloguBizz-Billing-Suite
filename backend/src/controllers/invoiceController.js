@@ -22,6 +22,7 @@ const { streamCsv } = require('../services/csvService');
 const { env } = require('../config/env');
 const { recordEvent, EVENT } = require('../services/usageEventService');
 const stock = require('../services/stockService');
+const stockLocations = require('../services/stockLocationService');
 const { scopeFilter, deletionPatch, RESTORE_PATCH } = require('../utils/softDelete');
 
 /**
@@ -420,6 +421,15 @@ const createInvoice = asyncHandler(async (req, res) => {
   // that counter (leaving it out of sync) and risks colliding with a
   // number the counter has already handed out.
   delete body.invoiceNumber;
+  /**
+   * A named warehouse that does not exist refuses the request here, before the
+   * document is numbered (2.5 #42).
+   *
+   * The resolution after creation is deliberately the non-throwing variant, so
+   * this is the only place a bad `locationId` can be reported — and it is the
+   * right place, because nothing has been issued yet.
+   */
+  if (body.locationId) await stockLocations.resolveLocation(req.orgId, body.locationId);
   const totals = await totalsFor(req, body);
   const invoice = await Invoice.create({
     ...body,
@@ -455,7 +465,15 @@ const createInvoice = asyncHandler(async (req, res) => {
    * invoice: an invoice that was legitimately issued must not be rejected because the
    * ledger had a bad moment. The ledger is repairable; an unissued invoice is not.
    */
-  const stockResult = invoice.status === 'draft' ? null : await stock.applyInvoice(req, invoice);
+  /**
+     * The warehouse the goods leave from (2.5 #42).
+     *
+     * Resolved once and stored on the invoice, so a cancellation or a credit
+     * note months later puts the stock back where it came from rather than
+     * wherever the tenant's default happens to be by then.
+     */
+  const location = await stockLocations.resolveLocationSafely(req.orgId, invoice.locationId);
+  const stockResult = invoice.status === 'draft' ? null : await stock.applyInvoice(req, invoice, location);
   res.status(201).json({
     ...invoice.toObject(),
     // Surfaced rather than silent: a line that matched no catalogue item moved no
@@ -703,7 +721,7 @@ const cancelInvoice = asyncHandler(async (req, res) => {
 
   // The goods never left, so the stock comes back. Idempotent: a second cancel finds
   // the existing reversal and posts nothing.
-  await stock.reverseInvoice(req, invoice);
+  await stock.reverseInvoice(req, invoice, await stockLocations.resolveLocationSafely(req.orgId, invoice.locationId));
   logAudit({ req, action: 'invoice.cancelled', entity: 'invoice', entityId: invoice._id, meta: { invoiceNumber: invoice.invoiceNumber, reason: invoice.cancelReason } });
   res.json(invoice);
 });

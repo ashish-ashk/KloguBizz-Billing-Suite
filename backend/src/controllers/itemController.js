@@ -10,6 +10,7 @@ const { assertValidMaster } = require('../services/masterService');
 const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
 const { notDeleted, scopeFilter, deletionPatch, RESTORE_PATCH } = require('../utils/softDelete');
 const stock = require('../services/stockService');
+const stockLocations = require('../services/stockLocationService');
 
 // `orgId` is never accepted from the body — it comes from the token, so an
 // update can't relocate the record into another tenant.
@@ -127,7 +128,11 @@ const createItem = asyncHandler(async (req, res) => {
       // The catalogue's purchase price is the only cost known at this point, and
       // it is what the person entering the item just typed. Zero would make the
       // first sale look like pure profit.
-      unitCost: Number(fields.purchasePrice) > 0 ? Number(fields.purchasePrice) : 0
+      unitCost: Number(fields.purchasePrice) > 0 ? Number(fields.purchasePrice) : 0,
+      // Opening stock lands in the default warehouse. Anyone with more than one
+      // moves it with a transfer, which leaves a record of the correction
+      // (2.5 #42).
+      location: await stockLocations.resolveLocationSafely(req.orgId, fields.locationId)
     }).catch(error => {
       // The item exists and is usable; the opening balance is bookkeeping about
       // it. Failing the create here would leave a caller who cannot tell whether

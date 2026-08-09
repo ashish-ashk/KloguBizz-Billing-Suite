@@ -162,6 +162,8 @@ const exportDetailsSchema = z.object({
 
 const invoiceBaseShape = {
   clientId: objectId.optional().nullable(),
+  /** Which warehouse the goods leave from (2.5 #42). Absent means the default. */
+  locationId: objectId.optional().nullable(),
   billTo: billToSchema.optional().nullable(),
   // The state whose tax applies. Distinct from the buyer's registered state (#29).
   placeOfSupply: stateCode.optional().nullable(),
@@ -473,6 +475,36 @@ const subscriptionStartSchema = z.object({
   couponCode: shortText.optional()
 });
 
+/**
+ * Stock locations and transfers (2.5 #42).
+ *
+ * `stateCode` is accepted and then refused by the service when it is not the
+ * organisation's own — the check needs the organisation, which a validator does
+ * not have, and the refusal carries an explanation a format error could not.
+ */
+const stockLocationCreateSchema = z.object({
+  name: shortText.min(2, 'must be at least 2 characters'),
+  code: shortText.optional().nullable(),
+  address: longText.optional().nullable(),
+  stateCode: stateCode.optional(),
+  note: longText.optional().nullable()
+});
+
+const stockLocationUpdateSchema = stockLocationCreateSchema.partial().extend({
+  status: z.enum(['active', 'archived']).optional()
+});
+
+const stockTransferSchema = z.object({
+  fromLocationId: objectId,
+  toLocationId: objectId,
+  date: isoDate.optional(),
+  note: longText.optional().nullable(),
+  lines: z.array(z.object({
+    itemId: objectId,
+    quantity: money.refine(value => value > 0, 'must be greater than zero')
+  })).min(1, 'must contain at least one item').max(200, 'cannot exceed 200 lines')
+});
+
 const couponCheckSchema = z.object({
   code: shortText.min(1, 'is required'),
   planCode: shortText.min(1, 'is required'),
@@ -553,6 +585,8 @@ const vendorUpdateSchema = vendorCreateSchema.partial();
  * it writes a movement that says nothing happened.
  */
 const stockAdjustSchema = z.object({
+  /** Which warehouse is being corrected. A recount is a fact about one shelf. */
+  locationId: objectId.optional().nullable(),
   quantity: z.coerce.number()
     .refine(Number.isFinite, 'must be a number')
     .refine(value => value !== 0, 'must not be zero — use a negative number to reduce stock'),
@@ -583,6 +617,8 @@ const purchaseLineItemSchema = lineItemSchema.extend({
 
 const purchaseBaseShape = {
   vendorId: objectId,
+  /** Which warehouse took delivery (2.5 #42). Absent means the default. */
+  locationId: objectId.optional().nullable(),
   // The supplier's own number, which is what GSTR-2A/2B reconciliation matches on.
   billNumber: shortText.min(1, 'is required'),
   billDate: isoDate,
@@ -806,5 +842,6 @@ module.exports = {
   userInviteSchema, userUpdateSchema,
   organisationUpdateSchema, transferOwnershipSchema,
   subscriptionStartSchema, couponCheckSchema, couponUpsertSchema,
-  creditSettleSchema, creditCreateSchema
+  creditSettleSchema, creditCreateSchema,
+  stockLocationCreateSchema, stockLocationUpdateSchema, stockTransferSchema
 };

@@ -28,7 +28,18 @@ const MOVEMENT_REASONS = [
   'opening',         // opening balance when stock tracking starts
   'adjustment',      // a manual correction, with a note
   'damage',
-  'return'           // goods came back from a customer
+  'return',          // goods came back from a customer
+  /**
+   * The two halves of a stock transfer (2.5 #42).
+   *
+   * Their own reasons rather than a pair of adjustments, because a transfer is
+   * not a correction: nothing was wrong, the total on hand did not change, and
+   * the inventory is worth exactly what it was worth a moment earlier. Filing it
+   * as an adjustment would make every transfer look like a stock discrepancy in
+   * the one report people read to find stock discrepancies.
+   */
+  'transfer-out',
+  'transfer-in'
 ];
 
 const stockMovementSchema = new mongoose.Schema({
@@ -36,6 +47,29 @@ const stockMovementSchema = new mongoose.Schema({
   itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item', required: true, index: true },
   /** Snapshotted, so the ledger reads on its own after an item is renamed. */
   itemName: String,
+
+  /**
+   * Where the movement happened (2.5 #42).
+   *
+   * Backfilled to the tenant's default location by migration 011. Snapshotted
+   * alongside as `locationName` for the same reason `itemName` is: a ledger that
+   * needs a join to be readable stops being readable the moment the thing it
+   * joins to is renamed or archived.
+   */
+  locationId: { type: mongoose.Schema.Types.ObjectId, ref: 'StockLocation', default: null, index: true },
+  locationName: String,
+
+  /**
+   * The other end of a transfer.
+   *
+   * A transfer is a *pair* of movements — out of one location, into another —
+   * and each row points at its counterpart. Without the link, a ledger showing
+   * "-10 Mumbai" and "+10 Delhi" on the same day is two unexplained adjustments
+   * that a reader has to guess are related.
+   */
+  transferPairId: { type: mongoose.Schema.Types.ObjectId, ref: 'StockMovement', default: null },
+  transferLocationId: { type: mongoose.Schema.Types.ObjectId, ref: 'StockLocation', default: null },
+  transferLocationName: String,
   reason: { type: String, enum: MOVEMENT_REASONS, required: true },
   /** Signed: negative reduces stock. */
   quantity: { type: Number, required: true },

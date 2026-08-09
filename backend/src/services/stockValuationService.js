@@ -99,7 +99,7 @@ function unitCostFromLine(line) {
  * ordering is what keeps the two code paths identical downstream.
  */
 async function receive({
-  orgId, itemId, quantity, unitCost, sourceType, sourceId, sourceNumber,
+  orgId, itemId, locationId = null, quantity, unitCost, sourceType, sourceId, sourceNumber,
   receivedAt, batchNumber, expiryDate, valuationMethod
 }) {
   const qty = round(quantity);
@@ -115,8 +115,16 @@ async function receive({
      * across the batchless remainder.
      */
     if (!batchNumber && !expiryDate) {
+      /**
+       * The blend is **per location**, never across them.
+       *
+       * Two warehouses that bought the same goods at different prices hold
+       * genuinely different value, and merging them would make each location's
+       * valuation wrong in opposite directions while the total stayed right —
+       * the kind of error that survives every check anyone thinks to run.
+       */
       const open = await StockLayer.findOne({
-        orgId, itemId, remaining: { $gt: 0 }, batchNumber: { $in: [null, ''] }, expiryDate: null
+        orgId, itemId, locationId, remaining: { $gt: 0 }, batchNumber: { $in: [null, ''] }, expiryDate: null
       }).sort({ receivedAt: 1 });
 
       if (open) {
@@ -134,6 +142,7 @@ async function receive({
   return StockLayer.create({
     orgId,
     itemId,
+    locationId,
     unitCost: cost,
     quantity: qty,
     remaining: qty,
@@ -162,7 +171,7 @@ async function receive({
  * The uncovered quantity is valued at the item's last known cost and reported as
  * `shortfall` so it can be surfaced rather than hidden.
  */
-async function consume({ orgId, itemId, quantity, consumeByExpiry }) {
+async function consume({ orgId, itemId, locationId, quantity, consumeByExpiry }) {
   const wanted = round(quantity);
   if (wanted <= 0) return { consumed: [], quantity: 0, value: 0, unitCost: 0, shortfall: 0 };
 
@@ -174,7 +183,21 @@ async function consume({ orgId, itemId, quantity, consumeByExpiry }) {
    * stock still goes in receipt order behind it.
    */
   const sort = consumeByExpiry ? { expiryDate: 1, receivedAt: 1 } : { receivedAt: 1, _id: 1 };
-  const layers = await StockLayer.find({ orgId, itemId, remaining: { $gt: 0 } }).sort(sort).lean();
+  /**
+   * Scoped to one location when one is named (2.5 #42).
+   *
+   * This single filter is most of what warehouses are. Without it, an invoice
+   * raised against the Mumbai godown would draw down Delhi's oldest layer and
+   * report Delhi's cost — the books would balance in total while both locations'
+   * physical counts drifted from the system, and nothing would say so.
+   *
+   * `undefined` means "wherever", which is what a caller that does not care
+   * about locations gets — and, before migration 011 has run, what everything
+   * gets.
+   */
+  const scope = { orgId, itemId, remaining: { $gt: 0 } };
+  if (locationId !== undefined && locationId !== null) scope.locationId = locationId;
+  const layers = await StockLayer.find(scope).sort(sort).lean();
 
   const consumed = [];
   let remainingWanted = wanted;
@@ -207,7 +230,7 @@ async function consume({ orgId, itemId, quantity, consumeByExpiry }) {
     shortfall = remainingWanted;
     // Nothing on hand to draw from. The last cost paid is the most defensible
     // available estimate, and it is flagged rather than quietly folded in.
-    const fallback = await lastKnownCost(orgId, itemId);
+    const fallback = await lastKnownCost(orgId, itemId, locationId);
     value = round(value + remainingWanted * fallback);
   }
 
@@ -228,7 +251,15 @@ async function consume({ orgId, itemId, quantity, consumeByExpiry }) {
  * `purchasePrice` — a typed field, which is why it is the last resort rather
  * than the first — and to zero, which at least does not invent profit.
  */
-async function lastKnownCost(orgId, itemId) {
+async function lastKnownCost(orgId, itemId, locationId) {
+  // This location's own most recent cost first: a shortfall at one warehouse is
+  // best valued at what that warehouse last paid, and only then at what anyone
+  // paid.
+  if (locationId) {
+    const here = await StockLayer.findOne({ orgId, itemId, locationId })
+      .sort({ receivedAt: -1, _id: -1 }).select('unitCost').lean();
+    if (here?.unitCost) return here.unitCost;
+  }
   const recent = await StockLayer.findOne({ orgId, itemId }).sort({ receivedAt: -1, _id: -1 }).select('unitCost').lean();
   if (recent?.unitCost) return recent.unitCost;
   const item = await Item.findOne({ _id: itemId, orgId }).select('purchasePrice').lean();
@@ -249,7 +280,7 @@ async function lastKnownCost(orgId, itemId) {
  * not assume that forever) falls through to a replacement layer at the recorded
  * cost, so the value returns even if its original home did not survive.
  */
-async function restore({ orgId, itemId, consumed = [], sourceType, sourceId, sourceNumber }) {
+async function restore({ orgId, itemId, locationId = null, consumed = [], sourceType, sourceId, sourceNumber }) {
   let value = 0;
   let quantity = 0;
   const orphans = [];
@@ -271,6 +302,9 @@ async function restore({ orgId, itemId, consumed = [], sourceType, sourceId, sou
     await receive({
       orgId,
       itemId,
+      // The replacement layer belongs where the original did, or the goods come
+      // back into the wrong warehouse.
+      locationId,
       quantity: entry.quantity,
       unitCost: entry.unitCost,
       sourceType: sourceType || 'return',

@@ -1213,6 +1213,30 @@ export interface CouponQuote {
   finalPrice: number;
 }
 
+/** A warehouse, with what it currently holds (2.5 #42). */
+export interface StockLocation {
+  _id: string;
+  name: string;
+  code?: string;
+  address?: string;
+  stateCode?: string;
+  /** The one every movement that names no warehouse falls back to. */
+  isDefault: boolean;
+  status: 'active' | 'archived';
+  note?: string;
+  quantity: number;
+  value: number;
+  itemCount: number;
+}
+
+/** What one item holds, per warehouse. */
+export interface StockLocationBalance {
+  locationId: string;
+  locationName: string;
+  quantity: number;
+  value: number;
+}
+
 /** A discount code as the console edits it. */
 export interface AdminCoupon {
   _id?: string;
