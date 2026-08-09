@@ -20,6 +20,7 @@ const crypto = require('node:crypto');
 const mongoose = require('mongoose');
 
 const app = require('../server');
+const { buildOpenApiDocument } = require('../src/services/openApiService');
 const { Plan } = require('../src/models/Plan');
 const { Organisation } = require('../src/models/Organisation');
 const { User } = require('../src/models/User');
@@ -583,3 +584,97 @@ test('a draft invoice contributes nothing to revenue or outstanding figures', ma
   assert.equal(stats.body.pendingAmount, 0);
   assert.equal(stats.body.counts.draft, 1);
 }));
+
+// ── Generated API description (#63) ──────────────
+
+/**
+ * The document is generated from the router, so what these guard is the
+ * *generation*, not the content. A test asserting particular endpoints exist
+ * would be a hand-written spec with extra steps — exactly what this replaces.
+ */
+
+test('the spec is built from the real route table', maybe(async () => {
+  const doc = buildOpenApiDocument(app);
+
+  assert.ok(Object.keys(doc.paths).length > 100, 'every mounted route should appear');
+  // Reading Express's own stack is the whole design: if this ever returned a
+  // handful of paths, the walker has stopped seeing nested routers and the
+  // document is quietly describing a fraction of the API.
+  assert.ok(doc.paths['/api/v1/invoices']);
+  assert.ok(doc.paths['/api/v1/invoices/{id}'], 'path parameters are converted to OpenAPI form');
+}));
+
+test('a request body is described by the schema the server actually enforces', maybe(async () => {
+  const doc = buildOpenApiDocument(app);
+  const register = doc.paths['/api/v1/auth/register']?.post;
+  assert.ok(register?.requestBody, 'a validated route must carry its body shape');
+
+  const ref = register.requestBody.content['application/json'].schema.$ref;
+  const name = ref.split('/').pop();
+  const schema = doc.components.schemas[name];
+
+  // Not a hand-written list: these are the fields `registerSchema` requires, and
+  // they appear here because the same object validates the request.
+  assert.ok(schema.properties.email, 'email is in the schema because zod says so');
+  assert.ok(schema.properties.password);
+  assert.ok(schema.required.includes('email'));
+}));
+
+test('an endpoint with no schema is named, not silently omitted', maybe(async () => {
+  const doc = buildOpenApiDocument(app);
+  const gaps = doc['x-undocumented'];
+
+  /**
+   * The half that makes generating this worth doing.
+   *
+   * A hand-written document is silent about its own gaps; this one lists them.
+   * The count is a coverage metric for request validation that nobody has to
+   * remember to compute.
+   */
+  assert.ok(Array.isArray(gaps.likelyGaps));
+  assert.ok(Array.isArray(gaps.actions));
+  assert.equal(gaps.count, gaps.likelyGaps.length + gaps.actions.length);
+  // Split by method, because an unvalidated action-style POST is usually fine
+  // and an unvalidated PUT usually is not. An overstated number gets ignored.
+  assert.ok(gaps.likelyGaps.every(entry => entry.startsWith('PUT') || entry.startsWith('PATCH')));
+  assert.ok(gaps.actions.every(entry => entry.startsWith('POST')));
+}));
+
+test('authentication is described from the guards on the route', maybe(async () => {
+  const doc = buildOpenApiDocument(app);
+  // Read off the middleware stack rather than declared a second time — a second
+  // declaration is a second thing to forget.
+  assert.deepEqual(doc.paths['/api/v1/invoices'].get.security, [{ bearerAuth: [] }]);
+  // A genuinely public route carries none.
+  assert.equal(doc.paths['/api/v1/public/branding'].get.security, undefined);
+}));
+
+test('the spec is served, and does not need a session to read', maybe(async () => {
+  const { status, body } = await call('GET', '/openapi.json');
+  assert.equal(status, 200);
+  assert.equal(body.openapi, '3.0.3');
+  // Public on purpose: an API description behind authentication cannot be used
+  // by the person deciding whether to integrate.
+  assert.ok(body.paths['/api/v1/invoices']);
+}));
+
+test('adding a schema to a route moves it out of the gap list', maybe(async () => {
+  const { validate } = require('../src/middleware/validate');
+  const { z } = require('zod');
+  const express = require('express');
+
+  const probe = express();
+  const router = express.Router();
+  router.post('/documented', validate(z.object({ name: z.string() })), (req, res) => res.json({}));
+  router.post('/undocumented', (req, res) => res.json({}));
+  probe.use('/api/v1/probe', router);
+
+  const doc = buildOpenApiDocument(probe);
+  // The mechanism itself: a schema on the route is what produces the
+  // documentation, so documenting an endpoint and validating it are the same
+  // action rather than two that can drift apart.
+  assert.ok(doc.paths['/api/v1/probe/documented'].post.requestBody);
+  assert.equal(doc['x-undocumented'].actions.length, 1);
+  assert.match(doc['x-undocumented'].actions[0], /undocumented/);
+}));
+

@@ -13,7 +13,7 @@ const { httpError } = require('../utils/httpError');
  * validated numbers and dates rather than raw strings.
  */
 function validate(schema, source = 'body') {
-  return (req, res, next) => {
+  const middleware = (req, res, next) => {
     const result = schema.safeParse(req[source]);
     if (!result.success) {
       // Flatten to `field: message` pairs — the frontend shows the first one,
@@ -32,6 +32,22 @@ function validate(schema, source = 'body') {
     req[source] = result.data;
     next();
   };
+
+  /**
+   * The schema is tagged onto the middleware itself (#63).
+   *
+   * This is what makes the API documentation generated rather than written. The
+   * spec builder walks Express's own router stack, finds the middleware carrying
+   * a schema, and converts it — so the docs describe what the server actually
+   * enforces, and cannot drift from it, because there is only one definition.
+   *
+   * The corollary is the more valuable half: a route with no schema shows up in
+   * the generated spec as **undocumented**, by name. A hand-written document
+   * cannot tell you what it is missing.
+   */
+  middleware.zodSchema = schema;
+  middleware.zodSource = source;
+  return middleware;
 }
 
 module.exports = { validate };

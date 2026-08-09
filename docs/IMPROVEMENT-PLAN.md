@@ -1553,12 +1553,50 @@ green tick is trusted and means nothing.
 fails on a laptop with nothing started is a gate people learn to skip. `npm run check` now
 runs lint + unit tests + production build; `npm run test:e2e` is the separate command.
 
-### 14. OpenAPI (#63)
+### 14. OpenAPI (#63) - **DONE (2026-08-07)**
 
-**How:** do **not** hand-write it — it will drift within a week. The zod schemas in
-`validators/schemas.js` are already the source of truth: add `zod-to-json-schema` and
-generate the spec from the route table, so an endpoint with no schema is visibly missing
-from the docs rather than silently undocumented.
+**Generated from Express's own router stack**, reading the zod schemas off the `validate()`
+middleware. There is one definition of a request's shape, the server enforces it, and the
+document describes it — they cannot disagree because they are the same object. A
+hand-written spec is correct on the day it is written and actively harmful within a week:
+an integrator trusts it, builds against a field that no longer exists, and the failure
+surfaces in their code rather than ours.
+
+**The half that matters more is what it cannot describe.** Every body-taking route with no
+schema is listed by method and path under `x-undocumented`. That is a coverage metric for
+request validation nobody has to remember to compute — and unlike a hand-written document,
+which is silent about its own gaps, this one names them.
+
+Current state: **180 paths, 46 generated request schemas, 56 endpoints accepting a body
+with no schema.** Split by method, because the raw number overstates the problem and an
+overstated number gets ignored: 44 are action-style POSTs (`/restore`, `/cancel`) that
+legitimately take no body, and **12 are PUT/PATCH routes that almost certainly do** — every
+one of them in the superadmin console, including `PUT /superadmin/plans/{code}`, which wrote
+whatever arrived straight through. The document found those by existing.
+
+The spec is served at `/api/v1/openapi.json` (public — an API description behind
+authentication cannot be read by the person deciding whether to integrate) and **committed**
+to `docs/openapi.json`. Committing a generated artefact is deliberate: it makes an API
+change visible in a diff. Adding a field to a zod schema shows up in the same commit, and a
+route that quietly stops validating its body shows up as a new line in `x-undocumented`. A
+spec that exists only at runtime cannot be reviewed.
+
+**Three bugs found by generating it, each one a thing the document would have got wrong:**
+
+- **Every authenticated route was documented as public.** Authentication was inferred from
+  `Function.name`, and `protect` is wrapped by `asyncHandler`, so what Express holds is
+  anonymous. Now tagged explicitly (`protect.isAuthGuard`) — the worst possible thing for a
+  spec to be wrong about, and it was wrong by default.
+- **Router-level middleware was invisible.** Almost every router here applies `protect` once
+  via `router.use(...)` rather than per route, so a per-route-only reading found no guards at
+  all. The walker inherits router-level layers down to the routes beneath them, in
+  declaration order — getting that backwards would document unguarded routes as guarded.
+- **`/api/v1/invoices/` and `/api/v1/invoices`** appeared as two entries for one endpoint,
+  which reads as an API with a duplicate rather than a generator with a rough edge.
+
+**393 backend tests pass.** The tests guard the *generation*, not the content — asserting
+that particular endpoints exist would be a hand-written spec with extra steps, which is
+exactly what this replaces.
 
 ### 15. E-way bill (2.1 #6) and GSTR-2A/2B reconciliation (2.1 #7)
 

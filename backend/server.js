@@ -158,6 +158,23 @@ app.use('/api/v1/webhooks/razorpay', require('./src/routes/razorpayWebhookRoutes
 // one anyone could use to stop a competitor's mail.
 app.use('/api/v1/webhooks/sendgrid', require('./src/routes/sendgridWebhookRoutes'));
 
+/**
+ * The API description, generated from these very routes (#63).
+ *
+ * Mounted last, after every route exists, because it reads Express's own stack —
+ * registering it earlier would produce a document of a half-built application.
+ * Built lazily and cached: it is deterministic for a given process, and doing it
+ * at boot would put a JSON-Schema conversion of every request shape on the
+ * startup path of a server that may never be asked for it.
+ */
+let openApiDocument = null;
+app.get('/api/v1/openapi.json', (req, res) => {
+  if (!openApiDocument) {
+    openApiDocument = require('./src/services/openApiService').buildOpenApiDocument(app);
+  }
+  res.json(openApiDocument);
+});
+
 app.use(notFoundHandler);
 app.use(errorHandler);
 

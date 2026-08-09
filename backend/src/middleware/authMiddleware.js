@@ -231,4 +231,15 @@ const protect = asyncHandler(async (req, res, next) => {
   });
 });
 
+/**
+ * Tagged rather than name-matched (#63).
+ *
+ * The generated API description needs to know which routes require a token.
+ * Inferring it from `Function.name` fails here for a subtle reason: `protect` is
+ * wrapped by `asyncHandler`, so the function Express actually holds is anonymous
+ * — and the document would have declared the entire authenticated API public,
+ * which is the worst possible thing for a spec to be wrong about.
+ */
+protect.isAuthGuard = true;
+
 module.exports = { protect };
