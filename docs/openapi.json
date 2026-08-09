@@ -8551,6 +8551,43 @@
         }
       }
     },
+    "/api/v1/subscriptions/invoices": {
+      "get": {
+        "summary": "GET /api/v1/subscriptions/invoices",
+        "tags": [
+          "subscriptions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
     "/api/v1/subscriptions/current": {
       "get": {
         "summary": "GET /api/v1/subscriptions/current",
@@ -12011,6 +12048,43 @@
             },
             "description": "Document id"
           }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "superadminIpAllowlist"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/superadmin/platform-invoices": {
+      "get": {
+        "summary": "GET /api/v1/superadmin/platform-invoices",
+        "tags": [
+          "superadmin"
         ],
         "security": [
           {

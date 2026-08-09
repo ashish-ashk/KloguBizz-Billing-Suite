@@ -22,6 +22,8 @@ const { getUsage } = require('../services/planService');
 const metrics = require('../services/metricsService');
 const jobs = require('../services/jobRunService');
 const approvals = require('../services/approvalService');
+const platformInvoices = require('../services/platformInvoiceService');
+const { PlatformInvoice } = require('../models/PlatformInvoice');
 const { ApprovalRequest } = require('../models/ApprovalRequest');
 const { BreakGlassGrant } = require('../models/BreakGlassGrant');
 /**
@@ -140,6 +142,35 @@ const metricsRebuild = asyncHandler(async (req, res) => {
  * genuine platform-wide figure; the latency percentiles are this instance's only,
  * and say so.
  */
+// ── The platform's own tax invoices (3.3 #10) ──
+
+/** Every invoice the platform has issued, newest first. */
+const listPlatformInvoices = asyncHandler(async (req, res) => {
+  const filter = {};
+  if (req.query.orgId && /^[0-9a-fA-F]{24}$/.test(req.query.orgId)) filter.orgId = req.query.orgId;
+  const invoices = await PlatformInvoice.find(filter).sort({ date: -1 }).limit(200).lean();
+
+  const identity = await platformInvoices.getBillingIdentity();
+  const readiness = platformInvoices.assessIdentity(identity);
+
+  res.json({
+    invoices,
+    /**
+     * Whether we can issue one at all, on the same screen as the list.
+     *
+     * A tax invoice missing the supplier's GSTIN is not a slightly worse
+     * invoice — it is not a tax invoice. Without this the failure is invisible
+     * until a customer's accountant asks for a document that was never produced.
+     */
+    canIssue: readiness.ready,
+    missing: readiness.missing,
+    totals: {
+      count: invoices.length,
+      value: invoices.reduce((sum, invoice) => sum + (invoice.totals?.total || 0), 0)
+    }
+  });
+});
+
 // ── Two-person approval and break-glass (3.4 #12) ──
 
 /**
@@ -1134,6 +1165,7 @@ module.exports = {
   metricsRebuild,
   systemHealth,
   jobRuns,
+  listPlatformInvoices,
   listApprovals,
   decideApproval,
   takeBreakGlass,

@@ -126,6 +126,9 @@ router.delete(
 );
 
 // ── Approvals and emergency access (3.4 #12) ──
+/** The platform's own tax invoices, and whether we are configured to issue any. */
+router.get('/platform-invoices', requireCapability(CAPABILITY.billingWrite), platform.listPlatformInvoices);
+
 router.get('/approvals', requireCapability(CAPABILITY.platformRead), platform.listApprovals);
 router.post('/approvals/:id/decide', requireCapability(CAPABILITY.platformRead), platform.decideApproval);
 router.post('/break-glass', requireCapability(CAPABILITY.platformRead), platform.takeBreakGlass);

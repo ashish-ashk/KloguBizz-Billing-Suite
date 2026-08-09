@@ -3,6 +3,7 @@ const { Subscription } = require('../models/Subscription');
 const { Organisation } = require('../models/Organisation');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
+const { PlatformInvoice } = require('../models/PlatformInvoice');
 const { snapshotFor } = require('../services/planVersionService');
 const { env } = require('../config/env');
 const { createSubscription, cancelSubscription: cancelAtProvider } = require('../services/razorpayService');
@@ -11,6 +12,22 @@ const { logAudit } = require('../services/auditService');
 
 const listPlans = asyncHandler(async (req, res) => {
   res.json(await Plan.find({ active: true }).sort({ sortOrder: 1 }));
+});
+
+/**
+ * The tenant's own tax invoices from us.
+ *
+ * On the subscription page, where the "Billing History" table used to show a row
+ * with an amount reconstructed from the current plan price and no document
+ * behind it at all. A customer needs the actual invoice to claim input tax
+ * credit on what they pay us.
+ */
+const myPlatformInvoices = asyncHandler(async (req, res) => {
+  const invoices = await PlatformInvoice.find({ orgId: req.orgId, status: 'issued' })
+    .sort({ date: -1 })
+    .limit(100)
+    .lean();
+  res.json({ invoices });
 });
 
 const currentSubscription = asyncHandler(async (req, res) => {
@@ -144,4 +161,5 @@ const cancelSubscription = asyncHandler(async (req, res) => {
   res.json(subscription);
 });
 
-module.exports = { listPlans, currentSubscription, startSubscription, cancelSubscription };
+module.exports = {
+  myPlatformInvoices, listPlans, currentSubscription, startSubscription, cancelSubscription };

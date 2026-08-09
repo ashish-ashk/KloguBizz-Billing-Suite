@@ -1363,9 +1363,8 @@ visible — the most expensive kind of silent failure there is.
 - **Refunds and proration.** Mid-cycle plan changes. Needs a decision this codebase has not
   made: whether we credit the unused remainder or simply charge the difference from the
   next cycle. The second is far simpler and is what most SMB SaaS does.
-- **The platform's own GST invoices.** The plan called this "genuinely just an `Invoice`
-  with us as the supplier". Investigating it says otherwise, and the reasons are worth
-  recording before anyone tries:
+- ~~**The platform's own GST invoices.**~~ **DONE (2026-08-07)** — see below. The
+  investigation notes are kept because they are why it is a separate model:
   - **There is no platform `Organisation`.** Superadmins have `orgId: null` by design.
     Creating a synthetic one pollutes tenant counts, MRR, ARPA and the at-risk lists,
     every one of which counts `Organisation` documents.
@@ -1378,6 +1377,51 @@ visible — the most expensive kind of silent failure there is.
   A separate `PlatformInvoice` model reusing `gstService.calculateInvoiceTotals` — which is
   pure and takes the supplier's state code as an argument — is the honest shape. The tax
   engine is genuinely reusable; the document model is not.
+
+#### The platform's own tax invoices - DONE (2026-08-07)
+
+**This system billed its customers and issued them nothing.** Razorpay took the money,
+`Subscription` recorded that it had, and the customer received no document to claim input
+tax credit against. A compliance failure on our side and unclaimable money on theirs.
+
+Built as `PlatformInvoice`, for the reasons above — and one more found while building it:
+`tenantFilter(req)` scopes every invoice read by `orgId`, so a platform invoice living in
+`Invoice` would either be invisible or would surface in a tenant's own invoice list, GST
+returns and revenue reports **as something they sold**. Charging a customer ₹999 and having
+it appear in their GSTR-1 as their own sale is a filing error we would have created for
+them.
+
+Four decisions that decide whether the document is actually usable:
+
+- **The tax head follows the customer's state, not ours.** For a service to a registered
+  person the place of supply is the recipient's location, so a Karnataka customer of a
+  Maharashtra platform gets IGST and a Maharashtra customer gets CGST + SGST. Backwards, and
+  the customer cannot claim the credit because the head on our invoice will not match what
+  their return expects.
+- **The price is inclusive of GST**, because it is: the plan page shows ₹999 and Razorpay
+  charges ₹999. Treating it as exclusive would invoice ₹1,179 and disagree with the
+  customer's card statement by exactly the tax — the one number they will check.
+- **The amount comes from the subscription's snapshot** (#9), so a grandfathered customer is
+  invoiced what they agreed to rather than today's published price.
+- **An incomplete billing identity blocks the invoice, not the payment.** This runs from the
+  payment webhook, and throwing there would make Razorpay retry a charge that already
+  succeeded — turning a configuration gap into a payment problem. The console reports the
+  gap instead.
+
+**A real bug, found by a test doing exactly what the console does.** The invoice counter
+started on the `platformBilling` setting beside the GSTIN and address. The console saves a
+setting by replacing `value` wholesale — so **saving the billing identity from a form
+without the counter reset it to zero**, and the next invoice reused a number already sent to
+a customer. A duplicate in a legally-consecutive tax invoice series has to be explained to
+an assessing officer. The counter now lives under its own key that no form writes, and the
+unique index on `invoiceNumber` is what surfaced it.
+
+Idempotent on the provider payment id, because Razorpay retries webhooks deliberately and
+often, and two tax invoices for one payment is worse than none — both carry consecutive
+numbers, and cancelling one leaves a gap.
+
+**Still needed before charging anyone:** set the `platformBilling` setting. Until it has a
+legal name, GSTIN, address and state code, no invoice is issued and the console says so.
 
 ### 11. Job/queue observability (3.5) - **DONE (2026-08-07)**
 

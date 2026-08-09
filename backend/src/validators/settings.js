@@ -132,7 +132,46 @@ const platformNoticeSchema = z.object({
   updatedBy: shortText.optional()
 });
 
+/**
+ * The platform's own supplier identity, for the tax invoices it issues (3.3 #10).
+ *
+ * Lives here rather than on an `Organisation` because there is no platform
+ * organisation — superadmins have `orgId: null` by design, and inventing a fake
+ * tenant would corrupt every tenant count, MRR figure and churn list.
+ */
+const platformBillingSchema = z.object({
+  legalName: z.string().trim().max(200).optional(),
+  gstin: z.string().trim().max(15).optional(),
+  pan: z.string().trim().max(10).optional(),
+  address: z.string().trim().max(500).optional(),
+  stateCode: z.string().trim().max(2).optional(),
+  /** Service accounting code. 997331 is licensing services for software, which
+   *  is what a SaaS subscription is; a tenant's auditor may prefer 998314. */
+  sac: z.string().trim().max(10).optional(),
+  gstRate: z.coerce.number().min(0).max(100).optional(),
+  invoicePrefix: z.string().trim().max(8).optional(),
+}).strict();
+
+/**
+ * The invoice counter, deliberately **not** part of `platformBilling`.
+ *
+ * It lived there first, and that was a bug: the console replaces a setting's
+ * `value` wholesale, so saving the billing identity from a form without the
+ * counter reset it to zero and the next invoice reused a number already sent to
+ * a customer. A duplicate in a legally-consecutive series has to be explained to
+ * an assessing officer.
+ *
+ * Kept in the allow-list so a support fix is possible, but nothing in the UI
+ * writes it.
+ */
+const platformInvoiceCounterSchema = z.object({
+  sequence: z.coerce.number().int().min(0).optional(),
+  sequenceFY: z.string().trim().max(4).optional()
+}).strict();
+
 const SETTING_SCHEMAS = {
+  platformBilling: platformBillingSchema,
+  platformInvoiceCounter: platformInvoiceCounterSchema,
   branding: brandingSchema,
   email: emailSchema,
   receipt: receiptSchema,

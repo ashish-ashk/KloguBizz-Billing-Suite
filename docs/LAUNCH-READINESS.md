@@ -94,6 +94,21 @@ the collection. The fix is to set `autoIndex: false` in
 migration. **Do not do this before you have checked the previous item** — with
 `autoIndex` off, a missing index is silent rather than merely slow.
 
+### Set the platform's billing identity before charging anyone
+
+The platform now issues its own tax invoices — legally required, since you are a registered
+supplier charging Indian customers. It issues **nothing** until this is configured, and the
+failure is silent from the customer's side: they pay, and no document arrives.
+
+Set the `platformBilling` global setting with your legal name, GSTIN, PAN, address and state
+code. `/superadmin/platform-invoices` reports `canIssue: false` and names what is missing
+until you do.
+
+Two things not to touch afterwards: the **invoice prefix**, because changing it mid-year
+breaks the consecutiveness of a legally-consecutive series; and the
+`platformInvoiceCounter` setting, which is deliberately separate so that saving the identity
+cannot reset it.
+
 ### Set a real superadmin password before seeding
 
 `npm run seed` refuses to run with the documented default, which is the correct
@@ -248,7 +263,7 @@ Not defects. Deliberate gaps, with the reasoning recorded in the improvement pla
 |---|---|
 | **Warehouses** (2.5 #43) | A customer holds stock in more than one location |
 | **Coupons, proration, refunds** (3.3 #10) | You plan to run launch discounts or mid-cycle upgrades |
-| **The platform's own GST invoices** (3.3 #10) | You are charging Indian customers — **you are legally required to issue a tax invoice for what you collect.** The plan explains why this is not "just an `Invoice`": there is no platform `Organisation`, invoice counters live *on* one, and nothing identifies the platform as a supplier. This is the most likely item on this list to actually block you |
+| ~~The platform's own GST invoices~~ | **Built.** But it issues nothing until the `platformBilling` setting has a legal name, GSTIN, address and state code — see §1 |
 | **Multi-GSTIN / branches** (2.1 #9) | A customer operates in more than one state under one business |
 | **Composition scheme, QRMP** (2.1 #10) | You are selling to businesses below the composition threshold |
 | **Depreciation** (2.4 #32) | A customer wants a P&L that accounts for capital assets |

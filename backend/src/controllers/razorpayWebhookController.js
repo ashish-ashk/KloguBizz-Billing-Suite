@@ -6,6 +6,8 @@ const { httpError } = require('../utils/httpError');
 const { verifyWebhookSignature } = require('../services/razorpayService');
 const { logAudit } = require('../services/auditService');
 const { restoreAfterPayment } = require('../services/tenantStatusService');
+const platformInvoices = require('../services/platformInvoiceService');
+const { Plan } = require('../models/Plan');
 
 // Razorpay sends epoch seconds; Mongo wants a Date.
 function toDate(epochSeconds) {
@@ -91,6 +93,28 @@ async function applyEvent(event, payload) {
         org.status = 'active';
         await org.save();
       }
+
+      /**
+       * The tax invoice for the money just taken (3.3 #10).
+       *
+       * A registered supplier must issue one, and until now this system took
+       * payment and issued the customer nothing they could claim credit against.
+       *
+       * Deliberately after the subscription and organisation are saved, and
+       * deliberately unable to fail this handler: the charge has already
+       * succeeded, and a non-200 here makes Razorpay retry a payment that went
+       * through. A missing document is a problem for a person; a retried charge
+       * is a problem for the customer.
+       */
+      const plan = await Plan.findOne({ code: subscription.planCode }).select('name').lean();
+      await platformInvoices.issueForChargeSafely({
+        subscription: { ...subscription.toObject(), planName: plan?.name },
+        org,
+        providerPaymentId: String(
+          payload?.payment?.entity?.id || entity?.id || `sub_${subscription._id}_${Date.now()}`
+        ),
+        period: { start: toDate(entity?.current_start), end: toDate(entity?.current_end) }
+      });
       return { handled: true, action: `activated ${subscription.planCode}` };
     }
 

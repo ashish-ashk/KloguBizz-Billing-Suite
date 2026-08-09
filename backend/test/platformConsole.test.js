@@ -42,6 +42,9 @@ const { EmailLog } = require('../src/models/EmailLog');
 const { runDunningSweep } = require('../src/services/dunningService');
 const { ApprovalRequest } = require('../src/models/ApprovalRequest');
 const { BreakGlassGrant } = require('../src/models/BreakGlassGrant');
+const { PlatformInvoice } = require('../src/models/PlatformInvoice');
+const { GlobalSetting } = require('../src/models/Settings');
+const platformInvoices = require('../src/services/platformInvoiceService');
 const { applyEvent } = require('../src/controllers/razorpayWebhookController');
 
 /** The webhook's decision layer, without rebuilding an HMAC for every case —
@@ -1985,5 +1988,284 @@ test('taking access you already have is refused', maybe(async () => {
   // An unnecessary grant dilutes the signal that a real one is supposed to send.
   assert.equal(pointless.status, 400);
   assert.equal(pointless.body.code, 'ALREADY_PERMITTED');
+}));
+
+// ── The platform's own tax invoices (3.3 #10) ────
+
+const PLATFORM_IDENTITY = {
+  legalName: 'KloguBizz Technologies Pvt Ltd',
+  gstin: '27AAPFU0939F1ZV',
+  pan: 'AAPFU0939F',
+  address: '1 Platform Road, Mumbai',
+  stateCode: '27',
+  sac: '997331',
+  gstRate: 18,
+  invoicePrefix: 'KB'
+};
+
+async function configurePlatformBilling(overrides = {}) {
+  await GlobalSetting.findOneAndUpdate(
+    { key: 'platformBilling' },
+    { $set: { key: 'platformBilling', value: { ...PLATFORM_IDENTITY, ...overrides } } },
+    { upsert: true }
+  );
+}
+
+
+/**
+ * Puts the shared counter somewhere later tests cannot collide with.
+ *
+ * The series tests deliberately move it — including into a *future* financial
+ * year to prove the rollover — and coming back from a future year is a genuine
+ * reset to 1, which then duplicates a number an earlier test already used. That
+ * is the FY logic working correctly; it is this suite's job not to trip it.
+ */
+async function parkInvoiceCounter() {
+  const fy = platformInvoices.financialYearOf(new Date());
+  await GlobalSetting.findOneAndUpdate(
+    { key: 'platformInvoiceCounter' },
+    { $set: { key: 'platformInvoiceCounter', value: { sequence: 5000, sequenceFY: String(fy) } } },
+    { upsert: true }
+  );
+}
+
+function subscriptionFor(overrides = {}) {
+  return {
+    planCode: 'growth',
+    planName: 'Growth',
+    billingCycle: 'monthly',
+    pricing: { monthlyPrice: 999, yearlyPrice: 9990 },
+    razorpaySubscriptionId: 'sub_test_1',
+    ...overrides
+  };
+}
+
+test('a charge produces a tax invoice the customer can claim credit on', maybe(async () => {
+  await configurePlatformBilling();
+  const tenant = await registerOrg();
+  const org = await Organisation.findById(tenant.org._id).lean();
+
+  const { invoice } = await platformInvoices.issueForCharge({
+    subscription: subscriptionFor(),
+    org,
+    providerPaymentId: 'pay_claim_1'
+  });
+
+  assert.ok(invoice, 'the system billed its customers and issued them nothing before this');
+  // Ours, snapshotted — a tax invoice is a record of a transaction as it stood.
+  assert.equal(invoice.supplier.gstin, PLATFORM_IDENTITY.gstin);
+  assert.equal(invoice.billTo.name, org.name);
+  assert.equal(invoice.items[0].sac, '997331');
+  assert.match(invoice.invoiceNumber, /^KB-\d{4}-\d{4}$/);
+}));
+
+test('the price shown is the price charged, so tax is worked back out of it', maybe(async () => {
+  await configurePlatformBilling();
+  const tenant = await registerOrg();
+  const org = await Organisation.findById(tenant.org._id).lean();
+  await Organisation.updateOne({ _id: org._id }, { $set: { stateCode: '27' } });
+
+  const { invoice } = await platformInvoices.issueForCharge({
+    subscription: subscriptionFor(),
+    org: { ...org, stateCode: '27' },
+    providerPaymentId: 'pay_inclusive_1'
+  });
+
+  /**
+   * ₹999 is what the plan page shows and what Razorpay charges, so it is
+   * inclusive of GST: ₹846.61 + ₹152.39 tax. Treating it as exclusive would
+   * invoice ₹1,179 and disagree with the customer's card statement by the tax —
+   * the one number they will check.
+   */
+  assert.equal(invoice.totals.total, 999);
+  assert.ok(invoice.totals.subtotal < 999);
+  assert.equal(
+    Math.round((invoice.totals.subtotal + invoice.totals.cgst + invoice.totals.sgst + invoice.totals.roundOff) * 100) / 100,
+    999
+  );
+}));
+
+test('the tax head follows the customer state, not ours', maybe(async () => {
+  await configurePlatformBilling();
+  const local = await registerOrg();
+  const distant = await registerOrg();
+  await Organisation.updateOne({ _id: distant.org._id }, { $set: { stateCode: '29' } });
+
+  const localOrg = await Organisation.findById(local.org._id).lean();
+  const distantOrg = await Organisation.findById(distant.org._id).lean();
+
+  const a = await platformInvoices.issueForCharge({
+    subscription: subscriptionFor(), org: localOrg, providerPaymentId: 'pay_local_1'
+  });
+  const b = await platformInvoices.issueForCharge({
+    subscription: subscriptionFor(), org: distantOrg, providerPaymentId: 'pay_distant_1'
+  });
+
+  /**
+   * For a service to a registered person the place of supply is the recipient's
+   * location. Get this backwards and the customer cannot claim the credit,
+   * because the tax head on our invoice will not match what their return
+   * expects.
+   */
+  assert.equal(a.invoice.totals.isIGST, false, 'same state as us: CGST + SGST');
+  assert.ok(a.invoice.totals.cgst > 0 && a.invoice.totals.sgst > 0);
+  assert.equal(b.invoice.totals.isIGST, true, 'another state: IGST');
+  assert.ok(b.invoice.totals.igst > 0);
+  assert.equal(b.invoice.placeOfSupply, '29');
+}));
+
+test('a webhook retry does not produce a second tax invoice', maybe(async () => {
+  await configurePlatformBilling();
+  const tenant = await registerOrg();
+  const org = await Organisation.findById(tenant.org._id).lean();
+
+  const first = await platformInvoices.issueForCharge({
+    subscription: subscriptionFor(), org, providerPaymentId: 'pay_retry_1'
+  });
+  const second = await platformInvoices.issueForCharge({
+    subscription: subscriptionFor(), org, providerPaymentId: 'pay_retry_1'
+  });
+
+  /**
+   * Razorpay retries webhooks deliberately and often. Two tax invoices for one
+   * payment is worse than none: both carry consecutive numbers from a legally
+   * consecutive series, and cancelling one leaves a gap to explain to an
+   * assessing officer.
+   */
+  assert.equal(second.alreadyIssued, true);
+  assert.equal(second.invoice.invoiceNumber, first.invoice.invoiceNumber);
+  assert.equal(await PlatformInvoice.countDocuments({ providerPaymentId: 'pay_retry_1' }), 1);
+}));
+
+test('the invoice number series runs unbroken and resets on the financial year', maybe(async () => {
+  /**
+   * Its own prefix, because resetting the shared counter would hand a number
+   * already used by an earlier test to a later one — and the unique index on
+   * `invoiceNumber` would refuse it. That the index refuses it is the point;
+   * this test should not be the thing that trips it.
+   */
+  await GlobalSetting.deleteOne({ key: 'platformInvoiceCounter' });
+  await configurePlatformBilling({ invoicePrefix: 'SER' });
+
+  const first = await platformInvoices.nextInvoiceNumber(new Date('2026-06-01'));
+  const second = await platformInvoices.nextInvoiceNumber(new Date('2026-07-01'));
+  // Consecutiveness is a legal requirement: a gap or a duplicate has to be
+  // explained to an assessing officer.
+  assert.equal(first, 'SER-2026-0001');
+  assert.equal(second, 'SER-2026-0002');
+
+  // April starts a new Indian financial year, so the series restarts.
+  const nextYear = await platformInvoices.nextInvoiceNumber(new Date('2027-04-05'));
+  assert.equal(nextYear, 'SER-2027-0001');
+  await configurePlatformBilling();
+  await parkInvoiceCounter();
+
+  // And January belongs to the year that started the previous April.
+  assert.equal(platformInvoices.financialYearOf(new Date('2027-01-15')), 2026);
+  assert.equal(platformInvoices.financialYearOf(new Date('2027-04-15')), 2027);
+}));
+
+test('an incomplete billing identity blocks the invoice, not the payment', maybe(async () => {
+  await configurePlatformBilling({ gstin: '' });
+  const tenant = await registerOrg();
+  const org = await Organisation.findById(tenant.org._id).lean();
+
+  const result = await platformInvoices.issueForCharge({
+    subscription: subscriptionFor(), org, providerPaymentId: 'pay_noidentity_1'
+  });
+
+  /**
+   * A tax invoice without the supplier's GSTIN is not a slightly worse invoice;
+   * it is not a tax invoice. But this runs from the payment webhook, and
+   * throwing there would make Razorpay retry a charge that already succeeded —
+   * turning a configuration gap into a payment problem.
+   */
+  assert.equal(result.invoice, null);
+  assert.equal(result.skipped, true);
+  assert.ok(result.missing.includes('GSTIN'));
+}));
+
+test('a free plan generates no invoice, because nothing was charged', maybe(async () => {
+  await configurePlatformBilling();
+  const tenant = await registerOrg();
+  const org = await Organisation.findById(tenant.org._id).lean();
+
+  const result = await platformInvoices.issueForCharge({
+    subscription: subscriptionFor({ pricing: { monthlyPrice: 0, yearlyPrice: 0 } }),
+    org,
+    providerPaymentId: 'pay_free_1'
+  });
+  // Not an error: there is genuinely nothing to document.
+  assert.equal(result.invoice, null);
+  assert.equal(result.skipped, true);
+}));
+
+test('a grandfathered customer is invoiced what they agreed to', maybe(async () => {
+  await configurePlatformBilling();
+  const tenant = await registerOrg();
+  const org = await Organisation.findById(tenant.org._id).lean();
+
+  const { invoice } = await platformInvoices.issueForCharge({
+    // Their snapshot says 499; the published price has since moved to 1999.
+    subscription: subscriptionFor({ pricing: { monthlyPrice: 499, yearlyPrice: 4990 } }),
+    org,
+    providerPaymentId: 'pay_grandfathered_1'
+  });
+  // An invoice quoting a price they never agreed to is both wrong and
+  // unclaimable — it would not match what left their account (3.3 #9).
+  assert.equal(invoice.totals.total, 499);
+}));
+
+test('a tenant can read its own invoices and nobody else can', maybe(async () => {
+  await configurePlatformBilling();
+  const mine = await registerOrg();
+  const theirs = await registerOrg();
+  const myOrg = await Organisation.findById(mine.org._id).lean();
+
+  await platformInvoices.issueForCharge({
+    subscription: subscriptionFor(), org: myOrg, providerPaymentId: 'pay_mine_1'
+  });
+
+  const own = await call('GET', '/subscriptions/invoices', { token: mine.token });
+  assert.equal(own.status, 200);
+  assert.equal(own.body.invoices.length, 1);
+  // The document a customer needs to claim input tax credit on what they pay us.
+  assert.equal(own.body.invoices[0].billTo.name, myOrg.name);
+
+  const other = await call('GET', '/subscriptions/invoices', { token: theirs.token });
+  assert.equal(other.body.invoices.length, 0);
+}));
+
+test('saving the billing identity does not reset the invoice counter', maybe(async () => {
+  await GlobalSetting.deleteOne({ key: 'platformInvoiceCounter' });
+  await configurePlatformBilling({ invoicePrefix: 'CNT' });
+  const first = await platformInvoices.nextInvoiceNumber(new Date('2026-06-01'));
+
+  // Exactly what the console does: replace `value` wholesale from a form.
+  await configurePlatformBilling({ invoicePrefix: 'CNT', address: '2 New Road, Mumbai' });
+  const second = await platformInvoices.nextInvoiceNumber(new Date('2026-06-02'));
+
+  /**
+   * The bug this closes. With the counter on the same document as the identity,
+   * saving an address reset the series and the next invoice reused a number
+   * already sent to a customer — a duplicate in a legally-consecutive series,
+   * which has to be explained to an assessing officer.
+   */
+  assert.notEqual(first, second);
+  assert.equal(second, 'CNT-2026-0002');
+  await configurePlatformBilling();
+  await parkInvoiceCounter();
+}));
+
+test('the console reports when it cannot issue invoices at all', maybe(async () => {
+  await GlobalSetting.deleteOne({ key: 'platformBilling' });
+  const { token } = await platformAccount('owner');
+
+  const { status, body } = await call('GET', '/superadmin/platform-invoices', { token });
+  assert.equal(status, 200);
+  // Otherwise the failure is invisible until a customer's accountant asks for a
+  // document that was never produced.
+  assert.equal(body.canIssue, false);
+  assert.ok(body.missing.length);
 }));
 
