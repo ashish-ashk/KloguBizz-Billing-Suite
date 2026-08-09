@@ -3,11 +3,15 @@ const { Invoice } = require('../models/Invoice');
 const { Client } = require('../models/Client');
 const { Organisation } = require('../models/Organisation');
 const { asyncHandler } = require('../utils/asyncHandler');
+const { notDeleted } = require('../utils/softDelete');
+const { resolveReturnPeriod } = require('../services/gstReturnService');
 const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { toCsv } = require('../services/csvService');
 const { buildGstr1, toGstnJson, buildGstr3b } = require('../services/gstReturnService');
 const eInvoice = require('../services/eInvoiceService');
+const ewb = require('../services/ewayBillService');
+const gstr2b = require('../services/gstr2bService');
 const { logAudit } = require('../services/auditService');
 const { recordEvent, EVENT } = require('../services/usageEventService');
 
@@ -360,7 +364,91 @@ const eInvoiceWorklist = asyncHandler(async (req, res) => {
   });
 });
 
+// ── E-way bills (2.1 #6) ─────────────────────────
+
+/**
+ * Whether this invoice needs an e-way bill, and what is missing if it does.
+ *
+ * A check rather than a generate, because the whole value here is *before* the
+ * lorry leaves: a missing HSN or a mistyped vehicle number found at a checkpoint
+ * is a detained vehicle, and found on this screen is thirty seconds.
+ */
+const checkEwayBill = asyncHandler(async (req, res) => {
+  const invoice = await Invoice.findOne({ _id: req.params.id, ...notDeleted(req) }).lean();
+  if (!invoice) throw httpError(404, 'Invoice not found');
+  const org = await Organisation.findById(req.orgId).lean();
+  const client = invoice.clientId ? await Client.findById(invoice.clientId).lean() : null;
+
+  const requirement = ewb.assessRequirement({ invoice, org });
+  const validation = requirement.required
+    ? ewb.validateForEwb({ invoice, org, client, transport: req.query })
+    : { ok: true, errors: [] };
+
+  res.json({
+    ...requirement,
+    ready: validation.ok,
+    blockers: validation.errors,
+    configured: ewb.isEwbConfigured(),
+    // Shown even before a distance is entered, so the user can see how the
+    // validity window will be worked out rather than discovering it after.
+    validityRule: 'One day per 200 km (one per 20 km for over-dimensional cargo), minimum one day.'
+  });
+});
+
+const generateEwayBill = asyncHandler(async (req, res) => {
+  const invoice = await Invoice.findOne({ _id: req.params.id, ...notDeleted(req) }).lean();
+  if (!invoice) throw httpError(404, 'Invoice not found');
+  const org = await Organisation.findById(req.orgId).lean();
+  const client = invoice.clientId ? await Client.findById(invoice.clientId).lean() : null;
+
+  const result = await ewb.generateEwayBill({ invoice, org, client, transport: req.body });
+  logAudit({ req, action: 'ewaybill.generated', entity: 'invoice', entityId: invoice._id });
+  res.json(result);
+});
+
+/** The payload, without submitting it — for checking a mapping against the portal. */
+const previewEwayBill = asyncHandler(async (req, res) => {
+  const invoice = await Invoice.findOne({ _id: req.params.id, ...notDeleted(req) }).lean();
+  if (!invoice) throw httpError(404, 'Invoice not found');
+  const org = await Organisation.findById(req.orgId).lean();
+  const client = invoice.clientId ? await Client.findById(invoice.clientId).lean() : null;
+
+  const transport = req.body || {};
+  res.json({
+    payload: ewb.buildEwbPayload({ invoice, org, client, transport }),
+    validityDays: ewb.validityDays(transport.distanceKm, { overDimensional: transport.overDimensional })
+  });
+});
+
+// ── GSTR-2B reconciliation (2.1 #7) ──────────────
+
+/**
+ * Reconciles recorded purchases against a GSTR-2B download.
+ *
+ * Takes the portal's own JSON in the request body. No GSP connection is needed
+ * or wanted: 2B is downloadable by anyone with the GST login, which every
+ * registered business has.
+ */
+const reconcileGstr2b = asyncHandler(async (req, res) => {
+  const period = resolveReturnPeriod(req.query);
+  const document = req.body?.gstr2b || req.body;
+
+  const rows = gstr2b.parseGstr2b(document);
+  if (!rows.length) {
+    throw httpError(
+      400,
+      'No supplier invoices were found in that file. Upload the GSTR-2B JSON downloaded from the GST portal.',
+      'GSTR2B_EMPTY'
+    );
+  }
+
+  const report = await gstr2b.reconcile(req.orgId, rows, { from: period.from, to: period.to });
+  recordEvent({ req, type: EVENT.reportViewed, meta: { report: 'gstr2b-reconciliation' } });
+  res.json({ ...report, period: { ...report.period, label: period.label } });
+});
+
 module.exports = {
+  checkEwayBill, generateEwayBill, previewEwayBill, reconcileGstr2b,
   gstr1, gstr1Json, gstr1Csv, gstr3b,
   checkEInvoice, generateEInvoice, cancelEInvoice, eInvoiceWorklist
 };

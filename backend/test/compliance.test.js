@@ -43,6 +43,8 @@ const { EmailLog, Suppression } = require('../src/models/EmailLog');
 const gst = require('../src/services/gstService');
 const eInvoice = require('../src/services/eInvoiceService');
 const totp = require('../src/utils/totp');
+const ewb = require('../src/services/ewayBillService');
+const gstr2b = require('../src/services/gstr2bService');
 const { purgeExpiredDeletions } = require('../src/services/maintenanceService');
 const { invalidateFeatureFlagCache } = require('../src/services/featureFlagService');
 
@@ -147,6 +149,17 @@ async function createVendor(token, overrides = {}) {
     body: { name: 'Supplier Pvt Ltd', stateCode: '27', gstin: '27AAPFU0939F1ZV', ...overrides }
   });
   assert.equal(status, 201, `vendor create failed: ${JSON.stringify(body)}`);
+  return body;
+}
+
+let purchaseCounter = 0;
+async function purchase(token, vendorId, items, overrides = {}) {
+  purchaseCounter += 1;
+  const { status, body } = await call('POST', '/purchases', {
+    token,
+    body: { vendorId, billNumber: `BILL/${purchaseCounter}`, billDate: '2026-06-01', items, ...overrides }
+  });
+  assert.equal(status, 201, `purchase failed: ${JSON.stringify(body)}`);
   return body;
 }
 
@@ -1200,3 +1213,303 @@ test('verification is skipped when no provider can send it, and works when asked
   const replay = await call('POST', '/auth/verify-email', { body: { token } });
   assert.equal(replay.status, 400);
 }));
+
+// ── E-way bills (2.1 #6) ─────────────────────────
+
+/**
+ * The provider is a stub, so what these test is the judgement: whether a bill is
+ * needed, whether the request would be rejected, and how long it lasts. That is
+ * where a mistake costs a detained vehicle rather than an API error.
+ */
+
+const ORG = { gstin: '27AAPFU0939F1ZV', name: 'Seller Ltd', address: '1 Test Road', stateCode: '27', state: 'Maharashtra' };
+const BUYER = { gstin: '29AAPFU0939F1ZR', companyName: 'Buyer Ltd', stateCode: '29', address: '9 Buyer Street' };
+const ROAD = { mode: 'road', vehicleNumber: 'MH12AB1234', distanceKm: 400 };
+
+function goodsInvoice(overrides = {}) {
+  return {
+    invoiceNumber: 'KLG-2026-001',
+    date: new Date('2026-06-10'),
+    status: 'pending',
+    placeOfSupply: '29',
+    items: [{ desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 8000, gstRate: 18 }],
+    totals: { subtotal: 80000, total: 94400, cgst: 0, sgst: 0, igst: 14400, cess: 0, isIGST: true },
+    ...overrides
+  };
+}
+
+test('an e-way bill is judged on the value including tax', maybe(async () => {
+  // 42,000 + 18% = 49,560. Below the threshold.
+  const below = ewb.assessRequirement({
+    invoice: goodsInvoice({ totals: { subtotal: 42000, total: 49560, isIGST: true } }),
+    org: ORG
+  });
+  assert.equal(below.required, false);
+
+  // 45,000 + 18% = 53,100. Taxable value is below 50,000; the consignment is not.
+  const above = ewb.assessRequirement({
+    invoice: goodsInvoice({ totals: { subtotal: 45000, total: 53100, isIGST: true } }),
+    org: ORG
+  });
+  /**
+   * The mistake this catches: measuring the threshold on the taxable value puts
+   * a ₹45,000 + GST consignment on the road with no bill, which is exactly the
+   * band where it happens most.
+   */
+  assert.equal(above.required, true);
+}));
+
+test('services never need one, decided from the SAC code', maybe(async () => {
+  const consulting = ewb.assessRequirement({
+    invoice: goodsInvoice({
+      items: [{ desc: 'Consulting', hsn: '998311', qty: 1, rate: 500000, gstRate: 18 }],
+      totals: { subtotal: 500000, total: 590000, isIGST: true }
+    }),
+    org: ORG
+  });
+  // Half a million rupees of consulting moves nothing. Generating a bill for it
+  // would declare a consignment that does not exist.
+  assert.equal(consulting.required, false);
+  assert.match(consulting.reason, /services/i);
+
+  // 99xx is the service accounting code chapter; a line with no code at all is
+  // treated as goods, which is the conservative direction.
+  assert.equal(ewb.isServiceLine({ hsn: '998311' }), true);
+  assert.equal(ewb.isServiceLine({ hsn: '7213' }), false);
+  assert.equal(ewb.isServiceLine({}), false);
+}));
+
+test('a draft or a cancelled invoice moves nothing', maybe(async () => {
+  assert.equal(ewb.assessRequirement({ invoice: goodsInvoice({ status: 'draft' }), org: ORG }).required, false);
+  assert.equal(ewb.assessRequirement({ invoice: goodsInvoice({ status: 'cancelled' }), org: ORG }).required, false);
+}));
+
+test('validity is a day per 200 km, and never less than a day', maybe(async () => {
+  assert.equal(ewb.validityDays(400), 2);
+  assert.equal(ewb.validityDays(401), 3, 'part of a day counts as a day');
+  // The edge that matters: a short local delivery computes to zero, and a bill
+  // valid for no time at all is worse than none.
+  assert.equal(ewb.validityDays(5), 1);
+  assert.equal(ewb.validityDays(0), 1);
+  // Over-dimensional cargo travels far more slowly.
+  assert.equal(ewb.validityDays(100, { overDimensional: true }), 5);
+}));
+
+test('a malformed vehicle number is caught here, not at a checkpoint', maybe(async () => {
+  const invoice = goodsInvoice();
+  const bad = ewb.validateForEwb({ invoice, org: ORG, client: BUYER, transport: { ...ROAD, vehicleNumber: 'LORRY 1' } });
+  assert.equal(bad.ok, false);
+  assert.match(bad.errors[0], /not a valid vehicle number/);
+
+  // Spaces and dashes are how people actually type these, and are not an error.
+  const spaced = ewb.validateForEwb({ invoice, org: ORG, client: BUYER, transport: { ...ROAD, vehicleNumber: 'MH 12 AB 1234' } });
+  assert.equal(spaced.ok, true);
+}));
+
+test('rail, air and sea need a document number instead of a vehicle', maybe(async () => {
+  const invoice = goodsInvoice();
+  const noDoc = ewb.validateForEwb({ invoice, org: ORG, client: BUYER, transport: { mode: 'rail', distanceKm: 900 } });
+  assert.equal(noDoc.ok, false);
+  assert.match(noDoc.errors[0], /transport document number/);
+
+  const withDoc = ewb.validateForEwb({
+    invoice, org: ORG, client: BUYER,
+    transport: { mode: 'rail', distanceKm: 900, transportDocNumber: 'RR/2026/551' }
+  });
+  assert.equal(withDoc.ok, true, JSON.stringify(withDoc.errors));
+}));
+
+test('a missing HSN is named by line, not reported in the abstract', maybe(async () => {
+  const invoice = goodsInvoice({
+    items: [
+      { desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 4000, gstRate: 18 },
+      { desc: 'Mystery Part', qty: 5, rate: 2000, gstRate: 18 }
+    ]
+  });
+  const result = ewb.validateForEwb({ invoice, org: ORG, client: BUYER, transport: ROAD });
+  assert.equal(result.ok, false);
+  // "Some line is missing something" is not actionable on a fifty-line invoice.
+  assert.ok(result.errors.some(e => e.includes('Mystery Part')));
+}));
+
+test('the payload uses the portal field names and date format', maybe(async () => {
+  const payload = ewb.buildEwbPayload({
+    invoice: goodsInvoice(), org: ORG, client: BUYER, transport: ROAD
+  });
+  // Named for the NIC schema, not for this codebase — a helpfully-renamed field
+  // is one nobody can find in the portal's documentation when debugging.
+  assert.equal(payload.docNo, 'KLG-2026-001');
+  assert.equal(payload.docDate, '10/06/2026', 'dd/mm/yyyy, which is what the portal expects');
+  assert.equal(payload.fromGstin, ORG.gstin);
+  assert.equal(payload.toGstin, BUYER.gstin);
+  assert.equal(payload.transMode, 1);
+  assert.equal(payload.vehicleNo, 'MH12AB1234');
+  assert.equal(payload.totInvValue, 94400);
+  assert.equal(payload.itemList.length, 1);
+  assert.equal(payload.itemList[0].igstRate, 18, 'inter-state: the whole rate sits in IGST');
+}));
+
+test('an unregistered buyer is declared as URP, not left blank', maybe(async () => {
+  const payload = ewb.buildEwbPayload({
+    invoice: goodsInvoice({ billTo: { name: 'Walk-in', stateCode: '29' }, clientId: null }),
+    org: ORG, client: null, transport: ROAD
+  });
+  // The portal's own placeholder for an unregistered person. A blank GSTIN is
+  // rejected; URP is the correct declaration.
+  assert.equal(payload.toGstin, 'URP');
+}));
+
+test('generating without a provider fails with an actionable message', maybe(async () => {
+  await assert.rejects(
+    () => ewb.generateEwayBill({ invoice: goodsInvoice(), org: ORG, client: BUYER, transport: ROAD }),
+    err => err.code === 'EWB_NOT_CONFIGURED' && err.statusCode === 501
+  );
+  // And validation runs *before* the provider, so the common problems produce
+  // something fixable rather than a 501 that hides them.
+  await assert.rejects(
+    () => ewb.generateEwayBill({ invoice: goodsInvoice(), org: ORG, client: BUYER, transport: { mode: 'road', distanceKm: 10 } }),
+    err => err.code === 'EWB_VALIDATION_FAILED'
+  );
+}));
+
+// ── GSTR-2B reconciliation (2.1 #7) ──────────────
+
+test('the portal JSON is read in whichever shape it arrives', maybe(async () => {
+  const invoices = [{ inum: 'SUP/1', dt: '05-06-2026', val: 11800, txval: 10000, iamt: 1800 }];
+  const current = gstr2b.parseGstr2b({ data: { docdata: { b2b: [{ ctin: '27AAPFU0939F1ZV', trdnm: 'Supplier', inv: invoices }] } } });
+  const older = gstr2b.parseGstr2b({ docdata: { b2b: [{ ctin: '27AAPFU0939F1ZV', inv: invoices }] } });
+  const bare = gstr2b.parseGstr2b({ b2b: [{ ctin: '27AAPFU0939F1ZV', inv: invoices }] });
+
+  // The download has been reorganised more than once. A tenant with last year's
+  // export should get their reconciliation, not a parse error about a key they
+  // have never heard of.
+  assert.equal(current.length, 1);
+  assert.equal(older.length, 1);
+  assert.equal(bare.length, 1);
+  assert.equal(current[0].invoiceValue, 11800);
+  assert.equal(current[0].tax, 1800);
+  assert.deepEqual(current[0].date, new Date(2026, 5, 5), 'dd-mm-yyyy, which new Date() reads as nothing useful');
+}));
+
+test('invoice numbers match across the ways suppliers type them', maybe(async () => {
+  // One invoice to a human, three strings to a computer.
+  assert.equal(gstr2b.normaliseInvoiceNumber('INV-001'), 'INV001');
+  assert.equal(gstr2b.normaliseInvoiceNumber('inv 001'), 'INV001');
+  assert.equal(gstr2b.normaliseInvoiceNumber('INV/001'), 'INV001');
+  // Aggressive on purpose: a false mismatch sends someone chasing a supplier
+  // over nothing, while a false match is caught by the value comparison.
+  assert.notEqual(gstr2b.normaliseInvoiceNumber('INV-001'), gstr2b.normaliseInvoiceNumber('INV-002'));
+}));
+
+test('credit claimed on an invoice the supplier never filed is reported as at risk', maybe(async () => {
+  const tenant = await registerOrg();
+  const vendor = await createVendor(tenant.token);
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 1000, gstRate: 18 }
+  ], { billNumber: 'SUP/UNFILED', billDate: '2026-06-05' });
+
+  // The portal has nothing for this period.
+  const report = await gstr2b.reconcile(tenant.org._id, [], {
+    from: new Date('2026-06-01'), to: new Date('2026-06-30')
+  });
+
+  assert.equal(report.summary.missingInPortal, 1);
+  /**
+   * The number the whole report exists to produce.
+   *
+   * Claim credit on a bill the supplier never reported and it is reversed with
+   * interest, typically a year later — by which time the money is spent and the
+   * supplier has stopped answering.
+   */
+  assert.equal(report.summary.itcAtRisk, 1800);
+  assert.match(report.missingInPortal[0].reason, /has not filed/);
+}));
+
+test('a purchase with no supplier GSTIN is not blamed on the supplier', maybe(async () => {
+  const tenant = await registerOrg();
+  const vendor = await createVendor(tenant.token, { name: 'Unregistered Supplier', gstin: undefined });
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Steel Rod', hsn: '7213', qty: 1, rate: 1000, gstRate: 18 }
+  ], { billNumber: 'SUP/NOGST', billDate: '2026-06-05' });
+
+  const report = await gstr2b.reconcile(tenant.org._id, [], {
+    from: new Date('2026-06-01'), to: new Date('2026-06-30')
+  });
+  // It cannot appear in 2B at all, so "the supplier has not filed" would send
+  // someone to chase a supplier who has done nothing wrong. The fix is ours.
+  assert.match(report.missingInPortal[0].reason, /No GSTIN recorded/);
+}));
+
+test('a matching invoice reconciles, and a differing one is flagged with the gap', maybe(async () => {
+  const tenant = await registerOrg();
+  const vendor = await createVendor(tenant.token);
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 1000, gstRate: 18 }
+  ], { billNumber: 'SUP/MATCH', billDate: '2026-06-05' });
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Steel Rod', hsn: '7213', qty: 5, rate: 1000, gstRate: 18 }
+  ], { billNumber: 'SUP/DIFF', billDate: '2026-06-06' });
+
+  const portal = gstr2b.parseGstr2b({
+    data: { docdata: { b2b: [{
+      ctin: '27AAPFU0939F1ZV',
+      trdnm: 'Supplier Pvt Ltd',
+      inv: [
+        // Typed differently by the supplier — same invoice.
+        { inum: 'sup/match', dt: '05-06-2026', val: 11800, txval: 10000, iamt: 1800 },
+        // Filed for a different amount than billed.
+        { inum: 'SUP/DIFF', dt: '06-06-2026', val: 4000, txval: 3390, iamt: 610 }
+      ]
+    }] } }
+  });
+
+  const report = await gstr2b.reconcile(tenant.org._id, portal, {
+    from: new Date('2026-06-01'), to: new Date('2026-06-30')
+  });
+  assert.equal(report.summary.matched, 1);
+  assert.equal(report.summary.mismatched, 1);
+  assert.match(report.mismatched[0].reason, /Recorded as/);
+}));
+
+test('a supplier filing something we never recorded is unclaimed credit', maybe(async () => {
+  const tenant = await registerOrg();
+  const portal = gstr2b.parseGstr2b({
+    data: { docdata: { b2b: [{
+      ctin: '27AAPFU0939F1ZV', trdnm: 'Supplier',
+      inv: [{ inum: 'SUP/UNSEEN', dt: '05-06-2026', val: 5900, txval: 5000, iamt: 900 }]
+    }] } }
+  });
+
+  const report = await gstr2b.reconcile(tenant.org._id, portal, {
+    from: new Date('2026-06-01'), to: new Date('2026-06-30')
+  });
+  assert.equal(report.summary.missingInBooks, 1);
+  // The other direction: money already paid, sitting unclaimed because the
+  // purchase was never entered.
+  assert.equal(report.summary.itcUnclaimed, 900);
+}));
+
+test('the portal flagging a credit as unavailable is not a match', maybe(async () => {
+  const tenant = await registerOrg();
+  const vendor = await createVendor(tenant.token);
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Steel Rod', hsn: '7213', qty: 10, rate: 1000, gstRate: 18 }
+  ], { billNumber: 'SUP/BLOCKED', billDate: '2026-06-05' });
+
+  const portal = gstr2b.parseGstr2b({
+    data: { docdata: { b2b: [{
+      ctin: '27AAPFU0939F1ZV',
+      inv: [{ inum: 'SUP/BLOCKED', dt: '05-06-2026', val: 11800, txval: 10000, iamt: 1800, itcavl: 'N', rsn: 'Filed after the cut-off' }]
+    }] } }
+  });
+
+  const report = await gstr2b.reconcile(tenant.org._id, portal, {
+    from: new Date('2026-06-01'), to: new Date('2026-06-30')
+  });
+  // Present in 2B is not the same as claimable. Treating it as a match would
+  // report a business as safe when its credit is going to be reversed.
+  assert.equal(report.summary.matched, 0);
+  assert.equal(report.summary.mismatched, 1);
+  assert.equal(report.summary.itcAtRisk, 1800);
+}));
+

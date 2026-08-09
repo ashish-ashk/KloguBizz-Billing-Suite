@@ -9699,6 +9699,187 @@
         }
       }
     },
+    "/api/v1/reports/eway-bill/{id}/check": {
+      "get": {
+        "summary": "GET /api/v1/reports/eway-bill/{id}/check",
+        "tags": [
+          "reports"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Document id"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/reports/eway-bill/{id}/preview": {
+      "post": {
+        "summary": "POST /api/v1/reports/eway-bill/{id}/preview",
+        "tags": [
+          "reports"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Document id"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/reports/eway-bill/{id}/generate": {
+      "post": {
+        "summary": "POST /api/v1/reports/eway-bill/{id}/generate",
+        "tags": [
+          "reports"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Document id"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/reports/gstr-2b/reconcile": {
+      "post": {
+        "summary": "POST /api/v1/reports/gstr-2b/reconcile",
+        "tags": [
+          "reports"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
     "/api/v1/purchases/vendors": {
       "get": {
         "summary": "GET /api/v1/purchases/vendors",
@@ -13141,7 +13322,7 @@
     }
   },
   "x-undocumented": {
-    "count": 43,
+    "count": 46,
     "likelyGaps": [],
     "actions": [
       "POST /api/v1/auth/mfa/setup",
@@ -13168,6 +13349,9 @@
       "POST /api/v1/recurring-invoices/{id}/run-now",
       "POST /api/v1/reports/e-invoice/{id}/cancel",
       "POST /api/v1/reports/e-invoice/{id}/generate",
+      "POST /api/v1/reports/eway-bill/{id}/generate",
+      "POST /api/v1/reports/eway-bill/{id}/preview",
+      "POST /api/v1/reports/gstr-2b/reconcile",
       "POST /api/v1/reports/stock/{id}/recompute",
       "POST /api/v1/sales-documents/{id}/restore",
       "POST /api/v1/subscriptions/cancel",

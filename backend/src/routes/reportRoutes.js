@@ -2,7 +2,8 @@ const router = require('express').Router();
 const { gstSummary, exportGstSummaryCsv } = require('../controllers/reportController');
 const {
   gstr1, gstr1Json, gstr1Csv, gstr3b,
-  checkEInvoice, generateEInvoice, cancelEInvoice, eInvoiceWorklist
+  checkEInvoice, generateEInvoice, cancelEInvoice, eInvoiceWorklist,
+  checkEwayBill, previewEwayBill, generateEwayBill, reconcileGstr2b
 } = require('../controllers/gstReturnController');
 const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
@@ -87,5 +88,25 @@ router.get('/e-invoice/worklist', requireFlag('einvoicing'), eInvoiceWorklist);
 router.get('/e-invoice/:id/check', requireFlag('einvoicing'), checkEInvoice);
 router.post('/e-invoice/:id/generate', requireRole('admin'), requireFlag('einvoicing'), generateEInvoice);
 router.post('/e-invoice/:id/cancel', requireRole('admin'), requireFlag('einvoicing'), cancelEInvoice);
+
+/**
+ * E-way bills (2.1 #6).
+ *
+ * `check` is readable by anyone: whether a consignment needs a bill is a
+ * dispatch-floor question, and the person loading the lorry is rarely the admin.
+ * Generating one is a filing with the government, so it is not.
+ */
+router.get('/eway-bill/:id/check', checkEwayBill);
+router.post('/eway-bill/:id/preview', requireRole('admin', 'accountant'), previewEwayBill);
+router.post('/eway-bill/:id/generate', requireRole('admin'), generateEwayBill);
+
+/**
+ * GSTR-2B reconciliation (2.1 #7).
+ *
+ * Takes the portal's own JSON download in the body — no GSP connection needed.
+ * A POST because it carries a document, not because it changes anything: nothing
+ * is written, and the report is computed and returned.
+ */
+router.post('/gstr-2b/reconcile', requireRole('admin', 'accountant'), reconcileGstr2b);
 
 module.exports = router;

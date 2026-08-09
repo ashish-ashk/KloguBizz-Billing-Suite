@@ -1629,14 +1629,73 @@ it.
   already accepts.** Tightening a contract is a separate change with its own consequences,
   not something to slip in under "add validation".
 
-### 15. E-way bill (2.1 #6) and GSTR-2A/2B reconciliation (2.1 #7)
+### 15. E-way bill (2.1 #6) and GSTR-2B reconciliation (2.1 #7) - **DONE (2026-08-07)**
 
-**Why not yet:** both need a live GSP connection.
+**The plan's premise was half right.** It filed both as "needs a live GSP connection". The
+e-way bill does. **GSTR-2B does not** — it is downloadable as JSON from the GST portal by
+anyone with the login, which every registered business has. A GSP would remove one manual
+download; it is not what stood between that feature and existing. So it shipped whole
+rather than as a seam.
 
-**How:** they land behind the same adapter seam as e-invoicing
-(`eInvoiceService#callIrp`). Write the payload builder and the validator first — that is
-the majority of the work and is fully testable without credentials, exactly as
-e-invoicing demonstrated.
+#### E-way bill
+
+Behind the same provider boundary as e-invoicing: `callEwbApi` is a stub with a precise
+contract, deliberately not faked, because every GSP has its own auth dance and error
+envelope and a mock only proves the mock works. Everything *around* it is real, which is
+the majority of the work and all of the risk.
+
+**The judgement is where the value is**, and each rule is one a mistake is expensive:
+
+- **The threshold is measured on the value including tax**, not the taxable value. That
+  single distinction is what puts a ₹45,000 + GST consignment on the road with no bill —
+  and it is exactly the band where it happens most.
+- **Services never need one**, decided from the SAC code. The first version checked an
+  `isService` flag that **does not exist on invoice line items**, so the rule silently
+  never fired and a ₹5,00,000 consulting invoice would have been told to raise a bill for a
+  consignment that does not exist. Now read from the HSN: the 99xx chapter is services, and
+  a line with no code is treated as goods — the conservative direction, since a spurious
+  suggestion costs a moment and a missing bill costs a detained vehicle.
+- **Validity is a day per 200 km, minimum one.** A 5 km delivery computes to zero days, and
+  a bill valid for no time at all is worse than none.
+- **A malformed vehicle number is caught on the screen**, where it costs thirty seconds,
+  rather than at a checkpoint. Spaces and dashes are accepted because that is how people
+  type them.
+- **An unregistered buyer is declared `URP`**, the portal's own placeholder — a blank GSTIN
+  is rejected.
+- The payload uses **NIC's field names**, not this codebase's. A helpfully-renamed field is
+  one nobody can find in the portal's documentation while debugging a rejection.
+
+The intra-state threshold genuinely differs by state, so the default is stated as the
+inter-state figure and flagged as such rather than presented as authoritative.
+
+#### GSTR-2B reconciliation
+
+**The most valuable report in the product**, and the reason is money that disappears
+quietly: input tax credit is only claimable if the *supplier* actually filed the invoice.
+Claim credit on a bill they never reported and it is reversed — with interest, typically a
+year later, by which time the money is spent and the supplier has stopped answering.
+
+Four outcomes, and the summary figure is **credit claimed on invoices that are not in 2B**.
+Everything else serves computing it accurately:
+
+| Outcome | Meaning |
+|---|---|
+| Matched | In the books, in 2B, figures agree |
+| Mismatched | Both have it, the figures differ — or the portal flags the credit unavailable, which is *not* a match however present the invoice is |
+| Missing in 2B | Recorded and claimed, supplier has not filed. **The money at risk** |
+| Missing in books | Supplier filed it, we have no record. Unclaimed credit, or a bill issued against our GSTIN we never received |
+
+Details that decide whether the report is usable: invoice numbers are **normalised
+aggressively** (`INV-001`, `inv 001` and `INV/001` are one invoice to a human), because a
+false mismatch sends someone chasing a supplier over nothing while a false match is caught
+immediately by the value comparison. A purchase with **no supplier GSTIN** is reported as
+our own gap, not as "the supplier has not filed" — it cannot appear in 2B at all, and
+blaming them would send someone to chase a supplier who has done nothing wrong. And the
+parser accepts the download in **whichever shape it arrives**, because the portal has
+reorganised it more than once and a tenant with last year's export should get their
+reconciliation rather than an error about a key they have never heard of.
+
+**410 backend tests pass.**
 
 ### 16. Multi-GSTIN / branches (2.1 #9), composition & QRMP (2.1 #10)
 
