@@ -2,6 +2,12 @@
 
 One branch, one push. There is no CI, no pipeline and no YAML to run.
 
+> **Deploying for the first time, or going live with paying customers?**
+> Read [LAUNCH-READINESS.md](LAUNCH-READINESS.md) first. It covers the one-way
+> doors — the encryption key that must be set before anyone enrols in 2FA, the
+> two migrations without which the application does not work, and the four
+> integrations that have never been run against a real provider.
+
 ```
 git add -A
 git commit -m "what changed"
