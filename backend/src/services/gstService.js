@@ -216,13 +216,49 @@ function resolveTaxContext(fromStateCode, toStateCode, {
  * @param options.supplyType       regular, an export/SEZ variant, or deemed-export
  * @param options.reverseCharge    tax payable by the recipient, so not collected here
  */
+/**
+ * A composition dealer cannot charge tax, and cannot supply inter-state.
+ *
+ * Both are statutory, and both are things this product would happily let them do
+ * — the first silently produces tax collected without authority, the second
+ * makes them ineligible for the scheme retrospectively. Exported so the invoice
+ * path can refuse before a document exists rather than after.
+ */
+function assertCompositionAllowed({ registration, isInterState }) {
+  if (registration?.type !== 'composition') return;
+  if (isInterState) {
+    const error = new Error(
+      'A composition taxable person cannot make inter-state outward supplies. '
+      + 'Making one puts your registration under the scheme at risk.'
+    );
+    error.statusCode = 400;
+    error.code = 'COMPOSITION_INTERSTATE';
+    throw error;
+  }
+}
+
 function calculateInvoiceTotals(items, fromStateCode, toStateCode, options = {}) {
-  const list = Array.isArray(items) ? items : [];
+  /**
+   * A composition dealer's lines are re-rated to zero before anything else.
+   *
+   * Done here rather than at each call site so it cannot be forgotten by one of
+   * them — the same reasoning that keeps every other tax decision in this file.
+   * The rate the user typed is discarded rather than validated against: a
+   * composition dealer entering 18% has made a mistake, and refusing the whole
+   * invoice would block them from billing over a field they should never have
+   * been shown.
+   */
+  const composition = options.registration?.type === 'composition';
+  const list = composition
+    ? (Array.isArray(items) ? items : []).map(item => ({ ...item, gstRate: 0, cessRate: 0 }))
+    : (Array.isArray(items) ? items : []);
   const invoiceDiscount = clampPercent(options.discountPercent, 'discountPercent');
   const applyRoundOff = options.roundOff !== false;
 
   const context = resolveTaxContext(fromStateCode, toStateCode, options);
-  const { isIGST, isUT, chargeTax } = context;
+  const { isIGST, isUT } = context;
+  // Composition overrides every other reason tax might be charged.
+  const chargeTax = composition ? false : context.chargeTax;
 
   let grossSubtotal = 0;
   let discountTotal = 0;
@@ -281,11 +317,25 @@ function calculateInvoiceTotals(items, fromStateCode, toStateCode, options = {})
     reverseCharge: context.reverseCharge,
     zeroRated: context.zeroRated,
     taxCharged: chargeTax,
-    taxNote: context.reason
+    /**
+     * The declaration a Bill of Supply is legally required to carry.
+     *
+     * Not decoration: rule 49 requires a composition dealer's document to state
+     * on its face that they are not eligible to collect tax. Putting it in
+     * `taxNote` means it prints wherever a zero-tax reason already prints, so
+     * every template carries it without one of them being missed.
+     */
+    taxNote: composition
+      ? 'Composition taxable person, not eligible to collect tax on supplies.'
+      : context.reason,
+    /** Drives the document title: a composition dealer issues a Bill of Supply,
+     *  not a Tax Invoice, and calling it the wrong thing is itself a defect. */
+    composition
   };
 }
 
 module.exports = {
+  assertCompositionAllowed,
   calculateInvoiceTotals,
   calculateLine,
   resolveTaxContext,

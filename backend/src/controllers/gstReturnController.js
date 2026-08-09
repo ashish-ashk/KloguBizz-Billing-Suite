@@ -4,7 +4,7 @@ const { Client } = require('../models/Client');
 const { Organisation } = require('../models/Organisation');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { notDeleted } = require('../utils/softDelete');
-const { resolveReturnPeriod } = require('../services/gstReturnService');
+const { resolveReturnPeriod, buildCmp08 } = require('../services/gstReturnService');
 const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { toCsv } = require('../services/csvService');
@@ -364,6 +364,23 @@ const eInvoiceWorklist = asyncHandler(async (req, res) => {
   });
 });
 
+// ── CMP-08, for composition dealers (2.1 #10) ────
+
+/**
+ * The quarterly statement a composition dealer files.
+ *
+ * Not gated on the registration type: a regular dealer who opens it gets the
+ * report with `applicable: false` and a sentence saying which returns they
+ * should file instead. Refusing outright would leave someone who is *about* to
+ * switch schemes unable to see what the filing would look like.
+ */
+const cmp08 = asyncHandler(async (req, res) => {
+  const period = resolveReturnPeriod(req.query);
+  const report = await buildCmp08(req.orgId, period);
+  recordEvent({ req, type: EVENT.gstReturnViewed, meta: { return: 'CMP-08', period: report.period.fp } });
+  res.json(report);
+});
+
 // ── E-way bills (2.1 #6) ─────────────────────────
 
 /**
@@ -448,6 +465,7 @@ const reconcileGstr2b = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  cmp08,
   checkEwayBill, generateEwayBill, previewEwayBill, reconcileGstr2b,
   gstr1, gstr1Json, gstr1Csv, gstr3b,
   checkEInvoice, generateEInvoice, cancelEInvoice, eInvoiceWorklist

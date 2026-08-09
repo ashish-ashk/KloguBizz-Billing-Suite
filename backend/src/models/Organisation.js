@@ -244,6 +244,43 @@ const inventorySchema = new mongoose.Schema({
   expiryWarningDays: { type: Number, default: 30, min: 0, max: 365 }
 }, { _id: false });
 
+/**
+ * How this business is registered under GST, and how often it files (2.1 #10).
+ *
+ * The whole product assumed **regular registration** — that the tenant charges
+ * GST, collects it, and files monthly. For a **composition** dealer every one of
+ * those is wrong, and wrongly in the dangerous direction: a composition taxable
+ * person is *prohibited* from collecting tax on supplies, so an invoice charging
+ * 18% is not a formatting problem, it is tax collected without authority. The
+ * customer also cannot claim it, so it is money taken from them for nothing.
+ *
+ * Defaults reproduce the previous behaviour exactly, so nothing changes for the
+ * tenants already using this.
+ */
+const gstRegistrationSchema = new mongoose.Schema({
+  type: { type: String, enum: ['regular', 'composition'], default: 'regular' },
+
+  /**
+   * The flat rate a composition dealer pays on turnover — not charged to the
+   * customer, paid out of the dealer's own margin.
+   *
+   * 1% for traders, 2% for manufacturers, 5% for restaurants, 6% for service
+   * providers. Stored rather than derived, because the category is a fact about
+   * the business that this product has no way to infer.
+   */
+  compositionRate: { type: Number, default: 1, min: 0, max: 10 },
+
+  /**
+   * Monthly, or QRMP — quarterly returns with monthly payment.
+   *
+   * Available to businesses under ₹5 crore turnover and chosen by a great many
+   * of them, because it is three filings a year instead of twelve. A product
+   * that only knows how to produce a monthly GSTR-1 makes a quarterly filer
+   * assemble their own return from three separate exports.
+   */
+  filingFrequency: { type: String, enum: ['monthly', 'quarterly'], default: 'monthly' }
+}, { _id: false });
+
 const organisationSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
   adminEmail: { type: String, required: true, lowercase: true, trim: true },
@@ -332,6 +369,7 @@ const organisationSchema = new mongoose.Schema({
   themeConfig: { type: themeConfigSchema, default: () => ({}) },
   paymentGateway: { type: paymentGatewaySchema, default: () => ({}) },
   inventory: { type: inventorySchema, default: () => ({}) },
+  gstRegistration: { type: gstRegistrationSchema, default: () => ({}) },
   invoiceSequence: { type: Number, default: 0 },
   // Which financial year (Apr–Mar, labelled by its starting calendar year,
   // e.g. '2026' for FY2026-27) `invoiceSequence` currently counts against.

@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { Invoice } = require('../models/Invoice');
 const { CreditNote } = require('../models/CreditNote');
 const { Purchase } = require('../models/Purchase');
@@ -116,6 +117,39 @@ function resolveReturnPeriod(query = {}) {
       label: from.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
       fp: returnPeriod(from),
       granularity: 'month'
+    };
+  }
+
+  /**
+   * A quarter, for QRMP filers (2.1 #10).
+   *
+   * Quarterly returns with monthly payment, available under ₹5 crore turnover
+   * and chosen by a great many businesses because it is four filings a year
+   * instead of twelve. Without it a quarterly filer has to assemble their own
+   * return from three separate monthly exports and hope they added up.
+   *
+   * Numbered by the Indian financial year: Q1 is April–June.
+   */
+  if (query.quarter) {
+    const match = /^(\d{4})-Q([1-4])$/i.exec(String(query.quarter));
+    if (!match) {
+      const error = new Error('quarter must be YYYY-Q1..Q4, numbered from April (Q1 = Apr-Jun)');
+      error.statusCode = 400;
+      throw error;
+    }
+    const fyStart = Number(match[1]);
+    const quarter = Number(match[2]);
+    const startMonth = 3 + (quarter - 1) * 3;
+    const from = new Date(fyStart, startMonth, 1, 0, 0, 0, 0);
+    const to = new Date(fyStart, startMonth + 3, 0, 23, 59, 59, 999);
+    return {
+      from,
+      to,
+      label: `Q${quarter} FY${fyStart}-${String(fyStart + 1).slice(-2)}`,
+      // The portal keys a quarterly filing to its **last** month, which is what
+      // the return itself is stamped with.
+      fp: returnPeriod(to),
+      granularity: 'quarter'
     };
   }
 
@@ -732,7 +766,106 @@ async function buildGstr3b(orgId, query = {}) {
   };
 }
 
+
+/**
+ * CMP-08 — the quarterly statement a composition dealer files (2.1 #10).
+ *
+ * Nothing like GSTR-1 or 3B, and giving a composition dealer either of those is
+ * worse than giving them nothing: those returns are built around tax charged to
+ * customers, and a composition dealer charges none. CMP-08 asks a much simpler
+ * question — what was your turnover, and what do you therefore owe at your flat
+ * rate — and the tax comes out of the dealer's own margin rather than off an
+ * invoice.
+ *
+ * The rate is a property of the business, not of a supply: 1% for traders, 2%
+ * for manufacturers, 5% for restaurants, 6% for service providers. Stored on the
+ * organisation, because this product has no way to infer which one applies.
+ */
+async function buildCmp08(orgIdRaw, period) {
+  const orgId = new mongoose.Types.ObjectId(String(orgIdRaw));
+  const org = await Organisation.findById(orgId).lean();
+  const registration = org?.gstRegistration || {};
+  const rate = Number(registration.compositionRate ?? 1);
+
+  const dateRange = { $gte: period.from, $lte: period.to };
+
+  const [outward, inwardReverseCharge] = await Promise.all([
+    Invoice.aggregate([
+      { $match: { orgId, deletedAt: null, status: { $nin: ['draft', 'cancelled'] }, date: dateRange } },
+      { $group: { _id: null, turnover: { $sum: '$totals.subtotal' }, count: { $sum: 1 } } }
+    ]),
+    /**
+     * Purchases under reverse charge are the exception that catches people out.
+     *
+     * A composition dealer pays **no** tax on their own supplies but still owes
+     * tax on inward supplies attracting reverse charge — at the ordinary rate,
+     * not the composition rate — and cannot claim it back. Omitting it
+     * understates what they owe, which is the direction that produces a demand
+     * notice.
+     *
+     * The liability has to be **recomputed** rather than read off a field, and
+     * that is not fussiness. On a reverse-charge purchase the supplier collects
+     * nothing, so `totals.cgst` and friends are correctly zero; the amount is
+     * normally derived into `itc.*` instead — but only when the credit is
+     * *eligible*, and a composition dealer's never is. So both stored figures
+     * read zero for exactly the tenant this report is for.
+     */
+    Purchase.find({
+      orgId, deletedAt: null, status: { $ne: 'draft' },
+      reverseCharge: true, billDate: dateRange
+    }).select('items placeOfSupply').lean()
+  ]);
+
+  const turnover = roundMoney(outward[0]?.turnover || 0);
+  const compositionTax = roundMoney((turnover * rate) / 100);
+
+  // What the supplier *would* have charged is what the recipient now owes.
+  const reverseChargeTax = roundMoney(
+    (inwardReverseCharge || []).reduce((sum, bill) => {
+      const lineTax = (bill.items || []).reduce((lines, item) => {
+        const line = calculateLine(item, 0, 'cmp08.item');
+        return lines + line.tax + line.cess;
+      }, 0);
+      return sum + lineTax;
+    }, 0)
+  );
+
+  return {
+    period: { from: isoDay(period.from), to: isoDay(period.to), label: period.label, fp: period.fp },
+    registration: {
+      type: registration.type || 'regular',
+      compositionRate: rate,
+      /**
+       * Stated, because the whole report is wrong for a regular dealer.
+       *
+       * Producing a CMP-08 for a business that is not under the scheme would be
+       * a filing they must not make, so the answer is on the report rather than
+       * left to whoever opens it.
+       */
+      applicable: registration.type === 'composition'
+    },
+    turnover: {
+      value: turnover,
+      invoices: outward[0]?.count || 0
+    },
+    tax: {
+      // Split half and half, which is how CMP-08 table 1 reports it for an
+      // intra-state dealer — and a composition dealer's supplies are all
+      // intra-state by definition, since inter-state ones are prohibited.
+      cgst: roundMoney(compositionTax / 2),
+      sgst: roundMoney(compositionTax / 2),
+      composition: compositionTax,
+      reverseCharge: reverseChargeTax,
+      total: roundMoney(compositionTax + reverseChargeTax)
+    },
+    note: registration.type === 'composition'
+      ? `Tax at ${rate}% of turnover, payable from your own margin — it is not charged to customers.`
+      : 'This organisation is registered as a regular taxpayer. File GSTR-1 and GSTR-3B instead.'
+  };
+}
+
 module.exports = {
+  buildCmp08,
   B2CL_THRESHOLD,
   OTHER_COUNTRY_POS,
   resolveReturnPeriod,

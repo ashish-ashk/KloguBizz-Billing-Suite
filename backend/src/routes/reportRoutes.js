@@ -3,7 +3,7 @@ const { gstSummary, exportGstSummaryCsv } = require('../controllers/reportContro
 const {
   gstr1, gstr1Json, gstr1Csv, gstr3b,
   checkEInvoice, generateEInvoice, cancelEInvoice, eInvoiceWorklist,
-  checkEwayBill, previewEwayBill, generateEwayBill, reconcileGstr2b
+  cmp08, checkEwayBill, previewEwayBill, generateEwayBill, reconcileGstr2b
 } = require('../controllers/gstReturnController');
 const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
@@ -96,6 +96,9 @@ router.post('/e-invoice/:id/cancel', requireRole('admin'), requireFlag('einvoici
  * dispatch-floor question, and the person loading the lorry is rarely the admin.
  * Generating one is a filing with the government, so it is not.
  */
+/** CMP-08 — the composition dealer's quarterly statement (2.1 #10). */
+router.get('/gst/cmp-08', cmp08);
+
 router.get('/eway-bill/:id/check', checkEwayBill);
 router.post('/eway-bill/:id/preview', requireRole('admin', 'accountant'), previewEwayBill);
 router.post('/eway-bill/:id/generate', requireRole('admin'), generateEwayBill);

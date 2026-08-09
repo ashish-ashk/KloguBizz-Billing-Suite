@@ -1741,14 +1741,81 @@ reconciliation rather than an error about a key they have never heard of.
 
 **410 backend tests pass.**
 
-### 16. Multi-GSTIN / branches (2.1 #9), composition & QRMP (2.1 #10)
+### 16. Composition scheme and QRMP - **DONE (2026-08-07)**. Multi-GSTIN / branches - **deliberately not started**
 
-**Why not yet:** one org = one GSTIN is assumed by the invoice counter, both returns and
-the tax engine.
+**Split, because they are not the same size of problem and one of them is a live
+correctness bug.**
 
-**How:** this is really "memberships for GSTINs" — a `Branch` sub-entity owning its own
-GSTIN, invoice series and returns. Sequence it **after** memberships, because they are the
-same shape of problem and solving one teaches the other.
+#### Composition scheme (2.1 #10) — done
+
+The whole product assumed **regular registration**: that the tenant charges GST, collects
+it, and files monthly. For a composition dealer every one of those is wrong, and wrongly in
+the dangerous direction. A composition taxable person is **prohibited from collecting tax on
+supplies** — so an invoice charging 18% is not a formatting problem, it is tax collected
+without authority, and the customer cannot claim it, so it is money taken from them for
+nothing.
+
+- **Rates are zeroed in the tax engine**, not at the call site, so no caller can forget. A
+  rate typed by mistake is discarded rather than refused: a composition dealer entering 18%
+  has made a mistake, and rejecting the invoice would block them from billing over a field
+  they should never have been shown.
+- **Rule 49's declaration is attached automatically** — "composition taxable person, not
+  eligible to collect tax on supplies" — in the same field every other zero-tax reason
+  prints from, so every template carries it without one being missed.
+- **Inter-state supply is refused before the document exists**, because the consequence is
+  not a wrong invoice: it is losing eligibility for the scheme retrospectively, discovered
+  at assessment and undoable by editing nothing.
+- **CMP-08** is built, and it is a genuinely different return — not GSTR-1 with the tax
+  removed. It asks what the turnover was and what is owed at the flat rate, paid from the
+  dealer's own margin.
+
+The reverse-charge line in CMP-08 needed care and is the detail most likely to have been got
+wrong: a composition dealer pays no tax on their own supplies but **still owes it on inward
+supplies under reverse charge**, at the ordinary rate and unclaimable. It cannot be read off
+a stored field — on a reverse-charge purchase `totals.cgst` is correctly zero because the
+supplier collects nothing, and the amount is normally derived into `itc.*`, but only when
+the credit is *eligible*, which a composition dealer's never is. Both stored figures read
+zero for exactly the tenant this report exists for, so the liability is recomputed.
+
+**Defaults reproduce the previous behaviour exactly**, so nothing changed for existing
+tenants — asserted by a test.
+
+#### QRMP (2.1 #10) — done
+
+Quarterly return periods, numbered by the Indian financial year (Q1 is April–June), keyed
+to the quarter's last month as the portal does. Available under ₹5 crore turnover and chosen
+by a great many businesses because it is four filings a year instead of twelve — and without
+it a quarterly filer assembles their own return from three monthly exports and hopes they
+added up. GSTR-1 and GSTR-3B both accept `?quarter=YYYY-Q1`.
+
+#### Multi-GSTIN / branches (2.1 #9) — not started, and here is the design
+
+**Deliberately not begun rather than half-built.** One org = one GSTIN is assumed by the
+invoice counter, both returns, the tax engine, e-invoicing and e-way bills. A partial
+implementation touching invoice numbering and tax calculation is the class of change that
+breaks GST filing for existing single-GSTIN tenants — and a filing regression costs a
+customer a penalty, not an apology.
+
+The plan's instinct was right: **this is "memberships for GSTINs"**. The shape, now that
+memberships have been built and the lesson is available:
+
+1. A **`Branch`** owning `{orgId, name, gstin, stateCode, address, invoicePrefix, sequence,
+   sequenceFY, isDefault, status}`. The counter fields move here from `Organisation`, which
+   is what makes a per-GSTIN series possible at all.
+2. A **migration creating one default branch per organisation** from its existing GSTIN,
+   state and counter — so every existing tenant has exactly one and behaves identically.
+   This is what makes the change safe, and is the same trick migration 006 used for
+   memberships.
+3. **`Invoice.branchId`**, optional, defaulting to the org's default branch. Absent means
+   "the default", exactly as a missing `planVersion` means "the live plan" (#9).
+4. `nextDocumentNumber` takes a branch instead of an org.
+5. `totalsFor` reads the **branch's** state code as `fromStateCode`, not the org's.
+6. GSTR-1/3B/CMP-08 take a `branchId`, because a return is filed **per GSTIN** — filing one
+   combined return across two registrations is a wrong filing, not an inconvenience.
+
+Sequenced after composition deliberately: composition is a correctness bug affecting
+customers who could sign up today, and branches is an architecture change affecting
+customers who would have to be turned away either way.
 
 ## Part 4 (premium polish) — the honest position
 

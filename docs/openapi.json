@@ -9736,6 +9736,43 @@
         }
       }
     },
+    "/api/v1/reports/gst/cmp-08": {
+      "get": {
+        "summary": "GET /api/v1/reports/gst/cmp-08",
+        "tags": [
+          "reports"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
     "/api/v1/reports/eway-bill/{id}/check": {
       "get": {
         "summary": "GET /api/v1/reports/eway-bill/{id}/check",

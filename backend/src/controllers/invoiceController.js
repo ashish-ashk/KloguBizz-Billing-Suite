@@ -7,7 +7,7 @@ const { CreditNote } = require('../models/CreditNote');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
-const { calculateInvoiceTotals, roundMoney } = require('../services/gstService');
+const { calculateInvoiceTotals, roundMoney, assertCompositionAllowed } = require('../services/gstService');
 const { nextInvoiceNumber } = require('../services/invoiceNumberService');
 const { renderInvoicePdf } = require('../services/pdfService');
 const { getPlatformDefaults } = require('../services/platformSettingsService');
@@ -60,6 +60,18 @@ async function totalsFor(req, body) {
    */
   const placeOfSupply = body.placeOfSupply || buyerStateCode;
 
+  /**
+   * A composition dealer cannot supply inter-state (2.1 #10).
+   *
+   * Refused here, before a document exists, because the consequence is not a
+   * wrong invoice — it is losing eligibility for the scheme retrospectively,
+   * which is discovered at assessment and cannot be undone by editing anything.
+   */
+  assertCompositionAllowed({
+    registration: org.gstRegistration,
+    isInterState: String(placeOfSupply) !== String(org.stateCode)
+  });
+
   return calculateInvoiceTotals(body.items || [], org.stateCode, placeOfSupply, {
     discountPercent: body.discountPercent,
     // Whole-rupee rounding is the Indian billing convention, but a tenant that
@@ -69,7 +81,9 @@ async function totalsFor(req, body) {
     // a taxable, regular, non-reverse-charge supply.
     taxTreatment: body.taxTreatment,
     supplyType: body.supplyType,
-    reverseCharge: body.reverseCharge
+    reverseCharge: body.reverseCharge,
+    // Composition zeroes every rate and adds the declaration rule 49 requires.
+    registration: org.gstRegistration
   });
 }
 

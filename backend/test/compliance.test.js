@@ -45,6 +45,7 @@ const eInvoice = require('../src/services/eInvoiceService');
 const totp = require('../src/utils/totp');
 const ewb = require('../src/services/ewayBillService');
 const gstr2b = require('../src/services/gstr2bService');
+const { resolveReturnPeriod } = require('../src/services/gstReturnService');
 const { purgeExpiredDeletions } = require('../src/services/maintenanceService');
 const { invalidateFeatureFlagCache } = require('../src/services/featureFlagService');
 
@@ -1511,5 +1512,178 @@ test('the portal flagging a credit as unavailable is not a match', maybe(async (
   assert.equal(report.summary.matched, 0);
   assert.equal(report.summary.mismatched, 1);
   assert.equal(report.summary.itcAtRisk, 1800);
+}));
+
+// ── Composition scheme and QRMP (2.1 #10) ────────
+
+async function makeComposition(orgId, overrides = {}) {
+  await Organisation.updateOne(
+    { _id: orgId },
+    { $set: { gstRegistration: { type: 'composition', compositionRate: 1, filingFrequency: 'quarterly', ...overrides } } }
+  );
+}
+
+test('a composition dealer charges no tax, and the invoice says why', maybe(async () => {
+  const tenant = await registerOrg();
+  await makeComposition(tenant.org._id);
+  const client = await createClient(tenant.token, { stateCode: '27' });
+
+  const invoice = await createInvoice(tenant.token, {
+    clientId: client._id,
+    items: [{ desc: 'Widget', hsn: '8479', qty: 10, rate: 500, gstRate: 18 }]
+  });
+
+  /**
+   * The correctness problem this closes.
+   *
+   * A composition taxable person is *prohibited* from collecting tax on
+   * supplies. Charging 18% is not a formatting issue — it is tax collected
+   * without authority, and the customer cannot claim it, so it is money taken
+   * from them for nothing.
+   */
+  assert.equal(invoice.totals.cgst, 0);
+  assert.equal(invoice.totals.sgst, 0);
+  assert.equal(invoice.totals.igst, 0);
+  assert.equal(invoice.totals.total, 5000, 'the customer pays the ticket price and no more');
+  assert.equal(invoice.totals.taxCharged, false);
+  // Rule 49 requires the document to say this on its face.
+  assert.match(invoice.totals.taxNote, /not eligible to collect tax/i);
+}));
+
+test('a rate typed by mistake is ignored rather than refused', maybe(async () => {
+  const tenant = await registerOrg();
+  await makeComposition(tenant.org._id);
+  const client = await createClient(tenant.token, { stateCode: '27' });
+
+  // 18% entered on a composition dealer's invoice is a mistake, not an attack.
+  // Refusing the invoice would block them from billing over a field they should
+  // never have been shown.
+  const invoice = await createInvoice(tenant.token, {
+    clientId: client._id,
+    items: [{ desc: 'Widget', hsn: '8479', qty: 1, rate: 100, gstRate: 28 }]
+  });
+  assert.equal(invoice.totals.total, 100);
+}));
+
+test('a composition dealer cannot make an inter-state supply', maybe(async () => {
+  const tenant = await registerOrg();
+  await makeComposition(tenant.org._id);
+  const client = await createClient(tenant.token, { stateCode: '29' });
+
+  const refused = await call('POST', '/invoices', {
+    token: tenant.token,
+    body: {
+      clientId: client._id,
+      date: '2026-06-10',
+      dueDate: '2026-07-10',
+      status: 'pending',
+      items: [{ desc: 'Widget', hsn: '8479', qty: 1, rate: 1000, gstRate: 18 }]
+    }
+  });
+
+  /**
+   * Refused before the document exists, because the consequence is not a wrong
+   * invoice — it is losing eligibility for the scheme retrospectively, which is
+   * discovered at assessment and cannot be undone by editing anything.
+   */
+  assert.equal(refused.status, 400);
+  assert.equal(refused.body.code, 'COMPOSITION_INTERSTATE');
+}));
+
+test('a regular dealer is completely unaffected', maybe(async () => {
+  const tenant = await registerOrg();
+  const client = await createClient(tenant.token, { stateCode: '27' });
+  const invoice = await createInvoice(tenant.token, {
+    clientId: client._id,
+    items: [{ desc: 'Widget', hsn: '8479', qty: 10, rate: 500, gstRate: 18 }]
+  });
+  // The default reproduces the previous behaviour exactly, so nothing changes
+  // for the tenants already using this.
+  assert.equal(invoice.totals.total, 5900);
+  assert.ok(invoice.totals.cgst > 0);
+}));
+
+test('CMP-08 charges the flat rate on turnover, not the customer', maybe(async () => {
+  const tenant = await registerOrg();
+  await makeComposition(tenant.org._id, { compositionRate: 1 });
+  const client = await createClient(tenant.token, { stateCode: '27' });
+
+  await createInvoice(tenant.token, {
+    clientId: client._id, date: '2026-06-10',
+    items: [{ desc: 'Widget', hsn: '8479', qty: 100, rate: 1000, gstRate: 18 }]
+  });
+
+  const { status, body } = await call('GET', '/reports/gst/cmp-08?quarter=2026-Q1', { token: tenant.token });
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.equal(body.registration.applicable, true);
+  assert.equal(body.turnover.value, 100000);
+  // 1% of turnover, paid out of the dealer's own margin — split half CGST, half
+  // SGST, since a composition dealer's supplies are all intra-state by
+  // definition.
+  assert.equal(body.tax.composition, 1000);
+  assert.equal(body.tax.cgst, 500);
+  assert.equal(body.tax.sgst, 500);
+  assert.match(body.note, /from your own margin/);
+}));
+
+test('CMP-08 still owes tax on reverse-charge purchases', maybe(async () => {
+  const tenant = await registerOrg();
+  await makeComposition(tenant.org._id);
+  const vendor = await createVendor(tenant.token);
+  await purchase(tenant.token, vendor._id, [
+    { desc: 'Freight', hsn: '996812', qty: 1, rate: 10000, gstRate: 18 }
+  ], { billNumber: 'RC/1', billDate: '2026-06-05', reverseCharge: true });
+
+  const { body } = await call('GET', '/reports/gst/cmp-08?quarter=2026-Q1', { token: tenant.token });
+  /**
+   * The exception that catches people out: a composition dealer pays no tax on
+   * their own supplies but still owes it on inward supplies under reverse
+   * charge — at the ordinary rate, and unclaimable. Omitting it understates what
+   * they owe, which is the direction that produces a demand notice.
+   */
+  assert.ok(body.tax.reverseCharge > 0);
+  assert.equal(body.tax.total, body.tax.composition + body.tax.reverseCharge);
+}));
+
+test('a regular dealer opening CMP-08 is told to file something else', maybe(async () => {
+  const tenant = await registerOrg();
+  const { body } = await call('GET', '/reports/gst/cmp-08?quarter=2026-Q1', { token: tenant.token });
+  // Not refused: someone about to switch schemes should be able to see what the
+  // filing would look like. But the report says plainly it does not apply.
+  assert.equal(body.registration.applicable, false);
+  assert.match(body.note, /GSTR-1 and GSTR-3B/);
+}));
+
+test('a quarter is a financial-year quarter, starting in April', maybe(async () => {
+  const q1 = resolveReturnPeriod({ quarter: '2026-Q1' });
+  assert.equal(q1.from.getMonth(), 3, 'Q1 starts in April, not January');
+  assert.equal(q1.to.getMonth(), 5, 'and ends in June');
+  assert.equal(q1.granularity, 'quarter');
+
+  const q4 = resolveReturnPeriod({ quarter: '2026-Q4' });
+  assert.equal(q4.from.getMonth(), 0, 'Q4 is January to March of the following calendar year');
+  assert.equal(q4.from.getFullYear(), 2027);
+
+  // The portal keys a quarterly filing to its last month.
+  assert.equal(q1.fp, '062026');
+
+  assert.throws(() => resolveReturnPeriod({ quarter: '2026-Q9' }), /Q1\.\.Q4/);
+}));
+
+test('GSTR-1 can be produced for a quarter, not only a month', maybe(async () => {
+  const tenant = await registerOrg();
+  const client = await createClient(tenant.token, { stateCode: '27', gstin: '27AAPFU0939F1ZV' });
+  await createInvoice(tenant.token, { clientId: client._id, date: '2026-04-15' });
+  await createInvoice(tenant.token, { clientId: client._id, date: '2026-06-20' });
+
+  const { status, body } = await call('GET', '/reports/gstr1?quarter=2026-Q1', { token: tenant.token });
+  assert.equal(status, 200, JSON.stringify(body));
+  /**
+   * Without this a QRMP filer assembles their own return from three separate
+   * monthly exports and hopes they added up. Both invoices fall in Q1 and both
+   * must appear.
+   */
+  assert.equal(body.summary.invoiceCount, 2);
+  assert.match(body.period.label, /Q1 FY2026/);
 }));
 

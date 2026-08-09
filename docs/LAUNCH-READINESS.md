@@ -265,7 +265,7 @@ Not defects. Deliberate gaps, with the reasoning recorded in the improvement pla
 | **Coupons, proration, refunds** (3.3 #10) | You plan to run launch discounts or mid-cycle upgrades |
 | ~~The platform's own GST invoices~~ | **Built.** But it issues nothing until the `platformBilling` setting has a legal name, GSTIN, address and state code — see §1 |
 | **Multi-GSTIN / branches** (2.1 #9) | A customer operates in more than one state under one business |
-| **Composition scheme, QRMP** (2.1 #10) | You are selling to businesses below the composition threshold |
+| ~~Composition scheme, QRMP~~ | **Built.** A composition dealer's invoices carry no tax and the rule 49 declaration; CMP-08 and quarterly GSTR-1/3B are available |
 | **Depreciation** (2.4 #32) | A customer wants a P&L that accounts for capital assets |
 | **Purchase debit notes** | A customer returns goods to suppliers often enough for it to move their numbers |
 | **Accessibility** (Part 4 #14) | ~225 known lint findings. Has a legal dimension in some markets |
