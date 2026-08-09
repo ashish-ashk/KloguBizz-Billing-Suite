@@ -343,6 +343,72 @@ async function sendReminderEmail({
  * could never receive a reset link -- an unrecoverable account created by a
  * one-character mistake.
  */
+/**
+ * Chasing a failed subscription payment (3.3 #10).
+ *
+ * Written to be *useful* rather than threatening. The overwhelmingly common
+ * cause is an expired card, which the customer would fix in two minutes if
+ * anybody told them — so the message leads with what happened and what to do,
+ * says plainly that nothing has been deleted, and only mentions consequences
+ * where they are imminent.
+ *
+ * From the platform, so no tenant branding: this is KloguBizz writing to its own
+ * customer about their account with us, and dressing it in their logo would
+ * suggest it came from their own system.
+ */
+async function sendDunningEmail({
+  to, orgId, name, orgName, planName, amount, billingCycle, daysPastDue, stage, subject, lead, tone, suspendInDays
+}) {
+  const money = typeof amount === 'number' && amount > 0
+    ? `₹${amount.toLocaleString('en-IN')} ${billingCycle === 'yearly' ? 'per year' : 'per month'}`
+    : null;
+
+  const lines = [
+    `Hello ${name || 'there'},`,
+    '',
+    lead,
+    '',
+    `Account: ${orgName}`,
+    `Plan: ${planName}${money ? ` (${money})` : ''}`,
+    `Outstanding for: ${daysPastDue} day${daysPastDue === 1 ? '' : 's'}`,
+    ''
+  ];
+
+  if (tone === 'warning' && suspendInDays > 0) {
+    lines.push(
+      `If this is not settled within ${suspendInDays} day${suspendInDays === 1 ? '' : 's'}, the account `
+      + 'will become read-only. Nothing is deleted: you will still be able to open and export every '
+      + 'invoice, client and report. Creating and editing stops until the payment goes through.',
+      ''
+    );
+  }
+
+  lines.push(
+    'You can update your payment details from Subscription inside the app.',
+    '',
+    'If you think this is a mistake, or the payment has already been made, reply to this email '
+    + 'and a person will look at it.'
+  );
+
+  const text = lines.join('\n');
+
+  return sendEmail({
+    to,
+    orgId,
+    type: 'dunning',
+    meta: { stage, daysPastDue },
+    subject,
+    text,
+    html: layout({
+      title: subject,
+      body: escapeHtml(text).replace(/\n/g, '<br />'),
+      ctaLabel: 'Update payment details',
+      ctaUrl: `${env.FRONTEND_URL}/subscription`,
+      footer: 'Sent by KloguBizz about your subscription.'
+    })
+  });
+}
+
 async function sendEmailVerification({ to, name, verifyUrl, orgId }) {
   const body = `
     <p style="margin:0 0 12px;">Hello ${escapeHtml(name || 'there')},</p>
@@ -437,6 +503,7 @@ module.exports = {
   sendPaymentLinkEmail,
   sendPasswordResetEmail,
   sendEmailVerification,
+  sendDunningEmail,
   sendReminderEmail,
   renderTemplate,
   DEFAULT_REMINDER_SUBJECT,

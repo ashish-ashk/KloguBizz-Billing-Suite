@@ -57,6 +57,34 @@ const subscriptionSchema = new mongoose.Schema({
   cancelledAt: Date,
   lastPaymentAt: Date,
   failedPaymentCount: { type: Number, default: 0 },
+
+  /**
+   * When this subscription first went past due (3.3 #10).
+   *
+   * `failedPaymentCount` alone cannot drive dunning: three failures could be
+   * three retries in an hour or three months apart, and the escalation everyone
+   * actually wants is measured in *days late*, not attempts. Set on the first
+   * failure and cleared on a successful charge, so it is the anchor every stage
+   * is measured from.
+   */
+  pastDueSince: { type: Date, default: null },
+
+  /** The highest dunning stage already sent, so a restarted sweep does not
+   *  begin the sequence again from the top. */
+  dunningStage: { type: Number, default: 0 },
+  lastDunningAt: { type: Date, default: null },
+
+  /**
+   * Whether a dunning message has ever actually reached a person.
+   *
+   * Suppression is silent by design — a bounced billing address makes every send
+   * a no-op — and suspending an account whose owner was never successfully told
+   * is punishing someone for a message they did not receive. The sweep refuses
+   * to suspend while this is false, and reports those tenants for a human to
+   * chase another way.
+   */
+  dunningDelivered: { type: Boolean, default: false },
+
   endDate: Date
 }, { timestamps: true });
 

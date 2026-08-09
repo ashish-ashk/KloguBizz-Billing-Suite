@@ -269,6 +269,18 @@ const organisationSchema = new mongoose.Schema({
   statusReason: { type: String, default: '' },
   statusChangedAt: Date,
   statusChangedBy: { type: String, default: '' },
+
+  /**
+   * Whether this suspension was applied automatically for non-payment (3.3 #10).
+   *
+   * The distinction is load-bearing, not bookkeeping. When a customer's card
+   * finally goes through, the dunning sweep restores their access — and it must
+   * restore *only* what it took away. A tenant suspended by an operator for
+   * fraud, abuse or a legal hold who then happens to pay an invoice must stay
+   * suspended; silently reinstating them because money arrived would undo a
+   * human decision that money was never the point of.
+   */
+  suspendedForNonPayment: { type: Boolean, default: false },
   /**
    * When the trial runs out. Set at registration; backfilled from `createdAt` for
    * organisations that predate it (migration 004). Nothing auto-suspends on this

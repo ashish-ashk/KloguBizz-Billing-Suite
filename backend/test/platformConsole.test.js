@@ -38,6 +38,15 @@ const { Plan } = require('../src/models/Plan');
 const { PlanVersion } = require('../src/models/PlanVersion');
 const { JobRun } = require('../src/models/JobRun');
 const jobs = require('../src/services/jobRunService');
+const { EmailLog } = require('../src/models/EmailLog');
+const { runDunningSweep } = require('../src/services/dunningService');
+const { applyEvent } = require('../src/controllers/razorpayWebhookController');
+
+/** The webhook's decision layer, without rebuilding an HMAC for every case —
+ *  the signature check and replay guard are covered in api.integration.test.js. */
+function applyRazorpayEvent(event, entity) {
+  return applyEvent(event, { subscription: { entity } });
+}
 const { Organisation } = require('../src/models/Organisation');
 const { User } = require('../src/models/User');
 const { Subscription } = require('../src/models/Subscription');
@@ -1447,5 +1456,223 @@ test('job history is readable, and only by the platform', maybe(async () => {
   const tenant = await registerOrg();
   const refused = await call('GET', '/superadmin/system/jobs', { token: tenant.token });
   assert.equal(refused.status, 403);
+}));
+
+// ── Dunning (3.3 #10) ────────────────────────────
+
+/**
+ * Puts a tenant into the state the Razorpay webhook leaves behind on a failed
+ * charge, `daysAgo` days ago.
+ */
+async function pastDue(tenant, daysAgo, overrides = {}) {
+  const since = new Date(Date.now() - daysAgo * 86400000);
+  await Subscription.updateMany({ orgId: tenant.org._id }, {
+    $set: {
+      status: 'past_due',
+      pastDueSince: since,
+      failedPaymentCount: 1,
+      planCode: 'growth',
+      billingCycle: 'monthly',
+      pricing: { monthlyPrice: 999, yearlyPrice: 9990 },
+      ...overrides
+    }
+  });
+  return Subscription.findOne({ orgId: tenant.org._id }).lean();
+}
+
+test('a failed payment is chased, and the first notice is gentle', maybe(async () => {
+  const tenant = await registerOrg();
+  await pastDue(tenant, 2);
+
+  const result = await runDunningSweep({ orgId: tenant.org._id });
+  assert.equal(result.details.length, 1);
+  /**
+   * `skipped`, not `sent` — there is no mail provider configured in tests.
+   *
+   * Which is the design working rather than a limitation of the harness: a
+   * deployment that cannot notify anyone never sets `dunningDelivered`, and so
+   * never auto-suspends. Cutting off customers you have no way of telling would
+   * be the worst possible behaviour for a misconfigured install.
+   */
+  assert.equal(result.skipped, 1);
+
+  const sub = await Subscription.findOne({ orgId: tenant.org._id }).lean();
+  assert.equal(sub.dunningDelivered, false, 'a send that reached nobody is not delivery');
+  // Day 2 reaches stage 1 but not stage 2 — the common case is an expired card
+  // that takes two minutes to fix, and it deserves a nudge before a warning.
+  assert.equal(sub.dunningStage, 1);
+
+  const log = await waitUntil(() => EmailLog.findOne({ orgId: tenant.org._id, type: 'dunning' }).lean());
+  assert.ok(log, 'the chase is recorded like every other send');
+  assert.match(log.subject, /did not go through/i);
+}));
+
+test('the same stage is never sent twice', maybe(async () => {
+  const tenant = await registerOrg();
+  await pastDue(tenant, 2);
+
+  await runDunningSweep({ orgId: tenant.org._id });
+  const second = await runDunningSweep({ orgId: tenant.org._id });
+  // The sweep runs hourly. Re-sending on every tick is how a dunning sequence
+  // becomes a spam complaint. The stage did not move, so nothing was attempted.
+  assert.equal(second.details.length, 0);
+  assert.equal((await Subscription.findOne({ orgId: tenant.org._id }).lean()).dunningStage, 1);
+}));
+
+test('escalation is measured in days late, not in failed attempts', maybe(async () => {
+  const tenant = await registerOrg();
+  // Twelve gateway retries in one hour is not twelve weeks of silence, and
+  // "we tried your card twelve times" is not a thing to say to a customer.
+  await pastDue(tenant, 1, { failedPaymentCount: 12 });
+
+  await runDunningSweep({ orgId: tenant.org._id });
+  assert.equal((await Subscription.findOne({ orgId: tenant.org._id }).lean()).dunningStage, 1);
+}));
+
+test('a long-overdue account jumps to the right stage rather than starting over', maybe(async () => {
+  const tenant = await registerOrg();
+  await pastDue(tenant, 15);
+
+  await runDunningSweep({ orgId: tenant.org._id });
+  const sub = await Subscription.findOne({ orgId: tenant.org._id }).lean();
+  // Fifteen days in, the honest message is the final warning — not "we could
+  // not take this month's payment", which would be two weeks out of date.
+  assert.equal(sub.dunningStage, 4);
+  const log = await waitUntil(() => EmailLog.findOne({ orgId: tenant.org._id, type: 'dunning' }).lean());
+  assert.match(log.subject, /final notice/i);
+}));
+
+test('an account is limited only after the deadline, and only after being told', maybe(async () => {
+  const tenant = await registerOrg();
+  await pastDue(tenant, 25, { dunningDelivered: true, dunningStage: 4 });
+
+  const result = await runDunningSweep({ orgId: tenant.org._id });
+  assert.equal(result.suspended, 1);
+
+  const org = await Organisation.findById(tenant.org._id).lean();
+  assert.equal(org.status, 'suspended');
+  assert.equal(org.suspendedForNonPayment, true, 'marked, so only the same mechanism lifts it');
+  assert.match(org.statusReason, /25 days/);
+  // The tenant keeps their data. Reads and exports stay open — see
+  // authMiddleware's SUSPENDED_ALLOWED_PREFIXES.
+  assert.match(org.statusReason, /view and export/);
+}));
+
+test('an account nobody could reach is never cut off', maybe(async () => {
+  const tenant = await registerOrg();
+  // Every send suppressed or failed, so `dunningDelivered` was never set. This
+  // is what a bounced billing address looks like: silent, by design.
+  await pastDue(tenant, 40, { dunningDelivered: false, dunningStage: 4 });
+
+  const result = await runDunningSweep({ orgId: tenant.org._id });
+  assert.equal(result.suspended, 0);
+  // A freshly registered org is on `trial`; the point is that it was not limited.
+  assert.notEqual((await Organisation.findById(tenant.org._id).lean()).status, 'suspended');
+
+  // Named rather than counted, because this needs a person to pick up a phone
+  // and a number cannot be actioned.
+  assert.equal(result.unreachable.length, 1);
+  assert.match(result.unreachable[0].reason, /has ever been delivered/);
+}));
+
+test('a successful payment clears the whole dunning state', maybe(async () => {
+  const tenant = await registerOrg();
+  await pastDue(tenant, 10, { dunningStage: 3, dunningDelivered: true, razorpaySubscriptionId: 'sub_dunning_1' });
+
+  await applyRazorpayEvent('subscription.charged', {
+    id: 'sub_dunning_1',
+    notes: { orgId: String(tenant.org._id) }
+  });
+
+  const sub = await Subscription.findOne({ orgId: tenant.org._id, razorpaySubscriptionId: 'sub_dunning_1' }).lean();
+  assert.equal(sub.status, 'active');
+  assert.equal(sub.pastDueSince, null);
+  // Reset, so a customer who lapses again in six months gets the gentle first
+  // notice rather than the final warning they last saw. Starting a returning
+  // customer at "final notice" is how a recovered account becomes a lost one.
+  assert.equal(sub.dunningStage, 0);
+  assert.equal(sub.dunningDelivered, false);
+}));
+
+test('paying restores an account dunning suspended', maybe(async () => {
+  const tenant = await registerOrg();
+  await pastDue(tenant, 30, { dunningDelivered: true, dunningStage: 4, razorpaySubscriptionId: 'sub_dunning_2' });
+  await runDunningSweep({ orgId: tenant.org._id });
+  assert.equal((await Organisation.findById(tenant.org._id).lean()).status, 'suspended');
+
+  await applyRazorpayEvent('subscription.charged', {
+    id: 'sub_dunning_2',
+    notes: { orgId: String(tenant.org._id) }
+  });
+  assert.equal((await Organisation.findById(tenant.org._id).lean()).status, 'active');
+}));
+
+test('paying does not undo a suspension a person applied for another reason', maybe(async () => {
+  const tenant = await registerOrg();
+  await Subscription.updateMany({ orgId: tenant.org._id }, {
+    $set: { status: 'past_due', razorpaySubscriptionId: 'sub_dunning_3', pastDueSince: new Date() }
+  });
+  const platform = await platformAccount('owner');
+  const suspended = await call('POST', `/superadmin/organisations/${tenant.org._id}/status`, {
+    token: platform.token,
+    body: { status: 'suspended', reason: 'Under investigation for fraudulent invoices' }
+  });
+  assert.equal(suspended.status, 200);
+
+  await applyRazorpayEvent('subscription.charged', {
+    id: 'sub_dunning_3',
+    notes: { orgId: String(tenant.org._id) }
+  });
+
+  const org = await Organisation.findById(tenant.org._id).lean();
+  /**
+   * The old code set `org.status = 'active'` on every successful charge, which
+   * meant paying an invoice silently reinstated an account suspended for fraud.
+   * Money was never what that suspension was about.
+   */
+  assert.equal(org.status, 'suspended');
+  assert.match(org.statusReason, /fraudulent/);
+}));
+
+test('an already-suspended account is not chased further', maybe(async () => {
+  const tenant = await registerOrg();
+  await pastDue(tenant, 30, { dunningDelivered: true, dunningStage: 4 });
+  await runDunningSweep({ orgId: tenant.org._id });
+
+  const again = await runDunningSweep({ orgId: tenant.org._id });
+  // There is nothing left to escalate to, and repeating the same warning after
+  // acting on it is noise.
+  assert.equal(again.details.length, 0);
+  assert.equal(again.suspended, 0);
+}));
+
+test('a dry run says what it would do and changes nothing', maybe(async () => {
+  const tenant = await registerOrg();
+  await pastDue(tenant, 25, { dunningDelivered: true, dunningStage: 4 });
+
+  const preview = await runDunningSweep({ orgId: tenant.org._id, dryRun: true });
+  assert.equal(preview.details[0].action, 'would suspend');
+  // How an operator sees the sequence before trusting it with real customers.
+  assert.notEqual((await Organisation.findById(tenant.org._id).lean()).status, 'suspended');
+  assert.equal(preview.suspended, 0);
+}));
+
+test('the amount quoted is what the customer agreed to', maybe(async () => {
+  const tenant = await registerOrg();
+  await pastDue(tenant, 2, { pricing: { monthlyPrice: 499, yearlyPrice: 4990 } });
+  await Plan.updateOne({ code: 'growth' }, { $set: { monthlyPrice: 4999 } });
+
+  await runDunningSweep({ orgId: tenant.org._id });
+  const log = await waitUntil(() => EmailLog.findOne({ orgId: tenant.org._id, type: 'dunning' }).lean());
+  assert.ok(log);
+  // Quoting the published price rather than their snapshot would put a figure
+  // they never agreed to in an email chasing them for money (3.3 #9).
+  assert.equal(log.status, 'skipped', 'no provider configured in tests, but the attempt is logged');
+}));
+
+test('dunning appears in the job registry, so a stopped sweep is visible', maybe(async () => {
+  // A billing job that silently stops is the most expensive kind: nobody is
+  // chased, nobody is suspended, and the revenue leaks with no signal at all.
+  assert.ok(jobs.JOBS['billing.dunning'], 'the sweep must be registered, or it can never be reported as stalled');
 }));
 

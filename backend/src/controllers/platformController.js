@@ -21,6 +21,13 @@ const { serialiseOrganisation } = require('../services/brandingAssetService');
 const { getUsage } = require('../services/planService');
 const metrics = require('../services/metricsService');
 const jobs = require('../services/jobRunService');
+/**
+ * Status changes live in a service so the dunning sweep can suspend an account
+ * exactly the way an operator does — a second implementation in the job is how
+ * you get an automatic suspension that forgets to cut live sessions.
+ */
+const tenantStatus = require('../services/tenantStatusService');
+const { bumpSessionVersionForOrg } = tenantStatus;
 const { resolveFlags, sanitiseFlagOverrides, FLAGS } = require('../services/featureFlagService');
 const { issueImpersonationToken, IMPERSONATION_TTL_SECONDS } = require('../services/impersonationService');
 const { capabilitiesFor, resolvePlatformRole, ROLE_CAPABILITIES } = require('../middleware/platformRoleMiddleware');
@@ -424,29 +431,20 @@ const setTenantStatus = asyncHandler(async (req, res) => {
     throw httpError(400, 'A reason is required — the tenant is shown it, and the next operator needs it.', 'REASON_REQUIRED');
   }
 
-  const previous = org.status;
-  org.status = status;
-  org.statusReason = status === 'active' || status === 'trial' ? '' : reason;
-  org.statusChangedAt = new Date();
-  org.statusChangedBy = req.user.name || req.user.email;
-  await org.save();
-
-  // Suspending an account has to cut its live sessions for writes to actually
-  // stop being attempted — `protect` re-reads the org on every request, so this is
-  // belt and braces rather than the enforcement itself, but it also means the
-  // tenant sees the banner immediately instead of on their next navigation.
-  if (status === 'suspended' || status === 'cancelled') {
-    await bumpSessionVersionForOrg(org._id);
-    await revokeAllForOrg(org._id, 'admin_revoked');
-  }
-
-  logAudit({
-    req,
-    action: `org.status_${status}`,
-    entity: 'organisation',
-    entityId: org._id,
-    orgId: org._id,
-    meta: { from: previous, to: status, reason: org.statusReason }
+  /**
+   * A person deciding this clears the non-payment marker.
+   *
+   * Which matters in the awkward direction: an operator suspending a tenant who
+   * was already in dunning must not leave a flag that lets the next successful
+   * charge silently reinstate them.
+   */
+  await tenantStatus.setStatus({
+    org,
+    status,
+    reason,
+    actor: req.user.name || req.user.email,
+    forNonPayment: false,
+    req
   });
   res.json(serialiseOrganisation(org));
 });
@@ -572,11 +570,7 @@ const setTenantSupport = asyncHandler(async (req, res) => {
  * "home" org (#53, #54), and a suspend/force-logout that missed them would be
  * a suspension with a hole in it.
  */
-async function bumpSessionVersionForOrg(orgId) {
-  const userIds = await Membership.find({ orgId, status: 'active' }).distinct('userId');
-  const result = await User.updateMany({ _id: { $in: userIds } }, { $inc: { sessionVersion: 1 } });
-  return result.modifiedCount ?? 0;
-}
+
 
 /** Revokes every session in the organisation. */
 const forceLogoutOrg = asyncHandler(async (req, res) => {

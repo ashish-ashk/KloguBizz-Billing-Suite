@@ -1298,13 +1298,86 @@ decide what they should be charged. Verified end to end including an idempotent 
 **346 backend tests pass**, including the one the codebase never had: that a price survives
 a plan edit.
 
-### 10. Dunning, coupons, refunds/proration, our own GST invoices
+### 10. Dunning - **DONE (2026-08-07)**. Coupons, proration and platform GST invoices - still open
 
-**How:** dunning is a `maintenanceService` job over `Subscription.failedPaymentCount` with
-an escalating email sequence and auto-suspend at N days past due — the suspension
-machinery already exists and is enforced. The platform's own GST invoice is genuinely just
-an `Invoice` with us as the supplier; the honest version reuses the whole GST engine rather
-than growing a second one.
+**Dunning shipped. The other three did not**, and the split is deliberate rather than a
+run out of road: a failed payment nobody chases is silent revenue loss happening *now*,
+while coupons are a growth lever and proration matters only when customers change plan
+mid-cycle. Detail on what remains is below.
+
+#### Dunning
+
+`failedPaymentCount` has been incremented by the Razorpay webhook since billing shipped
+and **nothing has ever read it**. A customer whose card expires stops paying, keeps full
+access, and is never told. The revenue leaks silently.
+
+**Escalation is measured in days late, not in failed attempts.** Three failures could be
+three gateway retries in an hour or three months apart, and "we tried your card three
+times" is not a thing to say to a customer — "your payment has been failing for a week"
+is. So a new `pastDueSince` is stamped once, on the first failure, and never moved by a
+later one: re-stamping on every retry would leave an account failing daily sitting
+permanently at "one day overdue", never escalating at all.
+
+Four steps at days 1, 3, 7 and 14, then read-only at 21. The messages lead with what
+happened and what to do, because the overwhelmingly common cause is an expired card that
+takes two minutes to fix.
+
+**The rule that shapes the rest: never suspend an account whose owner was never actually
+told.** Email suppression is silent by design — one bounce and every later send to that
+address is a no-op — so an account can pass through the entire sequence with nobody having
+received a word of it. Suspending them then punishes somebody for a message they did not
+get. The final step is gated on `dunningDelivered`, and accounts that reach the deadline
+with nothing delivered are **named for a human to chase** rather than cut off. That is
+deliberately the expensive choice: it leaves unpaid accounts running, and it is still
+right.
+
+A useful consequence falls out of it: a deployment with **no mail provider configured never
+auto-suspends anyone**, because no send ever counts as delivered.
+
+**Two bugs fixed on the way:**
+
+- **A successful charge silently un-suspended accounts suspended for other reasons.** The
+  webhook set `org.status = 'active'` unconditionally, so a tenant suspended for fraud,
+  abuse or a legal hold who then paid an invoice was reinstated — undoing a human decision
+  that money was never the point of. A new `suspendedForNonPayment` marker means only the
+  mechanism that applied a suspension can lift it.
+- **Suspension logic lived inside an HTTP controller**, reachable only with a `req.user`.
+  Extracted to `tenantStatusService` so the sweep suspends exactly the way an operator
+  does. The alternative — a second implementation in the job — is how you get an automatic
+  suspension that forgets to cut live sessions and a tenant who keeps writing for another
+  fifteen minutes.
+
+Recovery resets the whole dunning state including the stage, so a customer who lapses again
+in six months gets the gentle first notice rather than the final warning they last saw.
+Starting a returning customer at "final notice" is how a recovered account becomes a lost
+one. Registered in the job registry (#11), so a dunning sweep that stops running is
+visible — the most expensive kind of silent failure there is.
+
+**370 backend tests pass.**
+
+#### Still open, with what was learned
+
+- **Coupons.** A discount code applied at checkout. Now cheap, because
+  `Subscription.pricing` already snapshots what a customer agreed to (#9) — a coupon is a
+  discounted snapshot plus a record of which code produced it.
+- **Refunds and proration.** Mid-cycle plan changes. Needs a decision this codebase has not
+  made: whether we credit the unused remainder or simply charge the difference from the
+  next cycle. The second is far simpler and is what most SMB SaaS does.
+- **The platform's own GST invoices.** The plan called this "genuinely just an `Invoice`
+  with us as the supplier". Investigating it says otherwise, and the reasons are worth
+  recording before anyone tries:
+  - **There is no platform `Organisation`.** Superadmins have `orgId: null` by design.
+    Creating a synthetic one pollutes tenant counts, MRR, ARPA and the at-risk lists,
+    every one of which counts `Organisation` documents.
+  - **Invoice numbering counters are fields on an `Organisation`** (`invoiceSequence`,
+    `invoiceSequenceFY`), so a platform series has no home.
+  - **`Payment.invoiceId` is required**, so settlement cannot be recorded without a real
+    `Invoice` row.
+  - **Nothing identifies the platform as a supplier** — no GSTIN, PAN, address or state
+    code anywhere. `GlobalSetting` has an allow-list of keys and would need a new one.
+  A separate `PlatformInvoice` model reusing `gstService.calculateInvoiceTotals` — which is
+  pure and takes the supplier's state code as an argument — is the honest shape. The tax
+  engine is genuinely reusable; the document model is not.
 
 ### 11. Job/queue observability (3.5) - **DONE (2026-08-07)**
 

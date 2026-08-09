@@ -15,6 +15,7 @@ const { Organisation } = require('../models/Organisation');
 const { purgeCutoff } = require('../utils/softDelete');
 const { logger } = require('../utils/logger');
 const jobs = require('./jobRunService');
+const { runDunningSweep } = require('./dunningService');
 const { runRecurringSweep } = require('./recurringInvoiceService');
 const { sweepExpiredLinks } = require('./paymentLinkService');
 
@@ -201,10 +202,26 @@ async function runOnce() {
     const paymentLinks = await jobs.run('payment-links.expiry', sweepExpiredLinks) || {};
     if (paymentLinks.expiredPaymentLinks) logger.info('payment link expiry sweep', paymentLinks);
 
+    /**
+     * Chasing failed subscription payments (3.3 #10).
+     *
+     * Here rather than in its own scheduler because it is the same hourly
+     * cadence and the same "one instance at a time" guard, and because a fourth
+     * `setInterval` is a fourth thing that can silently stop. Its escalation is
+     * measured in days, so an hourly tick is far finer than it needs.
+     */
+    const dunning = await jobs.run('billing.dunning', () => runDunningSweep()) || {};
+    if (dunning.sent || dunning.suspended || dunning.unreachable?.length) {
+      logger.info('dunning sweep', {
+        scanned: dunning.scanned, sent: dunning.sent, suspended: dunning.suspended,
+        unreachable: dunning.unreachable?.length || 0
+      });
+    }
+
     const purged = await jobs.run('recycle-bin.purge', purgeExpiredDeletions) || {};
     if (Object.values(purged).some(Boolean)) logger.info('recycle bin purge', purged);
 
-    return { ...result, ...quotations, ...paymentLinks, recurring, purged };
+    return { ...result, ...quotations, ...paymentLinks, recurring, purged, dunning };
   } catch (error) {
     logger.error('maintenance sweep failed', { err: error });
     return null;

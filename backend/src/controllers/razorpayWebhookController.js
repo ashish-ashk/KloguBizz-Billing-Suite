@@ -5,6 +5,7 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { verifyWebhookSignature } = require('../services/razorpayService');
 const { logAudit } = require('../services/auditService');
+const { restoreAfterPayment } = require('../services/tenantStatusService');
 
 // Razorpay sends epoch seconds; Mongo wants a Date.
 function toDate(epochSeconds) {
@@ -58,11 +59,38 @@ async function applyEvent(event, payload) {
       subscription.startDate = toDate(entity?.start_at) || subscription.startDate;
       subscription.currentPeriodEnd = toDate(entity?.current_end || entity?.charge_at) || subscription.currentPeriodEnd;
       subscription.lastPaymentAt = new Date();
+      /**
+       * The money arrived, so the whole dunning state resets (3.3 #10).
+       *
+       * Including `dunningStage`: a customer who lapses again in six months
+       * should get the gentle first notice, not the final warning they last saw.
+       * Starting a returning customer at "final notice" is how a recovered
+       * account becomes a cancelled one.
+       */
       subscription.failedPaymentCount = 0;
+      subscription.pastDueSince = null;
+      subscription.dunningStage = 0;
+      subscription.lastDunningAt = null;
+      subscription.dunningDelivered = false;
       await subscription.save();
       org.plan = subscription.planCode;
-      org.status = 'active';
-      await org.save();
+      /**
+       * Restores an account **only** if dunning was what limited it.
+       *
+       * The old code set `org.status = 'active'` unconditionally, which meant a
+       * successful charge silently reinstated a tenant an operator had suspended
+       * for fraud, abuse or a legal hold — undoing a human decision that money
+       * was never the point of.
+       */
+      if (org.status === 'suspended') {
+        const restored = await restoreAfterPayment(org._id);
+        if (!restored.restored) {
+          return { handled: true, action: `payment recorded; suspension left in place (${restored.reason})` };
+        }
+      } else {
+        org.status = 'active';
+        await org.save();
+      }
       return { handled: true, action: `activated ${subscription.planCode}` };
     }
 
@@ -73,6 +101,14 @@ async function applyEvent(event, payload) {
     case 'payment.failed': {
       subscription.status = 'past_due';
       subscription.failedPaymentCount = (subscription.failedPaymentCount || 0) + 1;
+      /**
+       * Stamped once, on the first failure, and never moved by a later one.
+       *
+       * The escalation is measured in *days late*, and re-stamping this on every
+       * gateway retry would reset the clock each time — an account failing daily
+       * would sit permanently at "one day overdue" and never escalate at all.
+       */
+      if (!subscription.pastDueSince) subscription.pastDueSince = new Date();
       await subscription.save();
       return { handled: true, action: 'marked past_due' };
     }
@@ -143,4 +179,16 @@ const handleWebhook = asyncHandler(async (req, res) => {
   res.json({ received: true, event, handled: result.handled });
 });
 
-module.exports = { handleWebhook };
+module.exports = {
+  handleWebhook,
+  /**
+   * Exported for tests.
+   *
+   * The signature check and replay guard around it are covered separately in
+   * `api.integration.test.js`; this is the unit that decides what an event
+   * *means*, and the billing consequences of that — a charge clearing a dunning
+   * state, a failure stamping the clock — are worth testing without rebuilding
+   * an HMAC in every case.
+   */
+  applyEvent
+};
