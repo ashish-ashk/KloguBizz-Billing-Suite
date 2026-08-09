@@ -743,8 +743,19 @@ test('a barcode resolves to exactly one item, and cannot be duplicated', maybe(a
     body: { name: 'Impostor', itemCode: 'SCAN-2', unit: 'Nos', gstRate: 18, sellingPrice: 100, barcode: '8901234567894' }
   });
   // A barcode that resolves to two items is worse than none: the scan silently
-  // picks one. Enforced by the database, not by a check that loses the race.
-  assert.notEqual(duplicate.status, 201, 'a duplicate barcode must be refused');
+  // picks one. Refused explicitly *and* by a unique index — the index alone does
+  // not exist on a fresh database until Mongoose finishes building it in the
+  // background, and not at all where `autoIndex` is off, which is production.
+  assert.equal(duplicate.status, 409, JSON.stringify(duplicate.body));
+  assert.equal(duplicate.body.code, 'BARCODE_IN_USE');
+
+  // Saving the same item again keeps its own barcode — the check must exclude
+  // the row it is checking, or nothing with a barcode could ever be edited.
+  const resaved = await call('PUT', `/items/${item._id}`, {
+    token: tenant.token,
+    body: { name: 'Scanned Rod', sellingPrice: 550, barcode: '8901234567894' }
+  });
+  assert.equal(resaved.status, 200, JSON.stringify(resaved.body));
 }));
 
 test('two tenants may use the same barcode', maybe(async () => {

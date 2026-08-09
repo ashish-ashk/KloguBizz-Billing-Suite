@@ -1,6 +1,7 @@
 import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../../shared/app-shell.component';
 import { EmptyStateComponent, ModalComponent, PagerComponent, PillComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { ApiService } from '../../core/api.service';
@@ -26,15 +27,19 @@ interface ItemForm {
   stockQty: number;
   reorderLevel: number | null;
   barcode: string;
+  trackBatches: boolean;
   status: 'active' | 'inactive';
 }
 
 @Component({
   selector: 'app-items',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppShellComponent, ModalComponent, EmptyStateComponent, SkeletonRowsComponent, PillComponent, PagerComponent],
+  imports: [
+    CommonModule, FormsModule, RouterLink, AppShellComponent, ModalComponent,
+    EmptyStateComponent, SkeletonRowsComponent, PillComponent, PagerComponent
+  ],
   template: `
-    <app-shell title="Inventory" [subtitle]="subtitle()">
+    <app-shell title="Items" [subtitle]="subtitle()">
       <button actions class="btn secondary" type="button" (click)="openBulkUpload()">⇪ Bulk Upload</button>
       <button actions class="btn primary" type="button" (click)="openAdd()">+ Add Item</button>
 
@@ -195,8 +200,18 @@ interface ItemForm {
             <div class="form-section-title">Inventory &amp; Status</div>
             <div class="grid grid-3">
               <div class="field">
-                <label>Stock Quantity</label>
-                <input name="stockQty" type="number" min="0" step="1" [(ngModel)]="form.stockQty">
+                <label>{{ editing() ? 'Stock in hand' : 'Opening stock' }}</label>
+                @if (editing()) {
+                  <!--
+                    Read-only once the item exists. Stock is a ledger balance now:
+                    every change is a row with a reason behind it, and a hand-edit
+                    here is exactly what made the old number impossible to explain.
+                    The server refuses it outright (STOCK_NOT_EDITABLE).
+                  -->
+                  <input [value]="editing()!.stockQty ?? 0" disabled>
+                } @else {
+                  <input name="stockQty" type="number" min="0" step="1" [(ngModel)]="form.stockQty">
+                }
               </div>
               <div class="field">
                 <label>Reorder Level</label>
@@ -207,6 +222,21 @@ interface ItemForm {
                 <input name="barcode" class="mono" [(ngModel)]="form.barcode" placeholder="Optional">
               </div>
             </div>
+            @if (editing()) {
+              <p style="margin:2px 0 0;font-size:12px;color:var(--muted);line-height:1.6">
+                To change the stock in hand, post an adjustment from
+                <a routerLink="/inventory" style="color:var(--brand);font-weight:600">Inventory</a> —
+                it records who changed it, by how much and why.
+              </p>
+            } @else {
+              <p style="margin:2px 0 0;font-size:12px;color:var(--muted);line-height:1.6">
+                Recorded as an opening balance in the stock ledger, valued at the purchase price above.
+              </p>
+            }
+            <label class="checkbox" style="margin-top:10px">
+              <input type="checkbox" name="trackBatches" [(ngModel)]="form.trackBatches">
+              Track batch numbers and expiry dates for this item
+            </label>
             <div class="field" style="max-width:200px;">
               <label>Status</label>
               <select name="status" [(ngModel)]="form.status">
@@ -348,7 +378,8 @@ export class ItemsComponent implements OnInit, OnDestroy {
     return {
       itemCode: '', name: '', description: '', type: 'goods', hsn: '', category: '',
       unit: 'Nos', gstRate: 18, cessRate: 0, sellingPrice: 0, mrp: null, purchasePrice: null,
-      taxInclusive: false, stockQty: 0, reorderLevel: null, barcode: '', status: 'active'
+      taxInclusive: false, stockQty: 0, reorderLevel: null, barcode: '',
+      trackBatches: false, status: 'active'
     };
   }
 
@@ -378,6 +409,7 @@ export class ItemsComponent implements OnInit, OnDestroy {
       stockQty: it.stockQty ?? 0,
       reorderLevel: it.reorderLevel ?? null,
       barcode: it.barcode || '',
+      trackBatches: !!it.trackBatches,
       status: it.status || 'active'
     };
     this.submitted.set(false);
@@ -402,13 +434,17 @@ export class ItemsComponent implements OnInit, OnDestroy {
       mrp: this.form.mrp != null ? Number(this.form.mrp) : undefined,
       purchasePrice: this.form.purchasePrice != null ? Number(this.form.purchasePrice) : undefined,
       taxInclusive: this.form.taxInclusive,
-      stockQty: Number(this.form.stockQty) || 0,
       reorderLevel: this.form.reorderLevel != null ? Number(this.form.reorderLevel) : undefined,
       barcode: this.form.barcode.trim(),
+      trackBatches: this.form.trackBatches,
       status: this.form.status
     };
 
     const editing = this.editing();
+    // Only ever sent on create, where it becomes an opening ledger row. Sending
+    // it on an update is refused by the server, and rightly — there is no honest
+    // movement to post for "somebody typed a different number".
+    if (!editing) payload.stockQty = Number(this.form.stockQty) || 0;
     this.saving.set(true);
     const req = editing ? this.api.updateItem(editing._id, payload) : this.api.createItem(payload);
     req.subscribe({

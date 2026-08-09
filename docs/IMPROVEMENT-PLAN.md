@@ -1085,13 +1085,82 @@ codebase owns — signature maths, idempotency, the allowlist, the settlement pa
 tested. Before going live: connect a real test-mode key pair, make one payment end to end,
 and confirm the webhook arrives (Razorpay's dashboard shows delivery attempts).
 
-### 7. Inventory depth (2.5 #40–#44)
+### 7. Inventory depth (2.5 #40-#44) - **MOSTLY DONE (2026-08-07)**
 
-**How:** the Phase 6a ledger is the foundation. Valuation (FIFO / weighted average) is a
-pass over `StockMovement` once `unitCost` is added to the row. Batch/expiry and warehouses
-each add a dimension to a movement — do **warehouses last**, because they change every
-balance query from "per item" to "per item per location". Barcode scanning is a frontend
-capability on `Item.barcode`, which exists and is still unused.
+**Done: valuation (#41), batch and expiry (#42), barcodes (#44), and the UI for all of
+it. Warehouses (#43) remain, deliberately last.**
+
+The plan said valuation would be "a pass over `StockMovement` once `unitCost` is added to
+the row". That was wrong in a way worth recording: `StockMovement` is **append-only** by
+design - a ledger that can be edited is a second opinion - and depleting a cost layer is
+an update by definition. Costs live in a separate `StockLayer` collection, which also
+turned out to be what batch and expiry needed, since a batch is a property of a
+consignment rather than of a product.
+
+**One mechanism, both methods.** A layer is one receipt at one cost. FIFO consumes the
+oldest; weighted average merges receipts into a single blended layer so consumption takes
+from that one. Both are permitted under AS-2 and Ind AS 2; LIFO is not, which is why it is
+not offered. Per-tenant setting, because consistency of method is an accounting
+requirement rather than a preference.
+
+**The decision that carries the most weight:** an outbound movement records *exactly which
+layers it drew on and how much of each*. Without it, reversal has only two options -
+invent a layer at today's cost, silently rewriting the profit of a period that may already
+have been reported, or guess. Both produce a valuation that looks entirely reasonable and
+is wrong. With it, a cancelled invoice returns goods to the layers they left at the cost
+they left at, and a partial credit note restores its share proportionally.
+
+**Tax is excluded from cost.** GST on a purchase is an input tax credit, not part of what
+the goods cost; capitalising it would overstate inventory by the tax rate and overstate
+cost of goods sold by the same amount when it sells. The netting-down goes through
+`gstService.calculateLine` - the same function the bill's own totals use - rather than a
+second implementation that would drift and leave the inventory value disagreeing with the
+bill it came from by a few percent.
+
+**Three latent bugs surfaced on the way**, all the same species as the one the ledger was
+originally built to fix - a field that looked maintained and was not:
+
+| Found | Why it mattered |
+|---|---|
+| Deleting a purchase left its goods on the shelf **forever** | `purchase-reversed` had been in the reason enum since the ledger was written and was never once emitted. Every deleted bill inflated the balance permanently, with nothing in the ledger to explain it. Only the unsold remainder comes back now; anything already invoiced is named in the response rather than quietly under-reversed |
+| The repair path **destroyed data** | Opening stock arrived as a bare `stockQty` with no ledger row, so "rebuild from the ledger" threw it away - every item with an opening balance came back short by its whole starting quantity. A test asserted the wrong answer. Opening stock is a costed movement now, and editing `stockQty` afterwards is refused with a pointer to the adjustment endpoint |
+| A positive manual adjustment created **free units** | They would have sold at a cost of zero, reporting as pure profit, and the item's quantity and value would have drifted apart for good |
+
+**Barcodes** are unique per tenant via a partial index (present, non-empty, not deleted) -
+and refused explicitly in the controller as well, because Mongoose builds indexes in the
+background and `autoIndex` is off in production, so the constraint does not exist when it
+is most needed. That is the same lesson the purchase duplicate-bill guard learned, and it
+was re-learned here the hard way: the first version relied on the index alone and a test
+caught a duplicate being accepted. Scanner support needs no camera and no library - a
+hardware scanner types the code and presses Enter.
+
+**The UI, which is the half that made any of it real.** The stock ledger, the low-stock
+report and the adjustment endpoint had all been built, tested and wired into `ApiService`
+in an earlier phase - and **not one component called them**. The entire inventory feature
+was server-side only. New `/inventory` page with four tabs, because they answer four
+different questions someone actually arrives with: what is my stock worth and does it
+reconcile; why is this number what it is; what do I need to reorder; what am I about to
+lose. The catalogue stays on `/items`.
+
+**Verified in a real browser** against a live API with seeded data, not just typechecked:
+FIFO showing a 150-unit sale at Rs 47,000 / Rs 313.33 each (100 at Rs 300 plus 50 at
+Rs 340), the ledger naming every movement with its reason and actor, the expiry tab
+showing the short-dated batch and hiding the long-dated one, cost layers, barcode scan and
+its not-found path, a posted adjustment, and - the regression that mattered - the items
+page still saving now that `stockQty` is no longer accepted on update. **323 backend tests
+pass**, clean lint on both packages, clean production build.
+
+**Migration 008** seeds opening layers from the newest matching purchase line, then the
+catalogue price, then zero - and *names* the items it could not cost rather than hiding
+them. Verified end to end including an idempotent re-run.
+
+### 7a. Warehouses (2.5 #43) - still open
+
+**Why last, unchanged from the original reasoning:** they turn every balance query from
+"per item" into "per item per location", and every layer and movement gains a dimension.
+Doing them before valuation would have meant designing the layer model twice. The seam is
+now obvious: `StockLayer` and `StockMovement` each take a `locationId`, consumption filters
+on it, and a transfer becomes a paired movement out and in.
 
 ### 8. P&L and expense reporting (2.4 #32)
 

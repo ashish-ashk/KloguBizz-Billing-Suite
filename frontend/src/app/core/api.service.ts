@@ -17,6 +17,7 @@ import {
   SalesDocument, SalesDocumentKind, SalesDocumentStatus, SalesDocumentSummary, SecurityAlerts,
   Subscription, SuperOverview, SystemHealth, TenantDetail, TenantNotice, Vendor,
   ArAgeing, CollectionMetrics, CustomerStatement, LowStockReport, SalesBreakdown,
+  StockValuationReport, ExpiringStockReport, StockLayerRow,
   StockMovement, TenantActivityEntry
 } from './models';
 
@@ -562,17 +563,56 @@ export class ApiService {
     return this.cache.through(`${NS.items}:low`, () => this.http.get<LowStockReport>(`${this.api}/reports/stock/low`));
   }
   /** A correction, posted as a movement with a mandatory note — not an edit. */
-  adjustStock(itemId: string, payload: { quantity: number; note: string; reason?: string }) {
+  adjustStock(itemId: string, payload: {
+    quantity: number; note: string; reason?: string;
+    unitCost?: number | null; batchNumber?: string; expiryDate?: string;
+  }) {
     return this.afterWrite(
-      this.http.post<{ stockQty: number }>(`${this.api}/reports/stock/${itemId}/adjust`, payload),
+      this.http.post<{ stockQty: number; unitCost: number | null; value: number | null }>(
+        `${this.api}/reports/stock/${itemId}/adjust`, payload
+      ),
       NS.items
     );
   }
   recomputeStock(itemId: string) {
     return this.afterWrite(
-      this.http.post<{ ok: boolean; stockQty: number }>(`${this.api}/reports/stock/${itemId}/recompute`, {}),
+      this.http.post<{ ok: boolean; stockQty: number; stockValue: number }>(
+        `${this.api}/reports/stock/${itemId}/recompute`, {}
+      ),
       NS.items
     );
+  }
+
+  // ── Valuation, batches and barcodes (2.5 #41, #42, #44) ──
+
+  stockValuation() {
+    return this.cache.through(
+      `${NS.items}:valuation`,
+      () => this.http.get<StockValuationReport>(`${this.api}/reports/stock/valuation`)
+    );
+  }
+  expiringStock(days?: number) {
+    return this.cache.through(
+      `${NS.items}:expiring:${days ?? 'default'}`,
+      () => this.http.get<ExpiringStockReport>(`${this.api}/reports/stock/expiring`, {
+        params: this.params(days == null ? {} : { days })
+      })
+    );
+  }
+  /** The open cost layers behind one item — the audit trail for its valuation. */
+  stockLayers(itemId: string) {
+    return this.http.get<{ count: number; layers: StockLayerRow[] }>(`${this.api}/reports/stock/${itemId}/layers`);
+  }
+  /**
+   * One item, by barcode.
+   *
+   * Deliberately not `items({ q })`: a scanner needs "this exact item" or
+   * "nothing", where the search returns a page of near-matches ranked by nothing
+   * in particular. A till that silently picks the first of several rings up the
+   * wrong product.
+   */
+  itemByBarcode(barcode: string) {
+    return this.http.get<Item>(`${this.api}/items/barcode/${encodeURIComponent(barcode)}`);
   }
 
   // ── Tenant activity log (2.6 #50) ────────────

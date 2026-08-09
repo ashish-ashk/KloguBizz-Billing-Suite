@@ -235,8 +235,13 @@ export interface Item {
   purchasePrice?: number;
   taxInclusive?: boolean;
   stockQty?: number;
+  /** What the stock on hand cost, from the open cost layers. Not
+   *  `sellingPrice x quantity` — that books a profit not yet earned. */
+  stockValue?: number;
   reorderLevel?: number;
   barcode?: string;
+  /** Whether receipts of this item must carry a batch number and expiry date. */
+  trackBatches?: boolean;
   status?: 'active' | 'inactive';
 }
 
@@ -946,7 +951,77 @@ export interface StockMovement {
   documentNumber?: string;
   note?: string;
   actorName?: string;
+  /** On the way in, what the goods cost. On the way out, the weighted cost of
+   *  the layers actually consumed — the cost of goods sold. */
+  unitCost?: number | null;
+  /** Signed like `quantity`, so total movement is a sum rather than a conditional. */
+  value?: number | null;
+  batchNumber?: string;
+  expiryDate?: string | null;
+  valuationMethod?: 'fifo' | 'weighted-average' | null;
   createdAt: string;
+}
+
+export interface StockValuationReport {
+  method: 'fifo' | 'weighted-average';
+  totals: {
+    value: number;
+    retailValue: number;
+    quantity: number;
+    /** The gap between the two — margin sitting on the shelf, not yet earned. */
+    unrealisedMargin: number;
+  };
+  /** Items whose ledger balance and layered quantity disagree, i.e. something
+   *  moved stock without moving its cost. Invisible in every other view. */
+  unreconciled: number;
+  items: Array<{
+    itemId: string;
+    name: string;
+    itemCode: string;
+    unit: string;
+    category: string;
+    quantity: number;
+    layers: number;
+    oldestReceipt: string;
+    value: number;
+    averageCost: number;
+    retailValue: number;
+    ledgerQuantity: number;
+    reconciled: boolean;
+  }>;
+}
+
+export interface ExpiringStockReport {
+  days: number;
+  count: number;
+  batches: Array<{
+    layerId: string;
+    itemId: string;
+    name: string;
+    itemCode: string;
+    unit: string;
+    batchNumber: string;
+    expiryDate: string;
+    daysLeft: number;
+    expired: boolean;
+    quantity: number;
+    value: number;
+    sourceNumber: string;
+  }>;
+}
+
+export interface StockLayerRow {
+  _id: string;
+  unitCost: number;
+  quantity: number;
+  remaining: number;
+  value: number;
+  sourceType: 'purchase' | 'opening' | 'adjustment' | 'return';
+  sourceNumber?: string;
+  receivedAt: string;
+  batchNumber?: string;
+  expiryDate?: string | null;
+  closedAt?: string | null;
 }
 
 export interface LowStockReport {

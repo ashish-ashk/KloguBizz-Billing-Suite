@@ -65,7 +65,8 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
             <a routerLink="/recurring" routerLinkActive="active" title="Recurring Invoices"><span class="nav-icon"><app-icon name="clock" /></span><span class="nav-label">Recurring</span></a>
             <div class="nav-section">Management</div>
             <a routerLink="/clients" routerLinkActive="active" title="Clients"><span class="nav-icon"><app-icon name="users" /></span><span class="nav-label">Clients</span></a>
-            <a routerLink="/items" routerLinkActive="active" title="Inventory"><span class="nav-icon"><app-icon name="box" /></span><span class="nav-label">Inventory</span></a>
+            <a routerLink="/items" routerLinkActive="active" title="Items"><span class="nav-icon"><app-icon name="box" /></span><span class="nav-label">Items</span></a>
+            <a routerLink="/inventory" routerLinkActive="active" title="Inventory"><span class="nav-icon"><app-icon name="package" /></span><span class="nav-label">Inventory</span></a>
             <a routerLink="/payments" routerLinkActive="active" title="Payments"><span class="nav-icon"><app-icon name="creditCard" /></span><span class="nav-label">Payments</span></a>
             <a routerLink="/purchases" routerLinkActive="active" title="Purchases"><span class="nav-icon"><app-icon name="inbox" /></span><span class="nav-label">Purchases</span></a>
             <a routerLink="/receivables" routerLinkActive="active" title="Receivables"><span class="nav-icon"><app-icon name="clock" /></span><span class="nav-label">Receivables</span></a>
@@ -269,7 +270,11 @@ export class AppShellComponent {
       { label: 'Delivery Challans', route: '/sales-documents', icon: 'fileText' },
       { label: 'Recurring Invoices', route: '/recurring', icon: 'clock' },
       { label: 'Clients', route: '/clients', icon: 'users' },
-      { label: 'Inventory', route: '/items', icon: 'box' },
+      { label: 'Items', route: '/items', icon: 'box' },
+      { label: 'Inventory', route: '/inventory', icon: 'package' },
+      { label: 'Stock ledger', route: '/inventory', icon: 'package' },
+      { label: 'Low stock', route: '/inventory', icon: 'package' },
+      { label: 'Stock valuation', route: '/inventory', icon: 'package' },
       { label: 'Payments', route: '/payments', icon: 'creditCard' },
       { label: 'Purchases', route: '/purchases', icon: 'inbox' },
       { label: 'Receivables', route: '/receivables', icon: 'clock' },

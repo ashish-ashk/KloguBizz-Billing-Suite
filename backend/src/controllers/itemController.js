@@ -71,9 +71,42 @@ async function assertMasters(body) {
   await assertValidMaster('unit', body.unit, 'Unit');
 }
 
+/**
+ * Refuses a barcode already in use, explicitly as well as by the unique index.
+ *
+ * Relying on the index alone looked sufficient and is not — the same lesson the
+ * purchase duplicate-bill guard learned. Mongoose builds indexes in the
+ * background, so on a fresh database the constraint does not exist for the first
+ * moments of a process's life, and with `autoIndex` disabled (the usual
+ * production setting) it does not exist at all until someone builds it by hand.
+ * A barcode that resolves to two items is worse than no barcode, because the
+ * scan silently picks one; that cannot be conditional on index state.
+ *
+ * The index stays as the backstop for the genuinely concurrent case, which no
+ * read-then-write can close.
+ */
+async function assertBarcodeFree(req, barcode, excludeId) {
+  const code = String(barcode || '').trim();
+  if (!code) return;
+  const clash = await Item.findOne({
+    ...notDeleted(req),
+    barcode: code,
+    ...(excludeId ? { _id: { $ne: excludeId } } : {})
+  }).select('_id name').lean();
+  if (clash) {
+    throw httpError(
+      409,
+      `${clash.name} already uses the barcode ${code}. A barcode that matches two items is worse `
+      + 'than none — a scan would silently pick one of them.',
+      'BARCODE_IN_USE'
+    );
+  }
+}
+
 const createItem = asyncHandler(async (req, res) => {
   const fields = pickFields(req.body, ITEM_FIELDS);
   await assertMasters(fields);
+  await assertBarcodeFree(req, fields.barcode);
 
   // Held back and posted as a movement below, so the opening balance has a
   // ledger row and a cost rather than appearing from nowhere.
@@ -121,6 +154,7 @@ const updateItem = asyncHandler(async (req, res) => {
   }
   const fields = pickFields(req.body, ITEM_FIELDS);
   await assertMasters(fields);
+  await assertBarcodeFree(req, fields.barcode, req.params.id);
   const item = await Item.findOneAndUpdate(
     { _id: req.params.id, ...notDeleted(req) },
     fields,
