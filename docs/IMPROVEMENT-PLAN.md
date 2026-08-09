@@ -8,6 +8,38 @@ Severity: **P0** = broken/unsafe now · **P1** = important gap · **P2** = quali
 
 ---
 
+## STATUS — the backlog is finished (2026-08-09)
+
+**All sixteen Tier 1–4 items in this plan are done**, plus the inventory and
+compliance work that came out of them. 469 backend tests, 18 frontend unit tests,
+one end-to-end smoke test, a clean production build, and a generated
+`docs/openapi.json` covering 201 paths.
+
+Three things are deliberately **not** built, each with its reasoning written down
+where the item is, rather than quietly dropped:
+
+| Not built | Where the reasoning is | Who it blocks |
+|---|---|---|
+| **Multi-GSTIN / branches** (2.1 #9) | §16 — including the `Branch` design and the migration that would make it safe | A customer registered in more than one state. Also blocks warehouses in other states |
+| **Depreciation** (2.4 #32) | §8 — excluded from the P&L *on the report itself*, rather than silently either way | A customer who wants capital assets in their profit figure |
+| **Part 4 polish** (28 of 30 items) | The closing section — ordered by return per unit of work, accessibility first | Nobody today; accessibility has a legal dimension in some markets |
+
+**What stands between this and paying customers is configuration, not code.**
+`docs/LAUNCH-READINESS.md` is the list, ordered by consequence. The four things
+that matter most, in order:
+
+1. Set `MFA_ENCRYPTION_KEY` **before anyone enrols**. It falls back to
+   `JWT_SECRET`, and rotating that later makes every MFA secret and every stored
+   gateway credential permanently undecryptable.
+2. Run `npm run migrate`. Three of the eleven migrations are deployment-blocking;
+   without `011` the first sale after deploying reports a cost of goods sold of
+   zero.
+3. Make **one real Razorpay payment** and **one real failure** in test mode. It is
+   the only integration that takes money, and none of the four have ever run
+   against a live provider.
+4. Set the platform's `platformBilling` identity, or every customer pays and
+   receives no tax invoice.
+
 ## STATUS — Phase 1 shipped (2026-07-27)
 
 **Done: items #1–#9, #12 (partial), #17, #19 (partial), #20–#28, #33 (guard), #35,
