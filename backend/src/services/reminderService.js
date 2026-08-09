@@ -5,6 +5,7 @@ const { ReminderLog } = require('../models/ReminderLog');
 const { sendReminderEmail } = require('./emailService');
 const { env } = require('../config/env');
 const { logger } = require('../utils/logger');
+const jobs = require('./jobRunService');
 
 /**
  * Automated payment reminders.
@@ -223,7 +224,9 @@ async function sweepOnce() {
   if (running) return;
   running = true;
   try {
-    const result = await runReminderSweep();
+    // Recorded, so "did reminders go out today" has an answer that does not
+    // involve grepping the logs of a host that may since have been redeployed.
+    const result = await jobs.run('reminders.send', runReminderSweep) || {};
     if (result.sent || result.failed) {
       logger.info('reminder sweep', { scanned: result.scanned, sent: result.sent, skipped: result.skipped, failed: result.failed });
     }

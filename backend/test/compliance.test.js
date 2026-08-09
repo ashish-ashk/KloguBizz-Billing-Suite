@@ -1005,15 +1005,26 @@ test('every send outcome is recorded, including the silent ones', maybe(async ()
 
   await call('POST', `/invoices/${invoice._id}/remind`, { token: tenant.token });
 
-  const logs = await EmailLog.find({ to: 'chase@example.test' }).lean();
-  assert.equal(logs.length, 1);
+  /**
+   * Polled, not read immediately.
+   *
+   * Email logging is fire-and-forget by design — bookkeeping must never be able
+   * to fail the thing it records — so the response returns before the insert
+   * lands. Reading straight away passes on an idle machine and fails under load,
+   * which is the worst kind of test: it fails in the run you least want noise in
+   * and cannot be reproduced afterwards. This is the second test in this file to
+   * have had it.
+   */
+  const log = await waitUntil(() => EmailLog.findOne({ to: 'chase@example.test' }).lean());
+  assert.ok(log, 'a send attempt must always be recorded, even when nothing was sent');
+  assert.equal(await EmailLog.countDocuments({ to: 'chase@example.test' }), 1);
   // The actual bug in #58: with no provider configured `sendEmail` logged a line and
   // returned, so a deployment that was sending and one that was not looked identical and
   // nothing recorded which.
-  assert.equal(logs[0].status, 'skipped');
-  assert.equal(logs[0].type, 'reminder');
-  assert.ok(logs[0].reason.includes('SENDGRID_API_KEY'));
-  assert.equal(String(logs[0].orgId), String(tenant.org._id));
+  assert.equal(log.status, 'skipped');
+  assert.equal(log.type, 'reminder');
+  assert.ok(log.reason.includes('SENDGRID_API_KEY'));
+  assert.equal(String(log.orgId), String(tenant.org._id));
 }));
 
 test('a bounced address is suppressed and then refused', maybe(async () => {

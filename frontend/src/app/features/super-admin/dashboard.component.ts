@@ -320,6 +320,43 @@ const CHART_METRICS: Array<{ key: ChartMetric; label: string; money: boolean }> 
           <button class="btn ghost sm" type="button" (click)="loadHealth()">Refresh</button>
         </div>
         @if (health(); as h) {
+          @if (h.jobs) {
+            <!--
+              Background jobs, on the page an operator already opens.
+
+              A job that has quietly stopped is invisible by definition — a
+              crashed timer looks exactly like "no work to do" — so the fact has
+              to appear somewhere people go for other reasons. A dedicated screen
+              nobody visits is the same as no screen.
+            -->
+            <div style="margin-bottom:14px">
+              @if (h.jobs.unhealthy) {
+                <div class="info-box danger" style="margin-bottom:10px;display:flex;gap:8px;align-items:flex-start">
+                  <app-icon name="alertTriangle" [size]="15" style="flex-shrink:0;margin-top:1px" />
+                  <span>
+                    <strong>{{ h.jobs.unhealthy }} background job{{ h.jobs.unhealthy === 1 ? ' is' : 's are' }} not running as expected.</strong>
+                    Reminders, recurring invoices and overdue marking all depend on these.
+                  </span>
+                </div>
+              }
+              <div style="display:grid;gap:6px">
+                @for (job of h.jobs.jobs; track job.name) {
+                  <div style="display:flex;align-items:center;gap:10px;font-size:12.5px">
+                    <span class="pill" [class.success]="job.state === 'healthy'"
+                      [class.danger]="job.state === 'never' || job.state === 'stuck' || job.state === 'late'"
+                      [class.warn]="job.state === 'failing'">{{ jobStateLabel(job.state) }}</span>
+                    <span class="strong" style="flex:1">{{ job.label }}</span>
+                    <span class="muted">
+                      @if (job.lastRunAt) { {{ fmtDate(job.lastRunAt) }} } @else { never run }
+                    </span>
+                  </div>
+                  @if (job.lastError) {
+                    <div class="muted" style="font-size:11px;margin:-2px 0 4px 66px;color:var(--red)">{{ job.lastError }}</div>
+                  }
+                }
+              </div>
+            </div>
+          }
           <div class="grid grid-2" style="gap:10px">
             <div class="stat-block">
               <div class="sb-label">Database</div>
@@ -391,6 +428,25 @@ export class SuperDashboardComponent implements OnInit {
   attention = signal<AttentionLists | null>(null);
   adoption = signal<FeatureAdoption | null>(null);
   health = signal<SystemHealth | null>(null);
+
+  /**
+   * Plain words for the job states.
+   *
+   * `late` and `never` are the two that matter and neither is self-explanatory
+   * as a bare enum: "late" means the work is not getting done, whether because
+   * it is failing or because the timer died, and those are the same problem from
+   * the outside.
+   */
+  jobStateLabel(state: string): string {
+    return {
+      healthy: 'OK',
+      running: 'Running',
+      failing: 'Failing',
+      late: 'Not running',
+      stuck: 'Stuck',
+      never: 'Never ran'
+    }[state] || state;
+  }
 
   days = signal(30);
   metric = signal<ChartMetric>('signups');

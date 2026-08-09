@@ -1306,16 +1306,60 @@ machinery already exists and is enforced. The platform's own GST invoice is genu
 an `Invoice` with us as the supplier; the honest version reuses the whole GST engine rather
 than growing a second one.
 
-### 11. Job/queue console, and deliverability replay (3.5)
+### 11. Job/queue observability (3.5) - **DONE (2026-08-07)**
 
-**Why not yet:** there is no queue. Everything asynchronous is `setInterval` plus
-fire-and-forget.
+**The cheap option was the right one, and the plan was right to say so.** Retries and a
+dead-letter queue are real capabilities that would matter *if* jobs were failing in ways a
+retry fixes - and nobody could know whether they were, because nothing recorded it. Buying
+Redis to solve a problem you cannot yet see is how you end up operating a queue to run five
+cron sweeps.
 
-**How:** two options, and the cheap one is right first. Either add a `JobRun` collection so
-the existing sweeps become *observable* (no new infrastructure, covers most of the value —
-"did the reminder sweep run, what did it do, did it fail"), or add BullMQ + Redis if
-retries and a dead-letter queue are genuinely needed. Do the first; only do the second when
-a real failure demands it.
+**The failure mode that mattered is silence.** Every sweep was a `setInterval` with a
+try/catch that logged and moved on, which left three questions unanswerable: did the
+reminder sweep run today, did it fail, and - the one that matters - **has it stopped
+running altogether?** A crashed timer, an unhandled rejection that killed the interval, a
+deploy that never called the start function: all of them look exactly like "no work to do".
+
+So the health list is built from a **registry of jobs**, not from what has run. A job that
+has never run once still appears, as `never` - a history-driven list would omit precisely
+the case the feature exists for. The two non-obvious states are the important ones:
+
+| State | Means |
+|---|---|
+| `never` | Registered and has not run once. The deploy-forgot-to-start case |
+| `late` | Last success older than three intervals. Covers "failing repeatedly" and "the timer died" - from outside, the same problem: the work is not getting done |
+| `stuck` | A `running` row past its staleness window. `running` is written *before* the work starts, so a killed process leaves one - and a stuck row and a missing row say different things |
+
+**Three decisions worth recording:**
+
+- **Recording a job can never fail the job.** Every write is wrapped so a database blip
+  loses the record, not the work. Monitoring that takes down what it monitors converts a
+  question you could not answer into an outage you did not have.
+- **The wrapper does not re-throw.** Every existing caller already treats a sweep failure as
+  something to log and continue from; changing that under the guise of adding observability
+  would be a behaviour change in disguise.
+- **Each sub-sweep is its own job.** The maintenance tick does five things that fail
+  independently, and one "maintenance failed" row answers none of the useful questions.
+  This fixed a real bug in passing: the five sub-sweeps shared one `try` block, so a throw
+  in the recurring sweep **silently skipped the payment-link expiry and the recycle-bin
+  purge for that whole tick**.
+
+Results are **summarised, not stored whole** - counts and small scalars, one level of
+nesting flattened so `runRecurringSweep`'s `{recurring: {generated}}` survives. A 30-day
+TTL index expires the rows rather than a purge job, avoiding the circularity of needing a
+background job to clean up the record of background jobs.
+
+Surfaced on the console's existing **System health** panel rather than a screen of its own:
+a job that has quietly stopped is invisible by definition, so the fact has to appear
+somewhere people already go. A dedicated page nobody opens is the same as no page.
+
+**357 backend tests pass.** Also fixed a second flaky test of the same species as the one
+noted earlier - asserting on a fire-and-forget email-log write without waiting for it,
+which passes on an idle machine and fails under load.
+
+**When to revisit:** if the job history starts showing repeated failures of the same job
+that a retry would have fixed. That is the evidence BullMQ needs, and it did not exist
+before this.
 
 ### 12. Two-person approval and break-glass elevation (3.4)
 

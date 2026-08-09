@@ -14,6 +14,7 @@ const { User } = require('../models/User');
 const { Organisation } = require('../models/Organisation');
 const { purgeCutoff } = require('../utils/softDelete');
 const { logger } = require('../utils/logger');
+const jobs = require('./jobRunService');
 const { runRecurringSweep } = require('./recurringInvoiceService');
 const { sweepExpiredLinks } = require('./paymentLinkService');
 
@@ -159,10 +160,20 @@ async function runOnce() {
   if (running) return null;
   running = true;
   try {
-    const result = await sweepOverdueInvoices();
+    /**
+     * Each sub-sweep is recorded as its own job (3.5 #11).
+     *
+     * Not one row for the whole tick, because these five things fail
+     * independently and a single "maintenance failed" row answers none of the
+     * questions worth asking. Recording them separately is also what stops one
+     * failure hiding the others: `jobs.run` swallows a throw and returns null,
+     * so the recurring sweep failing no longer prevents the purge from running —
+     * which, in the old single try block, it did.
+     */
+    const result = await jobs.run('invoices.overdue', sweepOverdueInvoices) || {};
     if (result.updated) logger.info('overdue sweep', result);
 
-    const quotations = await sweepExpiredQuotations();
+    const quotations = await jobs.run('quotations.expiry', sweepExpiredQuotations) || {};
     if (quotations.expiredQuotations) logger.info('quotation expiry sweep', quotations);
 
     /**
@@ -173,7 +184,7 @@ async function runOnce() {
      * overlap with itself. Its own idempotency claim makes a concurrent run from
      * another instance harmless, but there is no reason to invite one.
      */
-    const recurring = await runRecurringSweep();
+    const recurring = await jobs.run('recurring.generate', runRecurringSweep) || {};
     if (recurring.generated || recurring.failed || recurring.paused) {
       logger.info('recurring invoice sweep', {
         scanned: recurring.scanned,
@@ -187,10 +198,10 @@ async function runOnce() {
 
     // A payment link that outlives its validity must read as expired in the
     // tenant's list too, not only on the public page (which derives it).
-    const paymentLinks = await sweepExpiredLinks();
+    const paymentLinks = await jobs.run('payment-links.expiry', sweepExpiredLinks) || {};
     if (paymentLinks.expiredPaymentLinks) logger.info('payment link expiry sweep', paymentLinks);
 
-    const purged = await purgeExpiredDeletions();
+    const purged = await jobs.run('recycle-bin.purge', purgeExpiredDeletions) || {};
     if (Object.values(purged).some(Boolean)) logger.info('recycle bin purge', purged);
 
     return { ...result, ...quotations, ...paymentLinks, recurring, purged };

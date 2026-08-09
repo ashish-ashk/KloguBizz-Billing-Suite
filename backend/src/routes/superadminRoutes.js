@@ -56,6 +56,9 @@ router.get('/metrics/adoption', requireCapability(CAPABILITY.metricsRead), platf
 // anything.
 router.post('/metrics/rebuild', requireCapability(CAPABILITY.orgWrite), platform.metricsRebuild);
 router.get('/system/health', requireCapability(CAPABILITY.platformRead), platform.systemHealth);
+/** Individual job executions, for when the summary says something is wrong and
+ *  the next question is "since when, and with what error". */
+router.get('/system/jobs', requireCapability(CAPABILITY.platformRead), platform.jobRuns);
 
 // ── Organisations ────────────────────────────────
 router.get('/overview', requireCapability(CAPABILITY.platformRead), overview);

@@ -20,6 +20,7 @@ const { paginate, parsePageParams, buildEnvelope, escapeRegex } = require('../ut
 const { serialiseOrganisation } = require('../services/brandingAssetService');
 const { getUsage } = require('../services/planService');
 const metrics = require('../services/metricsService');
+const jobs = require('../services/jobRunService');
 const { resolveFlags, sanitiseFlagOverrides, FLAGS } = require('../services/featureFlagService');
 const { issueImpersonationToken, IMPERSONATION_TTL_SECONDS } = require('../services/impersonationService');
 const { capabilitiesFor, resolvePlatformRole, ROLE_CAPABILITIES } = require('../middleware/platformRoleMiddleware');
@@ -129,6 +130,11 @@ const metricsRebuild = asyncHandler(async (req, res) => {
  * genuine platform-wide figure; the latency percentiles are this instance's only,
  * and say so.
  */
+/** Recent executions of one job, or of all of them. */
+const jobRuns = asyncHandler(async (req, res) => {
+  res.json({ runs: await jobs.history({ name: req.query.name, limit: req.query.limit }) });
+});
+
 const systemHealth = asyncHandler(async (req, res) => {
   const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
   const connection = mongoose.connection;
@@ -168,8 +174,19 @@ const systemHealth = asyncHandler(async (req, res) => {
     AuditLog.estimatedDocumentCount()
   ]);
 
+  /**
+   * Background job health, on the page an operator already looks at (3.5 #11).
+   *
+   * Deliberately here rather than only on a screen of its own: a job that has
+   * quietly stopped is invisible by definition, so the fact has to appear
+   * somewhere people go for other reasons. A dedicated page nobody opens is the
+   * same as no page.
+   */
+  const jobHealth = await jobs.summary();
+
   res.json({
     database,
+    jobs: jobHealth,
     collectionCounts: { organisations: orgs, users, invoices, payments, usageEvents: events, auditLogs: audit },
     /**
      * Where uploaded images live, and whether they are being resized (#45).
@@ -1064,6 +1081,7 @@ module.exports = {
   metricsAdoption,
   metricsRebuild,
   systemHealth,
+  jobRuns,
   tenantDetail,
   tenantInvoices,
   tenantUsers,

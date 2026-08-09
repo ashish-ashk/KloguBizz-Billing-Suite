@@ -9,6 +9,7 @@ const { UsageEvent } = require('../models/UsageEvent');
 const { MetricsDaily } = require('../models/MetricsDaily');
 const { EVENT, FEATURES, dayKey } = require('./usageEventService');
 const { logger } = require('../utils/logger');
+const jobs = require('./jobRunService');
 
 /**
  * Everything the platform console counts.
@@ -516,8 +517,8 @@ async function runRollupOnce() {
   if (running) return null;
   running = true;
   try {
-    const filled = await backfillMissingDays(30);
-    if (filled.length) logger.info('metrics rollup', { days: filled.length, from: filled[0], to: filled[filled.length - 1] });
+    const filled = await jobs.run('metrics.rollup', () => backfillMissingDays(30));
+    if (filled?.length) logger.info('metrics rollup', { days: filled.length, from: filled[0], to: filled[filled.length - 1] });
     return filled;
   } catch (error) {
     logger.error('metrics rollup failed', { err: error });

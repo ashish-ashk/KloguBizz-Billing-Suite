@@ -1383,7 +1383,24 @@ export interface FeatureAdoption {
   features: Array<{ key: string; label: string; orgs: number; rate: number }>;
 }
 
+/** One background job's health. `late` and `never` are the states this whole
+ *  feature exists to make visible — a stopped timer looks like idleness. */
+export interface JobHealth {
+  name: string;
+  label: string;
+  intervalMs: number;
+  state: 'healthy' | 'running' | 'failing' | 'late' | 'stuck' | 'never';
+  lastRunAt: string | null;
+  lastStatus: string | null;
+  lastDurationMs: number | null;
+  lastResult: Record<string, number | string | boolean> | null;
+  lastError: string | null;
+  lastSuccessAt: string | null;
+  host: string | null;
+}
+
 export interface SystemHealth {
+  jobs?: { jobs: JobHealth[]; unhealthy: number; checkedAt: string };
   database: {
     state: string;
     name?: string;

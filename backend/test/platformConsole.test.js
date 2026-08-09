@@ -36,6 +36,8 @@ const bcrypt = require('bcryptjs');
 const app = require('../server');
 const { Plan } = require('../src/models/Plan');
 const { PlanVersion } = require('../src/models/PlanVersion');
+const { JobRun } = require('../src/models/JobRun');
+const jobs = require('../src/services/jobRunService');
 const { Organisation } = require('../src/models/Organisation');
 const { User } = require('../src/models/User');
 const { Subscription } = require('../src/models/Subscription');
@@ -1303,5 +1305,147 @@ test('revenue is reported at what each subscriber actually pays', maybe(async ()
   // month's MRR whenever a price moved — a revenue chart that changes shape when
   // somebody edits a price is not a revenue chart.
   assert.equal(mrr - before, 3000);
+}));
+
+// ── Job observability (3.5 #11) ──────────────────
+
+test('a job records that it ran, and what it did', maybe(async () => {
+  await JobRun.deleteMany({ name: 'invoices.overdue' });
+  const result = await jobs.run('invoices.overdue', async () => ({ scanned: 12, updated: 3 }));
+  assert.deepEqual(result, { scanned: 12, updated: 3 }, 'the wrapper returns what the job returned');
+
+  const row = await JobRun.findOne({ name: 'invoices.overdue' }).lean();
+  assert.equal(row.status, 'succeeded');
+  // The counts the sweeps already computed and previously only logged.
+  assert.equal(row.result.updated, 3);
+  assert.ok(row.durationMs !== null);
+  assert.ok(row.host, 'and which process ran it — two instances doubling the work is worth seeing');
+}));
+
+test('a failing job is recorded rather than swallowed', maybe(async () => {
+  await JobRun.deleteMany({ name: 'reminders.send' });
+  const result = await jobs.run('reminders.send', async () => { throw new Error('SMTP refused the connection'); });
+  // Deliberately does not re-throw: every caller already treats a sweep failure
+  // as something to log and continue from, and changing that under the guise of
+  // adding observability would be a behaviour change in disguise.
+  assert.equal(result, null);
+
+  const row = await JobRun.findOne({ name: 'reminders.send' }).lean();
+  assert.equal(row.status, 'failed');
+  assert.equal(row.error.message, 'SMTP refused the connection');
+  assert.ok(row.error.stack, 'with a stack, bounded so a deep async chain cannot bloat the row');
+}));
+
+test('a job that has never run says so', maybe(async () => {
+  await JobRun.deleteMany({ name: 'metrics.rollup' });
+  const { jobs: list } = await jobs.summary();
+  const rollup = list.find(j => j.name === 'metrics.rollup');
+  /**
+   * The state this whole feature exists for.
+   *
+   * A crashed timer, an unhandled rejection that killed the interval, a deploy
+   * that never called the start function — all look exactly like "no work to
+   * do". Building the list from the registry rather than from history is what
+   * makes a job that has never run visible at all.
+   */
+  assert.equal(rollup.state, 'never');
+  assert.equal(rollup.lastRunAt, null);
+}));
+
+test('a job that stopped running is reported as late', maybe(async () => {
+  await JobRun.deleteMany({ name: 'quotations.expiry' });
+  const longAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+  await JobRun.create({
+    name: 'quotations.expiry', status: 'succeeded', startedAt: longAgo, finishedAt: longAgo, durationMs: 5
+  });
+
+  const { jobs: list, unhealthy } = await jobs.summary();
+  const job = list.find(j => j.name === 'quotations.expiry');
+  // It succeeded — the last time it ran, half a day ago. "Working" and "running"
+  // are different questions and only the second one matters here.
+  assert.equal(job.lastStatus, 'succeeded');
+  assert.equal(job.state, 'late');
+  assert.ok(unhealthy >= 1);
+}));
+
+test('a process killed mid-job leaves a stuck run, not a missing one', maybe(async () => {
+  await JobRun.deleteMany({ name: 'recycle-bin.purge' });
+  const longAgo = new Date(Date.now() - 10 * 60 * 60 * 1000);
+  // Exactly what a SIGKILL during a sweep leaves behind: `running` was written
+  // before the work started and nothing ever came back to close it.
+  await JobRun.create({ name: 'recycle-bin.purge', status: 'running', startedAt: longAgo });
+
+  const { jobs: list } = await jobs.summary();
+  const job = list.find(j => j.name === 'recycle-bin.purge');
+  // A missing row and a stuck row mean different things, and the second says
+  // "this died" — the fact the old log-and-continue threw away.
+  assert.equal(job.state, 'stuck');
+}));
+
+test('a job still inside its window is running, not stuck', maybe(async () => {
+  await JobRun.deleteMany({ name: 'payment-links.expiry' });
+  await JobRun.create({ name: 'payment-links.expiry', status: 'running', startedAt: new Date() });
+  const { jobs: list } = await jobs.summary();
+  // Otherwise every long sweep would raise an alarm the moment it started, and
+  // an alert that fires on normal operation is one people learn to ignore.
+  assert.equal(list.find(j => j.name === 'payment-links.expiry').state, 'running');
+}));
+
+test('one sweep failing no longer stops the ones after it', maybe(async () => {
+  await JobRun.deleteMany({ name: { $in: ['invoices.overdue', 'recycle-bin.purge'] } });
+  await jobs.run('invoices.overdue', async () => { throw new Error('boom'); });
+  await jobs.run('recycle-bin.purge', async () => ({ purged: 2 }));
+
+  // In the old single try block around all five sub-sweeps, a throw in one
+  // skipped every sweep after it for that whole tick — silently.
+  assert.equal((await JobRun.findOne({ name: 'invoices.overdue' }).lean()).status, 'failed');
+  assert.equal((await JobRun.findOne({ name: 'recycle-bin.purge' }).lean()).status, 'succeeded');
+}));
+
+test('recording a run cannot break the job it records', maybe(async () => {
+  const original = JobRun.create;
+  JobRun.create = async () => { throw new Error('database unreachable'); };
+  try {
+    const result = await jobs.run('metrics.rollup', async () => 'work happened anyway');
+    // Monitoring that takes down the system it monitors converts a question you
+    // could not answer into an outage you did not have.
+    assert.equal(result, 'work happened anyway');
+  } finally {
+    JobRun.create = original;
+  }
+}));
+
+test('a job result is summarised, not stored whole', maybe(async () => {
+  // What `runRecurringSweep` actually returns: counts, one level nested.
+  const summary = jobs.summarise({ scanned: 4, recurring: { generated: 2, failed: 0 }, rows: [1, 2, 3] });
+  assert.equal(summary.scanned, 4);
+  assert.equal(summary['recurring.generated'], 2, 'nested counts survive — that is the sweep that creates documents');
+  assert.equal(summary.rows, 3, 'and an array becomes its length rather than its contents');
+}));
+
+test('job health appears on the page an operator already looks at', maybe(async () => {
+  const { token } = await platformAccount('owner');
+  const { status, body } = await call('GET', '/superadmin/system/health', { token });
+  assert.equal(status, 200);
+  // A job that has quietly stopped is invisible by definition, so the fact has
+  // to surface somewhere people go for other reasons. A dedicated page nobody
+  // opens is the same as no page.
+  assert.ok(Array.isArray(body.jobs.jobs));
+  assert.equal(body.jobs.jobs.length, Object.keys(jobs.JOBS).length);
+  assert.ok(typeof body.jobs.unhealthy === 'number');
+}));
+
+test('job history is readable, and only by the platform', maybe(async () => {
+  const { token } = await platformAccount('owner');
+  await jobs.run('invoices.overdue', async () => ({ updated: 1 }));
+
+  const { status, body } = await call('GET', '/superadmin/system/jobs?name=invoices.overdue', { token });
+  assert.equal(status, 200);
+  assert.ok(body.runs.length >= 1);
+  assert.equal(body.runs[0].name, 'invoices.overdue');
+
+  const tenant = await registerOrg();
+  const refused = await call('GET', '/superadmin/system/jobs', { token: tenant.token });
+  assert.equal(refused.status, 403);
 }));
 
