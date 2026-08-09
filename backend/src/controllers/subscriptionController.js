@@ -3,6 +3,7 @@ const { Subscription } = require('../models/Subscription');
 const { Organisation } = require('../models/Organisation');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
+const { snapshotFor } = require('../services/planVersionService');
 const { env } = require('../config/env');
 const { createSubscription, cancelSubscription: cancelAtProvider } = require('../services/razorpayService');
 const { getUsage } = require('../services/planService');
@@ -62,12 +63,25 @@ const startSubscription = asyncHandler(async (req, res) => {
   // away. Everything else waits for the webhook.
   const activateNow = isFree || (provider.localMode && !env.isProduction);
 
+  /**
+   * The prices and limits this customer is agreeing to, copied onto the
+   * subscription (3.3 #9).
+   *
+   * Nothing stored them before, so every price was resolved by joining to the
+   * live `Plan` at read time — which meant a later price change rewrote the
+   * amount shown against charges already taken, and restated historical MRR. The
+   * snapshot is what makes those figures stable, and the pinned version is what
+   * makes this customer's terms survive the next price rise.
+   */
+  const snapshot = await snapshotFor(plan.toObject());
+
   const subscription = await Subscription.create({
     orgId: req.orgId,
     planCode,
     billingCycle,
     status: activateNow ? 'active' : 'pending',
-    razorpaySubscriptionId: provider.id
+    razorpaySubscriptionId: provider.id,
+    ...snapshot
   });
 
   if (activateNow) {

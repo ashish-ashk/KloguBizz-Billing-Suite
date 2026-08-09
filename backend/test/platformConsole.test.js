@@ -35,6 +35,7 @@ const bcrypt = require('bcryptjs');
 
 const app = require('../server');
 const { Plan } = require('../src/models/Plan');
+const { PlanVersion } = require('../src/models/PlanVersion');
 const { Organisation } = require('../src/models/Organisation');
 const { User } = require('../src/models/User');
 const { Subscription } = require('../src/models/Subscription');
@@ -1101,3 +1102,206 @@ test('system health reports the database and scopes the latency figures', maybe(
   assert.equal(typeof body.requests.latency.p95, 'number');
   assert.equal(typeof body.process.emailConfigured, 'boolean');
 }));
+
+// ── Plan versioning (3.3 #9) ─────────────────────
+
+/**
+ * The gap this closes: **no test asserted that a price survived a plan edit**,
+ * because nothing anywhere stored what a subscriber had agreed to.
+ */
+
+async function savePlan(token, code, body) {
+  return call('PUT', `/superadmin/plans/${code}`, { token, body });
+}
+
+test('raising a price does not reprice existing subscribers', maybe(async () => {
+  const { token: platform } = await platformAccount('owner');
+  await Plan.deleteMany({ code: 'versioned' });
+  await PlanVersion.deleteMany({ planCode: 'versioned' });
+  await savePlan(platform, 'versioned', {
+    code: 'versioned', name: 'Versioned', monthlyPrice: 999, yearlyPrice: 9990,
+    userLimit: 5, invoiceLimit: 200, active: true
+  });
+
+  const tenant = await registerOrg();
+  const started = await call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: 'versioned', billingCycle: 'monthly' }
+  });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+
+  const raised = await savePlan(platform, 'versioned', {
+    name: 'Versioned', monthlyPrice: 1499, yearlyPrice: 14990,
+    userLimit: 5, invoiceLimit: 200, active: true, changeNote: 'Annual price review'
+  });
+  assert.equal(raised.status, 200, JSON.stringify(raised.body));
+  // The operator is told what they just did, rather than left to infer it.
+  assert.equal(raised.body.grandfathered, 1);
+  assert.equal(raised.body.repriced, 0);
+
+  const sub = await Subscription.findOne({ orgId: tenant.org._id, planCode: 'versioned' }).lean();
+  // The customer keeps the terms they signed up on. Before this, the price was
+  // resolved by joining to the live plan at read time, so this number moved.
+  assert.equal(sub.pricing.monthlyPrice, 999);
+  assert.equal(sub.planVersion, 1);
+
+  const plan = await Plan.findOne({ code: 'versioned' }).lean();
+  assert.equal(plan.monthlyPrice, 1499, 'and the published price did change');
+  assert.equal(plan.currentVersion, 2);
+}));
+
+test('the old price is kept, not overwritten', maybe(async () => {
+  const { token: platform } = await platformAccount('owner');
+  await Plan.deleteMany({ code: 'histplan' });
+  await PlanVersion.deleteMany({ planCode: 'histplan' });
+
+  await savePlan(platform, 'histplan', { code: 'histplan', name: 'Hist', monthlyPrice: 100, userLimit: 3, invoiceLimit: 50 });
+  await savePlan(platform, 'histplan', { name: 'Hist', monthlyPrice: 200, userLimit: 3, invoiceLimit: 50, changeNote: 'Up' });
+  await savePlan(platform, 'histplan', { name: 'Hist', monthlyPrice: 300, userLimit: 3, invoiceLimit: 50 });
+
+  const { status, body } = await call('GET', '/superadmin/plans/histplan/history', { token: platform });
+  assert.equal(status, 200);
+  // Newest first. Previously the audit entry logged only the plan's *name*, so
+  // not even the previous price was recoverable after an edit.
+  assert.deepEqual(body.versions.map(v => v.monthlyPrice), [300, 200, 100]);
+  assert.equal(body.versions[1].changeNote, 'Up');
+  assert.ok(body.versions[0].changedBy, 'a price change has a name against it');
+}));
+
+test('saving a plan unchanged does not mint a version', maybe(async () => {
+  const { token: platform } = await platformAccount('owner');
+  await Plan.deleteMany({ code: 'noopplan' });
+  await PlanVersion.deleteMany({ planCode: 'noopplan' });
+
+  const body = { code: 'noopplan', name: 'Noop', monthlyPrice: 500, userLimit: 2, invoiceLimit: 20 };
+  await savePlan(platform, 'noopplan', body);
+  await savePlan(platform, 'noopplan', body);
+  await savePlan(platform, 'noopplan', body);
+
+  // The console's save button makes a no-op save trivially easy, and a history
+  // full of identical rows answers nothing.
+  assert.equal(await PlanVersion.countDocuments({ planCode: 'noopplan' }), 1);
+}));
+
+test('reordering a plan is not a price change', maybe(async () => {
+  const { token: platform } = await platformAccount('owner');
+  await Plan.deleteMany({ code: 'sortplan' });
+  await PlanVersion.deleteMany({ planCode: 'sortplan' });
+
+  await savePlan(platform, 'sortplan', { code: 'sortplan', name: 'Sort', monthlyPrice: 700, userLimit: 2, invoiceLimit: 20, sortOrder: 1 });
+  await savePlan(platform, 'sortplan', { name: 'Sort', monthlyPrice: 700, userLimit: 2, invoiceLimit: 20, sortOrder: 9 });
+
+  // How a plan is presented is not what it costs. Versioning a drag-to-reorder
+  // would bury the changes that matter among rows that say nothing.
+  assert.equal(await PlanVersion.countDocuments({ planCode: 'sortplan' }), 1);
+  assert.equal((await Plan.findOne({ code: 'sortplan' }).lean()).sortOrder, 9);
+}));
+
+test('an operator can reprice everyone on purpose', maybe(async () => {
+  const { token: platform } = await platformAccount('owner');
+  await Plan.deleteMany({ code: 'forceplan' });
+  await PlanVersion.deleteMany({ planCode: 'forceplan' });
+  await savePlan(platform, 'forceplan', { code: 'forceplan', name: 'Force', monthlyPrice: 400, userLimit: 5, invoiceLimit: 100, active: true });
+
+  const tenant = await registerOrg();
+  await call('POST', '/subscriptions/start', { token: tenant.token, body: { planCode: 'forceplan' } });
+
+  const applied = await savePlan(platform, 'forceplan', {
+    name: 'Force', monthlyPrice: 600, userLimit: 5, invoiceLimit: 100, active: true,
+    applyToExisting: true, changeNote: 'Everyone moves'
+  });
+  assert.equal(applied.body.repriced, 1);
+  assert.equal(applied.body.grandfathered, 0);
+
+  const sub = await Subscription.findOne({ orgId: tenant.org._id, planCode: 'forceplan' }).lean();
+  // Grandfathering is the default, not the only option — but it has to be asked
+  // for explicitly, because the reverse mistake costs a customer's trust.
+  assert.equal(sub.pricing.monthlyPrice, 600);
+  assert.equal(sub.planVersion, 2);
+}));
+
+test('lowering a limit does not put existing subscribers over quota', maybe(async () => {
+  const { token: platform } = await platformAccount('owner');
+  await Plan.deleteMany({ code: 'limitplan' });
+  await PlanVersion.deleteMany({ planCode: 'limitplan' });
+  await savePlan(platform, 'limitplan', { code: 'limitplan', name: 'Limits', monthlyPrice: 0, userLimit: 9, invoiceLimit: 40, active: true });
+
+  const tenant = await registerOrg();
+  await call('POST', '/subscriptions/start', { token: tenant.token, body: { planCode: 'limitplan' } });
+
+  await savePlan(platform, 'limitplan', { name: 'Limits', monthlyPrice: 0, userLimit: 2, invoiceLimit: 3, active: true });
+
+  const usage = await call('GET', '/subscriptions/current', { token: tenant.token });
+  assert.equal(usage.status, 200, JSON.stringify(usage.body));
+  // Lowering a limit used to put every existing subscriber over quota mid-month,
+  // and the first they heard of it was an invoice being refused.
+  assert.equal(usage.body.usage.invoiceLimit, 40);
+  assert.equal(usage.body.usage.userLimit, 9);
+  assert.equal(usage.body.usage.grandfathered, true, 'and the tenant is told why their ceiling differs');
+}));
+
+test('a subscription with no pinned version behaves exactly as before', maybe(async () => {
+  const { token: platform } = await platformAccount('owner');
+  await Plan.deleteMany({ code: 'legacyplan' });
+  await PlanVersion.deleteMany({ planCode: 'legacyplan' });
+  await savePlan(platform, 'legacyplan', { code: 'legacyplan', name: 'Legacy', monthlyPrice: 0, userLimit: 4, invoiceLimit: 60, active: true });
+
+  const tenant = await registerOrg();
+  await call('POST', '/subscriptions/start', { token: tenant.token, body: { planCode: 'legacyplan' } });
+  // Exactly the shape of every subscription created before versioning shipped.
+  await Subscription.updateOne(
+    { orgId: tenant.org._id, planCode: 'legacyplan' },
+    { $unset: { planVersion: '', pricing: '', limits: '' } }
+  );
+
+  await savePlan(platform, 'legacyplan', { name: 'Legacy', monthlyPrice: 0, userLimit: 7, invoiceLimit: 90, active: true });
+
+  const usage = await call('GET', '/subscriptions/current', { token: tenant.token });
+  // Falls through to the live plan — the old behaviour, unchanged. This fallback
+  // is what makes the whole feature safe to deploy: it is inert until a plan is
+  // next edited *and* the subscriber has a pin.
+  assert.equal(usage.body.usage.invoiceLimit, 90);
+  assert.equal(usage.body.usage.grandfathered, false);
+}));
+
+test('a plan version cannot be edited after the fact', maybe(async () => {
+  const { token: platform } = await platformAccount('owner');
+  await Plan.deleteMany({ code: 'immutable' });
+  await PlanVersion.deleteMany({ planCode: 'immutable' });
+  await savePlan(platform, 'immutable', { code: 'immutable', name: 'Immutable', monthlyPrice: 250, userLimit: 1, invoiceLimit: 10 });
+
+  const version = await PlanVersion.findOne({ planCode: 'immutable' });
+  // A historical record that can be edited answers no question — the same
+  // reasoning as the stock ledger and the audit log.
+  await assert.rejects(
+    () => PlanVersion.updateOne({ _id: version._id }, { $set: { monthlyPrice: 1 } }),
+    /immutable/i
+  );
+}));
+
+test('revenue is reported at what each subscriber actually pays', maybe(async () => {
+  const { token: platform } = await platformAccount('owner');
+  await Plan.deleteMany({ code: 'mrrplan' });
+  await PlanVersion.deleteMany({ planCode: 'mrrplan' });
+  await savePlan(platform, 'mrrplan', { code: 'mrrplan', name: 'MRR', monthlyPrice: 1000, yearlyPrice: 10000, userLimit: 5, invoiceLimit: 100, active: true });
+
+  // Measured as a delta: MRR is a platform-wide figure and every other test in
+  // this file leaves subscriptions behind.
+  const before = (await metrics.computeRecurringRevenue()).mrr;
+
+  const early = await registerOrg();
+  await call('POST', '/subscriptions/start', { token: early.token, body: { planCode: 'mrrplan' } });
+  await Subscription.updateOne({ orgId: early.org._id, planCode: 'mrrplan' }, { $set: { status: 'active' } });
+
+  await savePlan(platform, 'mrrplan', { name: 'MRR', monthlyPrice: 2000, yearlyPrice: 20000, userLimit: 5, invoiceLimit: 100, active: true });
+
+  const late = await registerOrg();
+  await call('POST', '/subscriptions/start', { token: late.token, body: { planCode: 'mrrplan' } });
+  await Subscription.updateOne({ orgId: late.org._id, planCode: 'mrrplan' }, { $set: { status: 'active' } });
+
+  const { mrr } = await metrics.computeRecurringRevenue();
+  // 1000 + 2000, not 2000 + 2000. Joining to the live plan restated every past
+  // month's MRR whenever a price moved — a revenue chart that changes shape when
+  // somebody edits a price is not a revenue chart.
+  assert.equal(mrr - before, 3000);
+}));
+

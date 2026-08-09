@@ -86,6 +86,17 @@ const PRICE_COLORS: Record<string, string> = {
                 <div style="font-weight:700;font-size:15px;margin-top:4px">{{ supportLevel() }}</div>
               </div>
             </div>
+            @if (u.grandfathered) {
+              <!--
+                Said out loud, because otherwise the published price and limits on
+                this very page disagree with the ones the customer is actually on,
+                and the only reading available is that something is broken.
+              -->
+              <div style="margin-top:14px;font-size:12.5px;line-height:1.6;color:rgba(255,255,255,.8)">
+                You are on the terms you signed up with, not the current published ones. Your price
+                and limits stay as they are unless you change plan.
+              </div>
+            }
           </div>
 
           <!-- Billing toggle -->
@@ -381,9 +392,24 @@ export class SubscriptionComponent implements OnInit {
     return this.plans().find(p => p.code === s.planCode)?.name || this.usage()?.planName || s.planCode;
   }
 
+  /**
+   * What this customer was actually charged.
+   *
+   * Read from the subscription's own snapshot, falling back to the published
+   * plan only for subscriptions that predate versioning (3.3 #9). It used to
+   * read the live plan unconditionally, which meant a past charge was rendered
+   * at *today's* price: raise Growth from ₹999 to ₹1,499 and every existing
+   * Growth customer's receipt row retroactively read ₹1,499, so their own
+   * billing history stopped matching their bank statement.
+   *
+   * Nullish coalescing rather than `||`, because a free plan's price is 0 and
+   * `||` would fall through to the published price for every one of them.
+   */
   historyAmount(): number | null {
     const s = this.sub();
     if (!s) return null;
+    const snapshot = s.billingCycle === 'yearly' ? s.pricing?.yearlyPrice : s.pricing?.monthlyPrice;
+    if (snapshot !== null && snapshot !== undefined) return snapshot;
     const plan = this.plans().find(p => p.code === s.planCode);
     if (!plan) return null;
     return s.billingCycle === 'yearly' ? plan.yearlyPrice : plan.monthlyPrice;

@@ -1140,8 +1140,32 @@ export interface Plan {
   sortOrder?: number;
 }
 
+/** A plan as it stood at a point in time. Immutable — a wrong version is
+ *  corrected by publishing another one. */
+export interface PlanVersion {
+  planCode: string;
+  version: number;
+  name: string;
+  monthlyPrice?: number;
+  yearlyPrice?: number;
+  userLimit?: number;
+  invoiceLimit?: number;
+  features: string[];
+  effectiveFrom: string;
+  changedBy?: string;
+  changeNote?: string;
+}
+
 export interface Subscription {
   _id: string;
+  /** The plan version this was sold on. Null for subscriptions created before
+   *  versioning — those fall back to the published plan, which is the old
+   *  behaviour exactly. */
+  planVersion?: number | null;
+  /** What this customer actually agreed to, copied at signup, so a later price
+   *  change cannot rewrite the amount shown against charges already taken. */
+  pricing?: { monthlyPrice?: number | null; yearlyPrice?: number | null };
+  limits?: { userLimit?: number | null; invoiceLimit?: number | null };
   planCode: string;
   billingCycle: 'monthly' | 'yearly';
   status: 'trial' | 'active' | 'past_due' | 'cancelled';
@@ -1151,6 +1175,11 @@ export interface Subscription {
 }
 
 export interface PlanUsage {
+  /** Which version of the plan this tenant is held to, and whether that differs
+   *  from the published one — the "why is my ceiling different" question, from
+   *  the other direction to `limitOverrides`. */
+  planVersion?: number | null;
+  grandfathered?: boolean;
   plan: string;
   planName: string;
   users: number;

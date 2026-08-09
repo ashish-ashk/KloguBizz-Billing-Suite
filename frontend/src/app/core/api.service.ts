@@ -18,7 +18,7 @@ import {
   Subscription, SuperOverview, SystemHealth, TenantDetail, TenantNotice, Vendor,
   ArAgeing, CollectionMetrics, CustomerStatement, LowStockReport, SalesBreakdown,
   StockValuationReport, ExpiringStockReport, StockLayerRow,
-  Expense, ProfitLossReport, MasterOption,
+  Expense, ProfitLossReport, MasterOption, PlanVersion,
   StockMovement, TenantActivityEntry
 } from './models';
 
@@ -801,8 +801,18 @@ export class ApiService {
     );
   }
   superPlans() { return this.cache.through(`${NS.superadmin}:plans`, () => this.http.get<Plan[]>(`${this.api}/superadmin/plans`)); }
-  superSavePlan(code: string, payload: Partial<Plan>) {
-    return this.afterWrite(this.http.put<Plan>(`${this.api}/superadmin/plans/${code}`, payload), NS.superadmin, 'plans');
+  superSavePlan(code: string, payload: Partial<Plan> & { changeNote?: string; applyToExisting?: boolean }) {
+    // The response reports how many subscribers each choice affected — the whole
+    // point of the grandfathering decision, so the caller can say so.
+    return this.afterWrite(
+      this.http.put<Plan & { version: number; repriced: number; grandfathered: number }>(
+        `${this.api}/superadmin/plans/${code}`, payload
+      ),
+      NS.superadmin, 'plans'
+    );
+  }
+  superPlanHistory(code: string) {
+    return this.http.get<{ versions: PlanVersion[] }>(`${this.api}/superadmin/plans/${code}/history`);
   }
   superMasters() {
     return this.cache.through(`${NS.superadmin}:masters`, () => this.http.get<MastersResponse>(`${this.api}/superadmin/masters`));

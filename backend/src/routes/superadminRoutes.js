@@ -7,6 +7,7 @@ const {
   deleteOrganisation,
   listPlansAdmin,
   upsertPlan,
+  planHistory,
   listMasters,
   saveMasters,
   updateReminder,
@@ -97,6 +98,9 @@ router.put('/broadcast', requireCapability(CAPABILITY.settingsWrite), platform.s
 router.get('/plans', requireCapability(CAPABILITY.platformRead), listPlansAdmin);
 router.post('/plans', requireCapability(CAPABILITY.billingWrite), upsertPlan);
 router.put('/plans/:code', requireCapability(CAPABILITY.billingWrite), upsertPlan);
+/** Every price this plan has ever carried. Readable with plain platform read
+ *  access: "what did we charge in March" is a support question, not a pricing one. */
+router.get('/plans/:code/history', requireCapability(CAPABILITY.platformRead), planHistory);
 
 // ── Platform configuration ───────────────────────
 router.get('/masters', requireCapability(CAPABILITY.platformRead), listMasters);

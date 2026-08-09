@@ -46,13 +46,25 @@ function daysAgo(days) {
  * distinction is the whole point of MRR, and getting it wrong inflates the figure
  * twelvefold for every annual customer.
  */
-function monthlyPriceFor(plan, billingCycle) {
-  if (!plan) return 0;
-  if (billingCycle === 'yearly') {
-    const yearly = Number(plan.yearlyPrice) || 0;
-    return yearly / 12;
-  }
-  return Number(plan.monthlyPrice) || 0;
+/**
+ * What this subscription contributes to monthly recurring revenue.
+ *
+ * Reads the **subscription's own snapshot** first and the live plan only as a
+ * fallback (3.3 #9). Joining to the live plan was the largest retroactive
+ * surface in the system: raising a price restated every past month's MRR and
+ * ARPA, because the figure was recomputed from today's number times the
+ * subscriber count. A revenue chart that changes shape when somebody edits a
+ * price is not a revenue chart.
+ *
+ * The fallback keeps subscriptions created before versioning behaving exactly as
+ * they did, so this is inert until a plan is next edited.
+ */
+function monthlyPriceFor(plan, billingCycle, subscription) {
+  const snapshot = subscription?.pricing || {};
+  const yearly = snapshot.yearlyPrice ?? plan?.yearlyPrice;
+  const monthly = snapshot.monthlyPrice ?? plan?.monthlyPrice;
+  if (billingCycle === 'yearly') return (Number(yearly) || 0) / 12;
+  return Number(monthly) || 0;
 }
 
 // A subscription counts towards MRR while the customer is contractually on the
@@ -70,7 +82,8 @@ const MRR_STATUSES = ['active', 'past_due'];
  */
 async function computeRecurringRevenue() {
   const [subscriptions, plans] = await Promise.all([
-    Subscription.find({ status: { $in: MRR_STATUSES } }).select('orgId planCode billingCycle status').lean(),
+    Subscription.find({ status: { $in: MRR_STATUSES } })
+      .select('orgId planCode billingCycle status planVersion pricing').lean(),
     Plan.find().lean()
   ]);
   const planMap = new Map(plans.map(plan => [plan.code, plan]));
@@ -89,7 +102,7 @@ async function computeRecurringRevenue() {
   let payingOrgs = 0;
   for (const subscription of perOrg.values()) {
     const plan = planMap.get(subscription.planCode);
-    const monthly = monthlyPriceFor(plan, subscription.billingCycle);
+    const monthly = monthlyPriceFor(plan, subscription.billingCycle, subscription);
     const entry = byPlan.get(subscription.planCode) || {
       planCode: subscription.planCode,
       planName: plan?.name || subscription.planCode,

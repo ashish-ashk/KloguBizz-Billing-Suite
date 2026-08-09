@@ -1236,13 +1236,67 @@ supplier, so those cannot be netted off costs.
 
 ## Tier 3 — platform and billing (Part 3.3, 3.5, 3.4)
 
-### 9. Plan versioning
+### 9. Plan versioning - **DONE (2026-08-07)**
 
-**Why it matters:** `upsertPlan` overwrites in place, so changing a price silently
-reprices every existing subscriber with no grandfathering.
+**The problem was bigger than the plan described.** It said `upsertPlan` "silently reprices
+every existing subscriber". True, and not the half of it: **no price was stored anywhere**.
+`Subscription` held only `planCode`, so every price, limit and revenue figure was resolved
+by joining to the live `Plan` row at read time. Editing that row therefore reached
+*backwards*:
 
-**How:** `PlanVersion` rows, and pin `Subscription.planVersionId` at signup. The pricing
-page reads the latest version; an existing subscriber keeps theirs.
+| Editing a price also changed | Why that matters |
+|---|---|
+| The amount shown against charges **already taken** | A customer's own billing history stopped matching their bank statement. That is not a rounding problem; it is the product telling them something false about money |
+| **Historical MRR and ARPA** | Recomputed as today's price times the subscriber count, for every past month. A revenue chart that changes shape when somebody edits a price is not a revenue chart |
+| Every existing subscriber's **quota** | Lowering `invoiceLimit` from 200 to 100 put them over mid-month, and the first they heard was an invoice being refused |
+
+Three parts. An immutable `PlanVersion` row written **before** the live row changes, so
+nothing is lost — previously the audit entry logged only the plan's *name*, so not even the
+previous price was recoverable. A snapshot of prices and limits copied onto the
+subscription at signup, which is what makes past figures stable. And resolution that
+prefers the snapshot, falling back to the live plan where there is none.
+
+**That fallback is what makes it safe to deploy.** Every subscription created before this
+has no snapshot, resolves to the live plan, and behaves exactly as it did. The change is
+inert until a plan is next edited.
+
+**Grandfathering is the default, and repricing is a deliberate opt-in**, because the two
+mistakes are not symmetrical: a price rise that quietly reaches existing customers costs
+their trust and cannot be taken back, while forgetting to reprice is visible and fixable.
+The console reports how many people each choice affected — it used to say only "Growth plan
+saved", which is true and useless when the operator cannot tell whether they just repriced
+two hundred customers or none.
+
+**Design decisions worth recording:**
+
+- **No `effectiveTo` on a version.** It is exactly derivable — a version ends when the next
+  begins — and storing it would mean *updating* a row the file calls immutable. A snapshot
+  with a mutable field is not a snapshot, and the guard would have needed an exception the
+  next change would widen.
+- **Reordering is not a price change.** `sortOrder` and `active` are how a plan is
+  presented, not what it costs; versioning a drag-to-reorder would bury the changes that
+  matter among rows that say nothing.
+- **A no-op save mints nothing.** The console's save button makes an unchanged save
+  trivially easy, and a history of identical rows answers no question.
+- **Nullish, not truthy, throughout.** A free plan's price is `0`, and `||` would fall
+  through to the live plan's price for every one of them.
+
+**The honest limit, stated in the code and in the console:** this governs what the product
+**displays, enforces and reports** — not what the gateway collects. `razorpayService` passes
+`plan_id: planCode` and the real amount lives in a Razorpay plan object this codebase never
+reads or writes, so an existing mandate keeps charging what Razorpay was told when it was
+created. `PlanVersion.versionedProviderPlanId` is the seam for closing that; doing it means
+creating a Razorpay plan per version and migrating mandates, which is a provider-side
+project.
+
+**Migration 010** creates version 1 of every plan and pins every live subscription to it —
+trials and pending checkouts included, since they will become paying customers on the terms
+they were shown. Cancelled subscriptions are left alone, and subscriptions whose plan no
+longer exists are **counted, not invented**: there is no honest way for a migration to
+decide what they should be charged. Verified end to end including an idempotent re-run.
+
+**346 backend tests pass**, including the one the codebase never had: that a price survives
+a plan edit.
 
 ### 10. Dunning, coupons, refunds/proration, our own GST invoices
 

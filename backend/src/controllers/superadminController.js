@@ -19,6 +19,7 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { logAudit } = require('../services/auditService');
 const { pickFields } = require('../utils/pickFields');
+const planVersions = require('../services/planVersionService');
 const { paginate, parsePageParams, buildEnvelope, escapeRegex, parseSort } = require('../utils/pagination');
 const { streamCsv } = require('../services/csvService');
 const { invalidateMasterCache } = require('../services/masterService');
@@ -306,14 +307,68 @@ const listPlansAdmin = asyncHandler(async (req, res) => {
   res.json(await Plan.find().sort({ sortOrder: 1 }));
 });
 
+/**
+ * Publishes a plan change (3.3 #9).
+ *
+ * This used to be a bare `findOneAndUpdate` on the single row for the code. The
+ * old values were not retained anywhere — the audit entry logged only the name,
+ * so even the previous price was unrecoverable — and because every price and
+ * limit in the system resolves by joining to that row at read time, an edit
+ * reached backwards: past receipts, historical MRR and every existing
+ * subscriber's quota all moved with it.
+ *
+ * **Existing subscribers are grandfathered by default.** `applyToExisting` is
+ * the deliberate opt-out, and the response reports how many people each choice
+ * affected so the operator learns what they just did rather than inferring it.
+ */
 const upsertPlan = asyncHandler(async (req, res) => {
-  const plan = await Plan.findOneAndUpdate(
-    { code: req.params.code || req.body.code },
-    req.body,
-    { new: true, upsert: true, runValidators: true }
-  );
-  logAudit({ req, action: 'plan.updated', entity: 'plan', entityId: plan.code, meta: { name: plan.name } });
-  res.json(plan);
+  const code = req.params.code || req.body.code;
+  if (!code) throw httpError(400, 'A plan code is required');
+
+  // Allowlisted, because the whole body used to be written straight through and
+  // these routes carry no validator — an unfiltered upsert would let a caller
+  // set `currentVersion` and desynchronise the plan from its own history.
+  const changes = pickFields(req.body, [
+    'name', 'monthlyPrice', 'yearlyPrice', 'userLimit', 'invoiceLimit', 'features', 'active', 'sortOrder'
+  ]);
+
+  const result = await planVersions.publish({
+    code,
+    changes,
+    changedBy: req.user?.name || req.user?.email,
+    changeNote: req.body?.changeNote,
+    applyToExisting: req.body?.applyToExisting === true
+  });
+
+  logAudit({
+    req,
+    action: 'plan.updated',
+    entity: 'plan',
+    entityId: code,
+    meta: {
+      name: result.plan.name,
+      version: result.version.version,
+      monthlyPrice: result.plan.monthlyPrice,
+      yearlyPrice: result.plan.yearlyPrice,
+      // Recorded, so "when did this go up and who did it" is answerable from the
+      // trail alone rather than only from the version rows.
+      applyToExisting: req.body?.applyToExisting === true,
+      repriced: result.repriced,
+      grandfathered: result.grandfathered
+    }
+  });
+
+  res.json({
+    ...result.plan,
+    version: result.version.version,
+    repriced: result.repriced,
+    grandfathered: result.grandfathered
+  });
+});
+
+/** What a plan has cost over time, newest first. */
+const planHistory = asyncHandler(async (req, res) => {
+  res.json({ versions: await planVersions.history(req.params.code) });
 });
 
 // ---- Masters: GST rates, HSN codes, payment methods, units ----
@@ -576,6 +631,8 @@ module.exports = {
   deleteOrganisation,
   listPlansAdmin,
   upsertPlan,
+  planHistory,
+  planHistory,
   listMasters,
   saveMasters,
   updateReminder,
