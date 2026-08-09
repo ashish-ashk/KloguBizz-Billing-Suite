@@ -10,14 +10,23 @@ function client() {
   });
 }
 
-async function createSubscription({ planCode, orgId }) {
+/**
+ * `offerId` is how a discount reaches the card (3.3 #10).
+ *
+ * The amount collected is set by a Razorpay plan object this codebase never
+ * writes, so a coupon applied only in our own records would show one price and
+ * charge another. `couponService.assertProviderCanHonour` refuses that case
+ * before it gets here; this passes the offer through when there is one.
+ */
+async function createSubscription({ planCode, orgId, offerId = null }) {
   const razorpay = client();
   if (!razorpay) {
-    return { id: `local_${orgId}_${planCode}`, status: 'created', localMode: true };
+    return { id: `local_${orgId}_${planCode}_${Date.now()}`, status: 'created', localMode: true };
   }
   return razorpay.subscriptions.create({
     plan_id: planCode,
     total_count: 120,
+    ...(offerId ? { offer_id: offerId } : {}),
     notes: { orgId: String(orgId), planCode }
   });
 }

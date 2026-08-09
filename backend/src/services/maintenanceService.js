@@ -16,6 +16,7 @@ const { purgeCutoff } = require('../utils/softDelete');
 const { logger } = require('../utils/logger');
 const jobs = require('./jobRunService');
 const { runDunningSweep } = require('./dunningService');
+const { applyScheduledChanges } = require('./planChangeService');
 const { runRecurringSweep } = require('./recurringInvoiceService');
 const { sweepExpiredLinks } = require('./paymentLinkService');
 
@@ -218,10 +219,21 @@ async function runOnce() {
       });
     }
 
+    /**
+     * Downgrades whose paid-up period has now ended (3.3 #10).
+     *
+     * A customer who downgrades keeps what they paid for until the period ends,
+     * so the change waits here. Registered as its own job because the failure is
+     * silent and expensive in the other direction to dunning's: a sweep that
+     * stops leaves customers on plans they stopped paying for.
+     */
+    const scheduled = await jobs.run('billing.scheduled-changes', () => applyScheduledChanges()) || {};
+    if (scheduled.applied) logger.info('scheduled plan changes applied', scheduled);
+
     const purged = await jobs.run('recycle-bin.purge', purgeExpiredDeletions) || {};
     if (Object.values(purged).some(Boolean)) logger.info('recycle bin purge', purged);
 
-    return { ...result, ...quotations, ...paymentLinks, recurring, purged, dunning };
+    return { ...result, ...quotations, ...paymentLinks, recurring, purged, dunning, scheduled };
   } catch (error) {
     logger.error('maintenance sweep failed', { err: error });
     return null;

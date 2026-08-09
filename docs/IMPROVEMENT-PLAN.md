@@ -1298,12 +1298,12 @@ decide what they should be charged. Verified end to end including an idempotent 
 **346 backend tests pass**, including the one the codebase never had: that a price survives
 a plan edit.
 
-### 10. Dunning - **DONE (2026-08-07)**. Coupons, proration and platform GST invoices - still open
+### 10. Dunning, platform GST invoices, coupons and proration - **ALL DONE (2026-08-09)**
 
-**Dunning shipped. The other three did not**, and the split is deliberate rather than a
-run out of road: a failed payment nobody chases is silent revenue loss happening *now*,
-while coupons are a growth lever and proration matters only when customers change plan
-mid-cycle. Detail on what remains is below.
+Shipped in three passes, in that order, and the order was the point: a failed payment
+nobody chases is silent revenue loss happening *now*; a customer billed with no tax
+invoice is a compliance failure on our side; coupons are a growth lever. Each section
+below is what actually shipped.
 
 #### Dunning
 
@@ -1355,16 +1355,9 @@ visible — the most expensive kind of silent failure there is.
 
 **370 backend tests pass.**
 
-#### Still open, with what was learned
+#### Investigation notes kept from before the platform invoices shipped
 
-- **Coupons.** A discount code applied at checkout. Now cheap, because
-  `Subscription.pricing` already snapshots what a customer agreed to (#9) — a coupon is a
-  discounted snapshot plus a record of which code produced it.
-- **Refunds and proration.** Mid-cycle plan changes. Needs a decision this codebase has not
-  made: whether we credit the unused remainder or simply charge the difference from the
-  next cycle. The second is far simpler and is what most SMB SaaS does.
-- ~~**The platform's own GST invoices.**~~ **DONE (2026-08-07)** — see below. The
-  investigation notes are kept because they are why it is a separate model:
+They are why it is a separate model:
   - **There is no platform `Organisation`.** Superadmins have `orgId: null` by design.
     Creating a synthetic one pollutes tenant counts, MRR, ARPA and the at-risk lists,
     every one of which counts `Organisation` documents.
@@ -1510,6 +1503,92 @@ not yet done", and carries the id to come back with.
 A **precondition** runs before anything is recorded, so a request that would fail on its own
 merits — a mismatched confirmation name — never reaches a human. An approval queue people
 learn to skim is one that has stopped working.
+
+#### Coupons and proration (#10c) - DONE (2026-08-09)
+
+**The plan left one question open and it had to be answered before any of this: credit the
+unused remainder, or charge the difference from the next cycle?**
+
+The answer is **neither, uniformly** - because upgrades and downgrades are not symmetrical,
+and treating them as one case is where this normally goes wrong.
+
+- **An upgrade takes effect immediately, and the unused remainder is credited.** The
+  customer wants the bigger plan *now*; that is why they are upgrading. Making them wait
+  until the period ends is refusing money that is being offered. The days they already
+  bought are theirs, so charging for those days twice is charging twice.
+- **A downgrade takes effect at the end of the period, and no money moves.** They paid
+  through that date and they keep what they paid for. Refunding a downgrade also creates an
+  obvious loop - upgrade, downgrade, repeat - and no SMB SaaS does it.
+
+Each direction resolves in the customer's favour on the thing they actually care about, and
+neither leaves the product holding money it did not earn.
+
+**The live bug found on the way, which was worth more than the feature.** A plan change
+created a new provider subscription and **left the old mandate running**. Razorpay charged
+both, every month, indefinitely, and nothing in the system knew. Two things made it worse:
+
+- `resolveSubscription` falls back to the newest local subscription when an event carries no
+  id, and it included cancelled ones - so a `payment.failed` on the abandoned mandate marked
+  the **live** subscription past due and started dunning a customer who had paid.
+- Cancelling the old mandate makes Razorpay report that cancellation back, and the ordinary
+  handler drops the tenant to `starter` - **the upgrade cancelling itself, seconds after it
+  succeeded**. Guarded twice: by `supersededBy`, and by refusing to revoke a plan while a
+  newer subscription is active.
+
+The predecessor is retired **when the replacement is paid for**, never at checkout:
+cancelling first would leave a customer whose payment then failed with no subscription at
+all.
+
+**The gate that decides whether coupons are safe at all.** What the card is charged is set
+by a Razorpay plan object this codebase never reads or writes. For plan versioning (#9) that
+limit is survivable, because versioning governs what the product *displays and enforces*.
+For a coupon it is not: showing "₹499/month with LAUNCH50" while the gateway collects ₹999
+is not a display bug, it is **₹500 a month taken from someone who did not agree to it** -
+and our own tax invoice would then disagree with their card statement by exactly the
+discount, which is the same class of error as pricing tax exclusively when the gateway
+charges inclusive.
+
+So a coupon carries a `providerOfferId`, and without one it is **refused at checkout on a
+paid plan** - by name, with the fix in the message - rather than accepted and quietly
+ignored. Free plans and local development collect nothing, so they apply directly. The
+console marks every coupon that is in that state, because an operator who has created six
+launch codes and can use none of them should find out there rather than from the first
+customer who tries.
+
+**Credits are owed, not applied**, for the same reason and it is worth stating plainly. The
+obvious implementation is a balance that reduces the next tax invoice, and it is wrong here:
+a credit that reduces our invoice but not the charge produces a document that disagrees with
+the customer's bank statement, which is worse than no document. So a credit is recorded,
+shown to the customer *and* the operator, and settled by recording **how** - a gateway
+refund, a discount on the next renewal, or a deliberate write-off. Slower than automating
+it, and honest; the alternative is a promise the code cannot keep. `settlement.reference` is
+where the refund id goes once refunds have been run against a real Razorpay account, which
+- see `docs/LAUNCH-READINESS.md` - has never happened.
+
+Smaller decisions that each close a specific way of getting it wrong:
+
+- **The discounted price goes into `pricing`**, not the list price with a discount beside it.
+  `pricing` is what the billing page, the tax invoice and MRR all read.
+- **The redemption cap is claimed atomically**, with the cap in the filter. For a launch code
+  posted publicly, simultaneous checkouts are the normal case, not a race worth ignoring.
+- **Direction is measured against what this customer pays**, not the list price, so a
+  grandfathered customer on ₹499 moving to a ₹999 plan is upgrading even if the plan they are
+  leaving now lists at ₹1,499. And it is measured **per month**, so monthly-to-yearly is not
+  read as a tenfold upgrade.
+- **Proration refuses to guess.** No paid-up period on record means no credit, not an
+  invented one - a guessed denominator produces a number that cannot be defended when the
+  customer asks how it was worked out. `currentPeriodStart` was added for this; `startDate`
+  is not a substitute, because after six charges it is six months before the period the
+  customer is actually in.
+- **A rate typed into a coupon is clamped, not refused.** A ₹1,000 code on a ₹999 plan makes
+  it free. A negative charge is not a discount.
+- **A code is retired, never deleted.** "Who used this, and what did we give away" is exactly
+  the question asked when a code turns out to have been shared publicly.
+- **Scheduled downgrades are a registered job** (#11), because a downgrade that never lands
+  leaves a customer on a plan they stopped paying for - silent, and expensive in the opposite
+  direction to dunning's failure.
+
+**454 backend tests pass.**
 
 #### Break-glass
 

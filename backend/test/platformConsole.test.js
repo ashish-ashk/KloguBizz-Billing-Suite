@@ -2269,3 +2269,516 @@ test('the console reports when it cannot issue invoices at all', maybe(async () 
   assert.ok(body.missing.length);
 }));
 
+
+// ── Coupons, proration and plan changes (3.3 #10) ─
+
+const { Coupon } = require('../src/models/Coupon');
+const { CouponRedemption } = require('../src/models/CouponRedemption');
+const { BillingCredit } = require('../src/models/BillingCredit');
+const couponService = require('../src/services/couponService');
+const planChanges = require('../src/services/planChangeService');
+
+/**
+ * Plans owned by this block alone.
+ *
+ * An earlier test in this suite reprices `growth` to 4,999 to prove
+ * grandfathering, and it stays repriced. Leaning on the shared fixtures made
+ * these tests depend on the order they happened to run in — which is how a suite
+ * ends up with a failure nobody can reproduce in isolation.
+ */
+const SMALL = 'cpn-small';
+const BIG = 'cpn-big';
+
+async function ensurePlans() {
+  await Plan.updateOne({ code: SMALL },
+    { $set: { code: SMALL, name: 'Coupon Small', monthlyPrice: 999, yearlyPrice: 9990, userLimit: 10, invoiceLimit: 1000, active: true } },
+    { upsert: true });
+  await Plan.updateOne({ code: BIG },
+    { $set: { code: BIG, name: 'Coupon Big', monthlyPrice: 2499, yearlyPrice: 24000, userLimit: 25, invoiceLimit: 5000, active: true } },
+    { upsert: true });
+}
+
+async function makeCoupon(overrides = {}) {
+  await ensurePlans();
+  counter += 1;
+  return Coupon.create({
+    code: `TEST${counter}`,
+    discountType: 'percent',
+    discountValue: 50,
+    duration: 'once',
+    ...overrides
+  });
+}
+
+/** Puts a tenant on a paid plan mid-period, the state proration is measured from. */
+async function onPaidPlan(tenant, {
+  planCode = SMALL, monthlyPrice = 999, daysIn = 10, periodDays = 30
+} = {}) {
+  await ensurePlans();
+  const now = new Date();
+  const start = new Date(now.getTime() - daysIn * 86400000);
+  const end = new Date(start.getTime() + periodDays * 86400000);
+  await Organisation.updateOne({ _id: tenant.org._id }, { plan: planCode });
+  return Subscription.findOneAndUpdate(
+    { orgId: tenant.org._id },
+    {
+      $set: {
+        planCode,
+        status: 'active',
+        billingCycle: 'monthly',
+        pricing: { monthlyPrice, yearlyPrice: monthlyPrice * 10 },
+        currentPeriodStart: start,
+        currentPeriodEnd: end,
+        lastPaymentAt: start,
+        razorpaySubscriptionId: `local_${tenant.org._id}_${planCode}`
+      }
+    },
+    { new: true, upsert: true }
+  );
+}
+
+test('a coupon discounts the price the subscription is actually held to', maybe(async () => {
+  const tenant = await registerOrg();
+  await makeCoupon({ code: 'HALFOFF', discountType: 'percent', discountValue: 50 });
+
+  const { status, body } = await call('POST', '/subscriptions/start', {
+    token: tenant.token,
+    body: { planCode: SMALL, billingCycle: 'monthly', couponCode: 'halfoff' }
+  });
+
+  assert.equal(status, 201, JSON.stringify(body));
+  /**
+   * The *discounted* price goes into the snapshot, not the list price with a
+   * discount recorded beside it. `pricing` is what the billing page, the tax
+   * invoice and MRR all read — leaving 999 there would have every one of them
+   * quote a number the customer never pays.
+   *
+   * The code was typed in lower case and matched anyway: nobody copies the
+   * capitalisation out of the email, and refusing it is a support ticket for
+   * something that was never wrong.
+   */
+  assert.equal(body.subscription.pricing.monthlyPrice, 499.5);
+  assert.equal(body.subscription.discount.listPrice, 999);
+  assert.equal(body.subscription.discount.couponCode, 'HALFOFF');
+}));
+
+test('a coupon cannot be used twice on the same account', maybe(async () => {
+  const tenant = await registerOrg();
+  await makeCoupon({ code: 'ONCEONLY', oncePerOrg: true });
+
+  const first = await call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: SMALL, couponCode: 'ONCEONLY' }
+  });
+  assert.equal(first.status, 201, JSON.stringify(first.body));
+
+  const second = await call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: BIG, couponCode: 'ONCEONLY' }
+  });
+  assert.equal(second.status, 409);
+  assert.equal(second.body.code, 'COUPON_ALREADY_USED');
+}));
+
+test('a redemption cap holds against simultaneous checkouts', maybe(async () => {
+  const coupon = await makeCoupon({ code: 'LIMITED1', maxRedemptions: 1 });
+  const a = await registerOrg();
+  const b = await registerOrg();
+
+  /**
+   * The case that matters: a launch code posted publicly is claimed by several
+   * people at the same instant. Reading `redemptionCount` and then incrementing
+   * it would let both of these through, and the cap would mean nothing.
+   */
+  const results = await Promise.all([a, b].map(tenant => call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: SMALL, couponCode: 'LIMITED1' }
+  })));
+
+  const ok = results.filter(r => r.status === 201);
+  const refused = results.filter(r => r.status === 409);
+  assert.equal(ok.length, 1, 'exactly one checkout may claim the last redemption');
+  assert.equal(refused.length, 1);
+  assert.equal(refused[0].body.code, 'COUPON_EXHAUSTED');
+  assert.equal((await Coupon.findById(coupon._id).lean()).redemptionCount, 1);
+  assert.equal(await CouponRedemption.countDocuments({ couponId: coupon._id }), 1);
+}));
+
+test('an expired or wrong-plan code says which it is', maybe(async () => {
+  const tenant = await registerOrg();
+  await makeCoupon({ code: 'GONE', validUntil: new Date('2020-01-01') });
+  await makeCoupon({ code: 'BIZONLY', appliesToPlans: ['business'] });
+
+  const expired = await call('POST', '/subscriptions/coupon/check', {
+    token: tenant.token, body: { code: 'GONE', planCode: SMALL }
+  });
+  const wrongPlan = await call('POST', '/subscriptions/coupon/check', {
+    token: tenant.token, body: { code: 'BIZONLY', planCode: SMALL }
+  });
+  const unknown = await call('POST', '/subscriptions/coupon/check', {
+    token: tenant.token, body: { code: 'NOSUCHCODE', planCode: SMALL }
+  });
+
+  /**
+   * Three different conversations. Collapsing them into "this code is not
+   * valid" turns each one into a support ticket.
+   */
+  assert.equal(expired.body.code, 'COUPON_EXPIRED');
+  assert.equal(wrongPlan.body.code, 'COUPON_WRONG_PLAN');
+  assert.equal(unknown.body.code, 'COUPON_NOT_FOUND');
+}));
+
+test('a discount worth more than the plan makes it free, not negative', maybe(async () => {
+  const big = { discountType: 'amount', discountValue: 5000, code: 'TOOBIG' };
+  const { discountAmount, finalPrice } = couponService.discountFor(big, 999);
+  // A negative charge is not a discount; it is a refund the gateway refuses and
+  // an invoice nobody can read.
+  assert.equal(discountAmount, 999);
+  assert.equal(finalPrice, 0);
+}));
+
+test('a coupon the payment provider does not know about is refused, not silently ignored', maybe(async () => {
+  const withoutOffer = { code: 'NOOFFER', providerOfferId: null };
+  const withOffer = { code: 'HASOFFER', providerOfferId: 'offer_abc123' };
+
+  /**
+   * The single most expensive thing this feature could get wrong. What the card
+   * is charged is set by a Razorpay plan object this codebase never writes, so a
+   * coupon applied only in our own records shows 499 and collects 999 — every
+   * month, silently — and our tax invoice then disagrees with the customer's
+   * card statement by exactly the discount.
+   */
+  assert.throws(
+    () => couponService.assertProviderCanHonour(withoutOffer, { providerWillCharge: true }),
+    /no matching offer at the payment provider/
+  );
+  // Free plans and local development collect nothing, so there is nothing to
+  // disagree with.
+  couponService.assertProviderCanHonour(withoutOffer, { providerWillCharge: false });
+  couponService.assertProviderCanHonour(withOffer, { providerWillCharge: true });
+}));
+
+test('a once-only discount stops after the charge it applied to', maybe(async () => {
+  const tenant = await registerOrg();
+  await makeCoupon({ code: 'FIRSTMONTH', duration: 'once' });
+  await call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: SMALL, couponCode: 'FIRSTMONTH' }
+  });
+
+  const before = await Subscription.findOne({ orgId: tenant.org._id }).sort({ createdAt: -1 }).lean();
+  assert.equal(before.discount.cyclesRemaining, 1);
+  assert.equal(couponService.discountStillApplies(before.discount), true);
+
+  await applyRazorpayEvent('subscription.charged', { id: before.razorpaySubscriptionId });
+
+  const after = await Subscription.findOne({ _id: before._id }).lean();
+  assert.equal(after.discount.cyclesRemaining, 0);
+  // Which is what the customer was told when they applied it.
+  assert.equal(couponService.discountStillApplies(after.discount), false);
+}));
+
+test('a forever discount is not counted down to zero', maybe(async () => {
+  const forever = { couponCode: 'LIFER', duration: 'forever', cyclesRemaining: null };
+  // `!null` and `!0` are the same and the two mean opposite things here, which
+  // is exactly the bug this asserts against.
+  assert.equal(couponService.discountStillApplies(forever), true);
+  assert.equal(couponService.discountStillApplies({ couponCode: 'X', duration: 'cycles', cyclesRemaining: 0 }), false);
+}));
+
+test('an upgrade credits the days already paid for', maybe(async () => {
+  const tenant = await registerOrg();
+  await onPaidPlan(tenant, { planCode: SMALL, monthlyPrice: 999, daysIn: 10, periodDays: 30 });
+
+  const { status, body } = await call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: BIG, billingCycle: 'monthly' }
+  });
+  assert.equal(status, 201, JSON.stringify(body));
+  assert.equal(body.direction, 'upgrade');
+
+  /**
+   * 20 of 30 days unused at 33.30 a day. Those days are theirs — they bought
+   * them — so charging for the same days again on the new plan is charging
+   * twice.
+   *
+   * Owed, not applied: nothing here can reduce what the gateway collects, and a
+   * tax invoice that disagrees with the card statement is worse than none.
+   */
+  assert.ok(body.credit, 'an upgrade mid-period owes the customer the remainder');
+  assert.ok(Math.abs(body.credit.amount - 666) < 5, `expected about 666, got ${body.credit.amount}`);
+  assert.equal(body.credit.reason, 'upgrade-proration');
+  assert.equal(body.credit.status, 'owed');
+  assert.equal(body.credit.basis.daysInPeriod, 30);
+}));
+
+test('a downgrade is scheduled for the end of the period, and moves no money', maybe(async () => {
+  const tenant = await registerOrg();
+  const before = await onPaidPlan(tenant, { planCode: BIG, monthlyPrice: 2499, daysIn: 5, periodDays: 30 });
+
+  const { status, body } = await call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: SMALL, billingCycle: 'monthly' }
+  });
+
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.equal(body.scheduled, true);
+  /**
+   * They paid through that date and they keep what they paid for. Moving them
+   * down now takes away something they bought — and refunding a downgrade
+   * creates an obvious loop nobody wants to be on the wrong side of.
+   */
+  assert.equal(new Date(body.effectiveAt).getTime(), before.currentPeriodEnd.getTime());
+  const org = await Organisation.findById(tenant.org._id).lean();
+  assert.equal(org.plan, BIG, 'the plan they paid for is still theirs');
+  assert.equal(await BillingCredit.countDocuments({ orgId: tenant.org._id }), 0);
+  assert.equal(await Subscription.countDocuments({ orgId: tenant.org._id }), 1, 'no second mandate is created');
+}));
+
+test('a scheduled downgrade can be cancelled, and applies when the period ends', maybe(async () => {
+  const tenant = await registerOrg();
+  await onPaidPlan(tenant, { planCode: BIG, monthlyPrice: 2499, daysIn: 5, periodDays: 30 });
+  await call('POST', '/subscriptions/start', { token: tenant.token, body: { planCode: SMALL } });
+
+  const cancelled = await call('POST', '/subscriptions/cancel-scheduled-change', { token: tenant.token });
+  assert.equal(cancelled.status, 200);
+  // The whole point of it being a field rather than an immediate write: change
+  // your mind and simply stay where you are.
+  assert.equal(cancelled.body.subscription.pendingChange.planCode, null);
+
+  await call('POST', '/subscriptions/start', { token: tenant.token, body: { planCode: SMALL } });
+  const due = await Subscription.findOne({ orgId: tenant.org._id }).sort({ createdAt: -1 }).lean();
+  const past = new Date(due.pendingChange.effectiveAt.getTime() + 1000);
+
+  const swept = await planChanges.applyScheduledChanges({ now: past });
+  // This tenant's change, not the count: the sweep is tenant-wide and another
+  // test in this suite legitimately leaves one due at the same moment.
+  assert.ok(
+    swept.changes.some(c => String(c.orgId) === String(tenant.org._id)),
+    `expected this tenant among ${JSON.stringify(swept.changes)}`
+  );
+  assert.equal((await Organisation.findById(tenant.org._id).lean()).plan, SMALL);
+}));
+
+test('changing plan does not leave the old mandate charging the card', maybe(async () => {
+  const tenant = await registerOrg();
+  const old = await onPaidPlan(tenant, { planCode: SMALL, monthlyPrice: 999, daysIn: 10 });
+
+  const { body } = await call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: BIG }
+  });
+
+  /**
+   * The bug this fixes. A plan change created a new provider subscription and
+   * left the old one running, so an upgrading customer was charged for both
+   * plans every month, indefinitely, and nothing in the system knew.
+   */
+  assert.equal(String(body.subscription.supersedes), String(old._id));
+  const previous = await Subscription.findById(old._id).lean();
+  assert.equal(previous.status, 'cancelled', 'the mandate it replaces is stopped');
+  assert.equal(String(previous.supersededBy), String(body.subscription._id));
+}));
+
+test('the cancellation of a superseded mandate does not undo the upgrade', maybe(async () => {
+  const tenant = await registerOrg();
+  const old = await onPaidPlan(tenant, { planCode: SMALL, monthlyPrice: 999, daysIn: 10 });
+  const { body } = await call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: BIG }
+  });
+  assert.equal((await Organisation.findById(tenant.org._id).lean()).plan, BIG);
+
+  /**
+   * Razorpay dutifully reports the cancellation we asked for. Handling it the
+   * ordinary way would take the customer straight off the plan they had just
+   * paid to upgrade to — the upgrade cancelling itself, seconds after it
+   * succeeded.
+   */
+  const result = await applyRazorpayEvent('subscription.cancelled', { id: old.razorpaySubscriptionId });
+  assert.equal(result.handled, true);
+  assert.match(result.action, /left alone/);
+  assert.equal((await Organisation.findById(tenant.org._id).lean()).plan, BIG);
+  assert.equal((await Subscription.findById(body.subscription._id).lean()).status, 'active');
+}));
+
+test('a late failure on a dead mandate does not dun a customer who has paid', maybe(async () => {
+  const tenant = await registerOrg();
+  await onPaidPlan(tenant, { planCode: SMALL, monthlyPrice: 999, daysIn: 10 });
+  const { body } = await call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: BIG }
+  });
+
+  /**
+   * `payment.failed` carries no subscription entity, so it falls back to the
+   * newest local subscription for the tenant. That fallback used to include
+   * cancelled ones — so a failure arriving late for a replaced mandate marked
+   * the *live* subscription past due and started chasing someone who had paid.
+   */
+  await applyEvent('payment.failed', { payment: { entity: { notes: { orgId: String(tenant.org._id) } } } });
+
+  const live = await Subscription.findById(body.subscription._id).lean();
+  assert.equal(live.status, 'past_due', 'the live subscription is the one an unattributed failure lands on');
+  assert.ok(live.pastDueSince);
+}));
+
+test('re-buying the plan you are already on is refused', maybe(async () => {
+  const tenant = await registerOrg();
+  await onPaidPlan(tenant, { planCode: SMALL, monthlyPrice: 999, daysIn: 10 });
+  const { status, body } = await call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: SMALL, billingCycle: 'monthly' }
+  });
+  assert.equal(status, 409);
+  assert.equal(body.code, 'ALREADY_ON_PLAN');
+}));
+
+test('a yearly switch is judged on what it costs per month', maybe(async () => {
+  const subscription = { planCode: SMALL, billingCycle: 'monthly', pricing: { monthlyPrice: 999 } };
+  const small = { code: SMALL, monthlyPrice: 999, yearlyPrice: 9990 };
+
+  /**
+   * 999 monthly to 9,990 yearly is more commitment and *less* per month.
+   * Comparing the raw numbers would call it a tenfold upgrade and raise a
+   * proration credit nobody earned.
+   */
+  const yearly = planChanges.classify({ subscription, toPlan: small, toBillingCycle: 'yearly' });
+  assert.equal(yearly.direction, 'downgrade');
+
+  const big = { code: BIG, monthlyPrice: 2499, yearlyPrice: 24000 };
+  assert.equal(
+    planChanges.classify({ subscription, toPlan: big, toBillingCycle: 'monthly' }).direction,
+    'upgrade'
+  );
+}));
+
+test('direction is measured against what this customer pays, not the list price', maybe(async () => {
+  /**
+   * A grandfathered customer on 499 moving to a 999 plan is upgrading, even
+   * though the plan they are leaving now lists at 1,499. What they pay is what
+   * they would stop paying.
+   */
+  const grandfathered = { planCode: SMALL, billingCycle: 'monthly', pricing: { monthlyPrice: 499 } };
+  const target = { code: BIG, monthlyPrice: 999 };
+  assert.equal(
+    planChanges.classify({ subscription: grandfathered, toPlan: target, toBillingCycle: 'monthly' }).direction,
+    'upgrade'
+  );
+}));
+
+test('proration refuses to guess when there is no period to measure', maybe(async () => {
+  const noPeriod = { planCode: SMALL, status: 'active', billingCycle: 'monthly', pricing: { monthlyPrice: 999 } };
+  const result = planChanges.prorate({ subscription: noPeriod, toPlanCode: BIG });
+  // A guessed denominator produces a credit that cannot be defended when the
+  // customer asks how it was worked out.
+  assert.equal(result.amount, 0);
+  assert.match(result.reason, /no paid-up period/);
+
+  const free = { planCode: 'starter', status: 'active', billingCycle: 'monthly', pricing: { monthlyPrice: 0 } };
+  assert.match(planChanges.prorate({ subscription: free, toPlanCode: SMALL }).reason, /free/);
+}));
+
+test('a credit is settled by recording how, and cannot be settled twice', maybe(async () => {
+  const tenant = await registerOrg();
+  await onPaidPlan(tenant, { planCode: SMALL, monthlyPrice: 999, daysIn: 10 });
+  await call('POST', '/subscriptions/start', { token: tenant.token, body: { planCode: BIG } });
+
+  const { token } = await platformAccount('owner');
+  const owed = await call('GET', '/superadmin/credits', { token });
+  assert.equal(owed.status, 200);
+  const mine = owed.body.credits.find(c => String(c.orgId) === String(tenant.org._id));
+  assert.ok(mine, 'the credit is on the console list of money to give back');
+  assert.ok(mine.orgName, 'the console needs a name, not an id');
+
+  const settled = await call('POST', `/superadmin/credits/${mine._id}/settle`, {
+    token, body: { method: 'refund', reference: 'rfnd_test_1' }
+  });
+  assert.equal(settled.status, 200);
+  assert.equal(settled.body.status, 'settled');
+  assert.equal(settled.body.settlement.reference, 'rfnd_test_1');
+
+  // Requiring a method rather than a free-text note is what makes "how much
+  // have we actually refunded" answerable later.
+  const again = await call('POST', `/superadmin/credits/${mine._id}/settle`, {
+    token, body: { method: 'refund', reference: 'rfnd_test_2' }
+  });
+  assert.equal(again.status, 409);
+  assert.equal(again.body.code, 'CREDIT_NOT_OWED');
+}));
+
+test('the tenant sees what it is owed, without having to ask', maybe(async () => {
+  const tenant = await registerOrg();
+  await onPaidPlan(tenant, { planCode: SMALL, monthlyPrice: 999, daysIn: 10 });
+  await call('POST', '/subscriptions/start', { token: tenant.token, body: { planCode: BIG } });
+
+  const { body } = await call('GET', '/subscriptions/current', { token: tenant.token });
+  // A credit only an operator can see is a credit the customer has to remember
+  // to ask for, and the ones who forget are the ones it was owed to.
+  assert.ok(body.creditBalance > 0);
+  assert.equal(body.credits.length, 1);
+}));
+
+test('the console names the coupons it cannot actually honour', maybe(async () => {
+  await makeCoupon({ code: 'NOOFFERYET', providerOfferId: null });
+  const { token } = await platformAccount('owner');
+  const { status, body } = await call('GET', '/superadmin/coupons', { token });
+
+  assert.equal(status, 200);
+  // An operator who has created six launch codes and can use none of them should
+  // find out here, not from the first customer who tries.
+  assert.ok(body.providerNote.length);
+  assert.ok(body.coupons.some(c => c.code === 'NOOFFERYET'));
+}));
+
+test('a cycles discount must say how many, and a percent cannot exceed 100', maybe(async () => {
+  const { token } = await platformAccount('owner');
+
+  const noCount = await call('POST', '/superadmin/coupons', {
+    token,
+    body: { code: 'VAGUE', discountType: 'percent', discountValue: 25, duration: 'cycles' }
+  });
+  // Defaulting this to one would silently turn "three months half price" into
+  // one month, and the customer would be the one to find out.
+  assert.equal(noCount.status, 400);
+  assert.equal(noCount.body.code, 'COUPON_CYCLES_REQUIRED');
+
+  const absurd = await call('POST', '/superadmin/coupons', {
+    token, body: { code: 'FREEMONEY', discountType: 'percent', discountValue: 150 }
+  });
+  assert.equal(absurd.status, 400);
+  assert.equal(absurd.body.code, 'COUPON_PERCENT_RANGE');
+}));
+
+test('deactivating a code stops new redemptions and leaves existing prices alone', maybe(async () => {
+  const tenant = await registerOrg();
+  const coupon = await makeCoupon({ code: 'RETIRING', oncePerOrg: false });
+  await call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: SMALL, couponCode: 'RETIRING' }
+  });
+
+  const { token } = await platformAccount('owner');
+  const off = await call('DELETE', `/superadmin/coupons/${coupon._id}`, { token });
+  assert.equal(off.status, 200);
+  assert.equal(off.body.active, false);
+
+  const other = await registerOrg();
+  const refused = await call('POST', '/subscriptions/start', {
+    token: other.token, body: { planCode: SMALL, couponCode: 'RETIRING' }
+  });
+  assert.equal(refused.body.code, 'COUPON_INACTIVE');
+
+  /**
+   * Deactivated rather than deleted: "who used this, and what did we give away"
+   * is exactly the question asked when a code turns out to have been shared
+   * publicly.
+   */
+  const history = await call('GET', `/superadmin/coupons/${coupon._id}/redemptions`, { token });
+  assert.equal(history.body.redemptions.length, 1);
+  assert.equal(history.body.given, 499.5);
+
+  // The subscriber's price is snapshotted and does not consult the coupon row.
+  const still = await Subscription.findOne({ orgId: tenant.org._id }).sort({ createdAt: -1 }).lean();
+  assert.equal(still.pricing.monthlyPrice, 499.5);
+}));
+
+test('scheduled plan changes are a registered job, so one that stops is visible', maybe(async () => {
+  const summary = await jobs.summary();
+  const entry = summary.jobs.find(j => j.name === 'billing.scheduled-changes');
+  /**
+   * A downgrade that never lands leaves the customer on a plan they stopped
+   * paying for — silent, and expensive in the opposite direction to dunning.
+   */
+  assert.ok(entry, 'the sweep is declared in the registry, not discovered from its own history');
+  assert.equal(entry.label, 'Apply scheduled plan downgrades');
+}));

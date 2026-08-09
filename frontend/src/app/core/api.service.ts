@@ -19,7 +19,8 @@ import {
   ArAgeing, CollectionMetrics, CustomerStatement, LowStockReport, SalesBreakdown,
   StockValuationReport, ExpiringStockReport, StockLayerRow,
   Expense, ProfitLossReport, MasterOption, PlanVersion,
-  StockMovement, TenantActivityEntry
+  StockMovement, TenantActivityEntry,
+  BillingCredit, CouponQuote, PlanChangePreview, AdminCoupon, AdminCredit
 } from './models';
 
 /**
@@ -727,7 +728,46 @@ export class ApiService {
   subscription() {
     return this.cache.through(
       NS.subscription,
-      () => this.http.get<{ subscription: Subscription | null; usage: PlanUsage }>(`${this.api}/subscriptions/current`)
+      () => this.http.get<{
+        subscription: Subscription | null;
+        usage: PlanUsage;
+        /** Money owed back after a mid-cycle upgrade (3.3 #10). Shown to the
+         *  customer as well as to us: a credit only an operator can see is one
+         *  the customer has to remember to ask for. */
+        credits: BillingCredit[];
+        creditBalance: number;
+      }>(`${this.api}/subscriptions/current`)
+    );
+  }
+
+  /**
+   * Whether a discount code is usable, and what it would be worth.
+   *
+   * POST rather than GET despite being a read: the code stays out of access logs
+   * and browser history.
+   */
+  checkCoupon(payload: { code: string; planCode: string; billingCycle: string }) {
+    return this.http.post<CouponQuote>(`${this.api}/subscriptions/coupon/check`, payload);
+  }
+
+  /**
+   * What changing plan would do, before it is done.
+   *
+   * An upgrade lands now and earns a credit for the days already paid for; a
+   * downgrade lands at the end of the period and moves no money. Those are
+   * different enough decisions that the button should not say the same thing for
+   * both.
+   */
+  previewPlanChange(planCode: string, billingCycle: string) {
+    return this.http.get<PlanChangePreview>(
+      `${this.api}/subscriptions/preview-change?planCode=${encodeURIComponent(planCode)}&billingCycle=${billingCycle}`
+    );
+  }
+
+  cancelScheduledPlanChange() {
+    return this.afterWrite(
+      this.http.post<{ subscription: Subscription; message: string }>(`${this.api}/subscriptions/cancel-scheduled-change`, {}),
+      NS.subscription, NS.organisation
     );
   }
   /**
@@ -735,17 +775,54 @@ export class ApiService {
    * `pendingPayment` is true until a verified provider webhook confirms the
    * money arrived, and the tenant stays on their current plan until then.
    */
-  startSubscription(payload: { planCode: string; billingCycle: string }) {
+  startSubscription(payload: { planCode: string; billingCycle: string; couponCode?: string }) {
     return this.afterWrite(
       this.http.post<{
         subscription: Subscription;
         pendingPayment: boolean;
         checkout: { keyId: string; subscriptionId: string } | null;
         message: string;
+        /** 'downgrade' returns 200 with `scheduled: true` and no checkout — there
+         *  is nothing to collect until the new term starts. */
+        direction?: 'new' | 'upgrade' | 'downgrade' | 'lateral';
+        scheduled?: boolean;
+        effectiveAt?: string;
+        credit?: BillingCredit | null;
       }>(`${this.api}/subscriptions/start`, payload),
       NS.subscription, NS.organisation
     );
   }
+  // ── Discount codes and credits, console side (3.3 #10) ──
+  adminCoupons() {
+    return this.cache.through(
+      `${NS.superadmin}:coupons`,
+      () => this.http.get<{ coupons: AdminCoupon[]; providerNote: string }>(`${this.api}/superadmin/coupons`)
+    );
+  }
+  saveCoupon(payload: AdminCoupon) {
+    return this.afterWrite(this.http.post<AdminCoupon>(`${this.api}/superadmin/coupons`, payload), NS.superadmin);
+  }
+  /** Retires rather than deletes: the redemption history is what answers "who
+   *  used this, and what did we give away". */
+  retireCoupon(id: string) {
+    return this.afterWrite(this.http.delete<AdminCoupon>(`${this.api}/superadmin/coupons/${id}`), NS.superadmin);
+  }
+  couponRedemptions(id: string) {
+    return this.http.get<{
+      given: number;
+      redemptions: Array<{ _id: string; orgName: string; appliedAt: string; originalPrice: number; finalPrice: number }>;
+    }>(`${this.api}/superadmin/coupons/${id}/redemptions`);
+  }
+  adminCredits(status: 'owed' | 'settled' | 'void' = 'owed') {
+    return this.cache.through(
+      `${NS.superadmin}:credits:${status}`,
+      () => this.http.get<{ total: number; credits: AdminCredit[] }>(`${this.api}/superadmin/credits?status=${status}`)
+    );
+  }
+  settleCredit(id: string, payload: { method: string; reference?: string; note?: string }) {
+    return this.afterWrite(this.http.post(`${this.api}/superadmin/credits/${id}/settle`, payload), NS.superadmin);
+  }
+
   cancelSubscription() {
     return this.afterWrite(this.http.post<Subscription>(`${this.api}/subscriptions/cancel`, {}), NS.subscription);
   }

@@ -1172,6 +1172,92 @@ export interface Subscription {
   startDate?: string;
   endDate?: string;
   createdAt?: string;
+  currentPeriodStart?: string | null;
+  currentPeriodEnd?: string | null;
+  /** The coupon behind the price, snapshotted (3.3 #10). `pricing` already holds
+   *  the discounted figure; this is what makes "was ₹999" sayable. */
+  discount?: {
+    couponCode?: string | null;
+    discountType?: 'percent' | 'amount' | null;
+    discountValue?: number | null;
+    listPrice?: number | null;
+    duration?: 'once' | 'cycles' | 'forever' | null;
+    cyclesRemaining?: number | null;
+  } | null;
+  /** A downgrade already agreed, landing at the end of the paid-up period. */
+  pendingChange?: {
+    planCode?: string | null;
+    billingCycle?: 'monthly' | 'yearly' | null;
+    effectiveAt?: string | null;
+  } | null;
+}
+
+/** Money owed back to the tenant — see the backend's `BillingCredit` model. */
+export interface BillingCredit {
+  _id: string;
+  amount: number;
+  reason: 'upgrade-proration' | 'manual';
+  note?: string;
+  status: 'owed' | 'settled' | 'void';
+  createdAt?: string;
+}
+
+/** What a coupon would be worth, before committing to it. */
+export interface CouponQuote {
+  code: string;
+  description?: string;
+  duration?: 'once' | 'cycles' | 'forever';
+  durationCycles?: number | null;
+  listPrice: number;
+  discountAmount: number;
+  finalPrice: number;
+}
+
+/** A discount code as the console edits it. */
+export interface AdminCoupon {
+  _id?: string;
+  code: string;
+  description?: string;
+  discountType: 'percent' | 'amount';
+  discountValue: number;
+  duration?: 'once' | 'cycles' | 'forever';
+  durationCycles?: number | null;
+  appliesToPlans?: string[];
+  appliesToCycles?: string[];
+  maxRedemptions?: number | null;
+  redemptionCount?: number;
+  oncePerOrg?: boolean;
+  /** Without this the code cannot discount a card payment, so it is refused at
+   *  checkout rather than applied — see the backend's `Coupon` model. */
+  providerOfferId?: string | null;
+  usableAtCheckout?: boolean;
+  active?: boolean;
+}
+
+/** A credit as the console lists it, with the tenant's name resolved. */
+export interface AdminCredit {
+  _id: string;
+  orgId: string;
+  orgName: string;
+  amount: number;
+  reason: string;
+  note?: string;
+  status: 'owed' | 'settled' | 'void';
+  createdAt?: string;
+}
+
+/** What a plan change would do, before it is done. */
+export interface PlanChangePreview {
+  direction: 'new' | 'none' | 'lateral' | 'upgrade' | 'downgrade';
+  /** Whether it lands later rather than now. Reported by the server, never
+   *  inferred from `direction`: a downgrade with no paid-up period to protect
+   *  applies immediately, and a button reading "Schedule Change" over that is
+   *  the page lying about what the click does. */
+  scheduled?: boolean;
+  listPrice?: number;
+  effectiveAt?: string;
+  credit?: { amount: number; daysUnused?: number; reason?: string };
+  message: string;
 }
 
 export interface PlanUsage {

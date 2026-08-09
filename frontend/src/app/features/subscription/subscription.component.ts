@@ -6,7 +6,7 @@ import { IconComponent } from '../../shared/icons';
 import { ModalComponent, PillComponent, EmptyStateComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
-import { Plan, PlanUsage, Subscription } from '../../core/models';
+import { BillingCredit, CouponQuote, Plan, PlanChangePreview, PlanUsage, Subscription } from '../../core/models';
 import { fmtDate, fmtINR } from '../../core/format';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -47,6 +47,10 @@ const PRICE_COLORS: Record<string, string> = {
                   Billing cycle: {{ cycleTitle(subCycle()) }}
                   @if (bannerPrice() !== null) {
                     <span> · {{ fmtINR(bannerPrice(), true) }}/{{ subCycle() === 'yearly' ? 'yr' : 'mo' }}</span>
+                  }
+                  @if (bannerListPrice() !== null) {
+                    <!-- Otherwise a discounted figure just looks like a mistake. -->
+                    <span> · was {{ fmtINR(bannerListPrice(), true) }}, {{ sub()?.discount?.couponCode }} applied</span>
                   }
                 </div>
               </div>
@@ -98,6 +102,42 @@ const PRICE_COLORS: Record<string, string> = {
               </div>
             }
           </div>
+
+          @if (pendingChange(); as pc) {
+            <!--
+              A downgrade already agreed but not yet landed. Said plainly, with the
+              date, because the plan card above still shows the old plan — which is
+              correct, and without this reads as the downgrade having failed.
+            -->
+            <div class="info-box" style="display:flex;gap:10px;align-items:flex-start;margin-bottom:20px">
+              <app-icon name="clock" [size]="15" style="flex-shrink:0;margin-top:1px" />
+              <div style="flex:1">
+                <div><strong>{{ planName(pc.planCode) }}</strong> starts on {{ fmtDate(pc.effectiveAt) }}.</div>
+                <div style="color:var(--muted);margin-top:2px">
+                  You keep {{ planName(sub()?.planCode) }} until then — you have already paid for it.
+                </div>
+              </div>
+              <button class="btn ghost sm" type="button" [disabled]="saving()" (click)="keepCurrentPlan()">Keep my plan</button>
+            </div>
+          }
+
+          @if (creditBalance() > 0) {
+            <!--
+              Shown to the customer, not only on the console. A credit only an
+              operator can see is one the customer has to remember to ask for, and
+              the ones who forget are the ones it was owed to.
+            -->
+            <div class="info-box success" style="display:flex;gap:10px;align-items:flex-start;margin-bottom:20px">
+              <app-icon name="check" [size]="15" style="flex-shrink:0;margin-top:1px" />
+              <div>
+                <div><strong>{{ fmtINR(creditBalance(), true) }} credit on your account.</strong></div>
+                <div style="color:var(--muted);margin-top:2px">
+                  For the days you had already paid for when you upgraded. We will apply it to your
+                  next renewal or refund it — get in touch if you would prefer the refund now.
+                </div>
+              </div>
+            </div>
+          }
 
           <!-- Billing toggle -->
           <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:20px">
@@ -197,15 +237,59 @@ const PRICE_COLORS: Record<string, string> = {
       }
 
       <!-- Upgrade modal -->
-      <app-modal [open]="upgradeOpen()" [width]="420" [title]="'Switch to ' + (selPlan()?.name || '')" (close)="upgradeOpen.set(false)">
+      <app-modal [open]="upgradeOpen()" [width]="440" [title]="'Switch to ' + (selPlan()?.name || '')" (close)="closeUpgrade()">
         @if (selPlan(); as p) {
           <div style="background:var(--brand-pale);border-radius:12px;padding:18px;text-align:center;margin-bottom:16px">
-            <span style="font-family:var(--font-display);font-size:30px;font-weight:800" [style.color]="priceColor(p.code)">{{ fmtINR(priceFor(p), true) }}</span>
+            @if (quote(); as q) {
+              <!-- The list price stays visible beside the discounted one, so the
+                   customer can see what the code did rather than trusting it. -->
+              <div style="font-size:13px;color:var(--muted);text-decoration:line-through">{{ fmtINR(q.listPrice, true) }}</div>
+              <span style="font-family:var(--font-display);font-size:30px;font-weight:800" [style.color]="priceColor(p.code)">{{ fmtINR(q.finalPrice, true) }}</span>
+            } @else {
+              <span style="font-family:var(--font-display);font-size:30px;font-weight:800" [style.color]="priceColor(p.code)">{{ fmtINR(priceFor(p), true) }}</span>
+            }
             <span style="font-size:13px;color:var(--muted)">/{{ cycle() === 'yearly' ? 'year' : 'month' }}</span>
-            @if (cycle() === 'yearly' && savings(p) > 0) {
+            @if (quote(); as q) {
+              <div style="font-size:12px;color:var(--green);font-weight:600;margin-top:6px">
+                {{ q.code }} applied — {{ fmtINR(q.discountAmount, true) }} off{{ durationNote(q) }}
+              </div>
+            } @else if (cycle() === 'yearly' && savings(p) > 0) {
               <div style="font-size:12px;color:var(--green);font-weight:600;margin-top:6px">You save {{ fmtINR(savings(p), true) }} vs monthly</div>
             }
           </div>
+
+          @if (preview(); as pv) {
+            <!--
+              What this change actually does. An upgrade lands now and earns a
+              credit for days already paid for; a downgrade lands at the end of the
+              period and moves no money. Those are different enough decisions that
+              one unlabelled button for both is how customers get surprised.
+            -->
+            <div class="info-box" style="margin-bottom:14px;font-size:12.5px;line-height:1.6">{{ pv.message }}</div>
+          }
+
+          <!-- Discount code -->
+          <label class="field" style="margin-bottom:14px">
+            <span>Discount code</span>
+            <div style="display:flex;gap:8px">
+              <input type="text" [value]="couponCode()" (input)="onCouponInput($event)"
+                placeholder="e.g. LAUNCH50" autocapitalize="characters" [disabled]="!!quote()" />
+              @if (quote()) {
+                <button class="btn ghost" type="button" (click)="clearCoupon()">Remove</button>
+              } @else {
+                <button class="btn secondary" type="button" [disabled]="!couponCode() || checkingCoupon()" (click)="applyCoupon()">
+                  @if (checkingCoupon()) { <span class="spinner"></span> }
+                  Apply
+                </button>
+              }
+            </div>
+            @if (couponError()) {
+              <!-- The server's own words: an expired code, a code for another plan
+                   and a code already used are three different conversations. -->
+              <span class="err">{{ couponError() }}</span>
+            }
+          </label>
+
           <div style="display:grid;gap:7px">
             @for (f of p.features; track f) {
               <div style="display:flex;gap:8px;align-items:flex-start">
@@ -215,10 +299,10 @@ const PRICE_COLORS: Record<string, string> = {
             }
           </div>
           <div class="modal-foot">
-            <button class="btn ghost" type="button" (click)="upgradeOpen.set(false)">Cancel</button>
+            <button class="btn ghost" type="button" (click)="closeUpgrade()">Cancel</button>
             <button class="btn primary" type="button" [disabled]="saving()" (click)="confirmUpgrade()">
               @if (saving()) { <span class="spinner"></span> }
-              Confirm Upgrade
+              {{ confirmLabel() }}
             </button>
           </div>
         }
@@ -253,15 +337,48 @@ export class SubscriptionComponent implements OnInit {
   cancelOpen = signal(false);
   selPlan = signal<Plan | null>(null);
 
+  // ── Coupons, credits and plan-change preview (3.3 #10) ──
+  credits = signal<BillingCredit[]>([]);
+  creditBalance = signal(0);
+  couponCode = signal('');
+  quote = signal<CouponQuote | null>(null);
+  couponError = signal('');
+  checkingCoupon = signal(false);
+  preview = signal<PlanChangePreview | null>(null);
+
   fmtINR = fmtINR;
   fmtDate = fmtDate;
 
   currentPlan = computed(() => this.plans().find(p => p.code === this.usage()?.plan) || null);
   subCycle = computed<'monthly' | 'yearly'>(() => this.sub()?.billingCycle || 'monthly');
+  /**
+   * What this customer actually pays, headline figure.
+   *
+   * The snapshot first, the published plan only as a fallback for subscriptions
+   * that predate versioning. Reading the live plan unconditionally was already
+   * slightly wrong for a grandfathered customer — which is why the banner has a
+   * note explaining the mismatch — and a discount makes it plainly wrong: the
+   * page would say ₹2,499/mo to somebody paying ₹1,250. Caught by looking at the
+   * rendered page, not by a test.
+   *
+   * Nullish rather than `||`, because a free plan's price is 0 and `||` would
+   * fall through to the published price for every one of them.
+   */
   bannerPrice = computed<number | null>(() => {
+    const s = this.sub();
+    const snapshot = this.subCycle() === 'yearly' ? s?.pricing?.yearlyPrice : s?.pricing?.monthlyPrice;
+    if (snapshot !== null && snapshot !== undefined) return snapshot;
     const p = this.currentPlan();
     if (!p) return null;
     return this.subCycle() === 'yearly' ? p.yearlyPrice : p.monthlyPrice;
+  });
+
+  /** The undiscounted price, so the banner can say "was ₹2,499" rather than
+   *  leaving a discounted figure looking like a mistake. */
+  bannerListPrice = computed<number | null>(() => {
+    const d = this.sub()?.discount;
+    if (!d?.couponCode || d.listPrice == null) return null;
+    return d.listPrice === this.bannerPrice() ? null : d.listPrice;
   });
 
   constructor(private api: ApiService, private toast: ToastService) {}
@@ -277,6 +394,8 @@ export class SubscriptionComponent implements OnInit {
         this.plans.set(res.plans);
         this.sub.set(res.current.subscription);
         this.usage.set(res.current.usage);
+        this.credits.set(res.current.credits || []);
+        this.creditBalance.set(res.current.creditBalance || 0);
         if (res.current.subscription?.billingCycle === 'yearly') this.cycle.set('yearly');
         this.loading.set(false);
       },
@@ -342,28 +461,134 @@ export class SubscriptionComponent implements OnInit {
     this.toast.info('Our sales team will reach out to you shortly.');
   }
 
-  // ── Upgrade ────────────────────────────────────
+  // ── Plan changes, coupons and credits (3.3 #10) ─
+  pendingChange() {
+    const pc = this.sub()?.pendingChange;
+    return pc?.planCode ? pc : null;
+  }
+
+  planName(code?: string | null): string {
+    if (!code) return '';
+    return this.plans().find(p => p.code === code)?.name || code;
+  }
+
+  /**
+   * The button says what the click does.
+   *
+   * Keyed off `scheduled`, which the server reports, rather than off the
+   * direction. A downgrade is usually scheduled — but not when there is no
+   * paid-up period to protect, and then it applies on the spot.
+   */
+  confirmLabel(): string {
+    return this.preview()?.scheduled ? 'Schedule Change' : 'Confirm Upgrade';
+  }
+
+  durationNote(q: CouponQuote): string {
+    if (q.duration === 'forever') return ', for as long as you subscribe';
+    if (q.duration === 'cycles' && q.durationCycles) return `, for your first ${q.durationCycles} payments`;
+    return ' on your first payment';
+  }
+
   openUpgrade(plan: Plan) {
     this.selPlan.set(plan);
+    this.clearCoupon();
+    this.preview.set(null);
     this.upgradeOpen.set(true);
+
+    /**
+     * What this change would do, fetched before they commit rather than
+     * described after. An upgrade lands now and earns a credit for the days
+     * already paid for; a downgrade lands at the end of the period and moves no
+     * money.
+     *
+     * A failure here is deliberately silent: the preview is an explanation, and
+     * a toast about not being able to explain something is noise on top of a
+     * change the customer can still make.
+     */
+    this.api.previewPlanChange(plan.code, this.cycle()).subscribe({
+      next: pv => { if (this.selPlan()?.code === plan.code) this.preview.set(pv); },
+      error: () => {}
+    });
+  }
+
+  closeUpgrade() {
+    this.upgradeOpen.set(false);
+    this.clearCoupon();
+  }
+
+  onCouponInput(event: Event) {
+    this.couponCode.set((event.target as HTMLInputElement).value.toUpperCase());
+    this.couponError.set('');
+  }
+
+  clearCoupon() {
+    this.couponCode.set('');
+    this.quote.set(null);
+    this.couponError.set('');
+  }
+
+  applyCoupon() {
+    const plan = this.selPlan();
+    const code = this.couponCode().trim();
+    if (!plan || !code || this.checkingCoupon()) return;
+    this.checkingCoupon.set(true);
+    this.couponError.set('');
+
+    this.api.checkCoupon({ code, planCode: plan.code, billingCycle: this.cycle() }).subscribe({
+      next: quote => { this.checkingCoupon.set(false); this.quote.set(quote); },
+      error: err => {
+        this.checkingCoupon.set(false);
+        /**
+         * The server's own message, shown inline rather than as a toast.
+         *
+         * It names the actual reason — expired, wrong plan, already used, or no
+         * matching offer at the payment provider — and each of those is a
+         * different thing for the customer to do next. It belongs beside the
+         * field they typed in.
+         */
+        this.couponError.set(err?.error?.message || 'That code could not be applied.');
+      }
+    });
   }
 
   confirmUpgrade() {
     const plan = this.selPlan();
     if (!plan || this.saving()) return;
     this.saving.set(true);
-    this.api.startSubscription({ planCode: plan.code, billingCycle: this.cycle() }).subscribe({
+    this.api.startSubscription({
+      planCode: plan.code,
+      billingCycle: this.cycle(),
+      ...(this.quote() ? { couponCode: this.quote()!.code } : {})
+    }).subscribe({
       next: result => {
         this.saving.set(false);
-        this.upgradeOpen.set(false);
+        this.closeUpgrade();
         // The plan is only granted once payment is confirmed by the provider
         // webhook, so don't claim success for a checkout that is still pending —
         // the tenant would see "Plan updated" while remaining on their old plan.
-        if (result?.pendingPayment) {
+        // A scheduled downgrade is neither: nothing is charged and nothing has
+        // changed yet, so it is reported as the arrangement it is.
+        if (result?.scheduled) {
+          this.toast.info(result.message || `${plan.name} starts at the end of your current period.`);
+        } else if (result?.pendingPayment) {
           this.toast.info(result.message || `Complete the payment to activate ${plan.name}. Your current plan stays active until then.`);
         } else {
           this.toast.success(result?.message || `Plan updated to ${plan.name}`);
         }
+        this.load();
+      },
+      error: err => { this.saving.set(false); this.toast.httpError(err); }
+    });
+  }
+
+  /** Calls off a scheduled downgrade — the reason it is a plan rather than a write. */
+  keepCurrentPlan() {
+    if (this.saving()) return;
+    this.saving.set(true);
+    this.api.cancelScheduledPlanChange().subscribe({
+      next: result => {
+        this.saving.set(false);
+        this.toast.success(result?.message || 'Your plan will stay as it is.');
         this.load();
       },
       error: err => { this.saving.set(false); this.toast.httpError(err); }

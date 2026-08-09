@@ -78,6 +78,7 @@ export const routes: Routes = [
       { path: 'templates', loadComponent: () => import('./features/super-admin/templates.component').then(m => m.SuperTemplatesComponent) },
       { path: 'reminders', loadComponent: () => import('./features/super-admin/reminders.component').then(m => m.SuperRemindersComponent) },
       { path: 'plans', loadComponent: () => import('./features/super-admin/plans.component').then(m => m.SuperPlansComponent) },
+      { path: 'coupons', loadComponent: () => import('./features/super-admin/coupons.component').then(m => m.SuperCouponsComponent) },
       { path: 'branding', loadComponent: () => import('./features/super-admin/branding.component').then(m => m.SuperBrandingComponent) },
       { path: 'profile', loadComponent: () => import('./features/super-admin/profile.component').then(m => m.SuperProfileComponent) }
     ]

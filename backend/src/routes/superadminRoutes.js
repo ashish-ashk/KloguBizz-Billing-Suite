@@ -17,6 +17,7 @@ const {
   exportAuditLogsCsv
 } = require('../controllers/superadminController');
 const platform = require('../controllers/platformController');
+const coupons = require('../controllers/couponController');
 const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { CAPABILITY, requireCapability } = require('../middleware/platformRoleMiddleware');
@@ -31,7 +32,8 @@ const { validate, validatedElsewhere } = require('../middleware/validate');
 const {
   tenantLimitsSchema, tenantFlagsSchema, tenantNoticeSchema, tenantSupportSchema,
   tenantUserUpdateSchema, platformRoleSchema, broadcastSchema, planUpsertSchema,
-  mastersSaveSchema, reminderUpdateSchema, organisationAdminUpdateSchema
+  mastersSaveSchema, reminderUpdateSchema, organisationAdminUpdateSchema,
+  couponUpsertSchema, creditCreateSchema, creditSettleSchema
 } = require('../validators/schemas');
 const { requireApproval, requireCapabilityOrGrant } = require('../middleware/approvalMiddleware');
 const { assertDeletionConfirmed } = require('../controllers/superadminController');
@@ -154,6 +156,22 @@ router.put('/plans/:code', requireCapability(CAPABILITY.billingWrite), validate(
 /** Every price this plan has ever carried. Readable with plain platform read
  *  access: "what did we charge in March" is a support question, not a pricing one. */
 router.get('/plans/:code/history', requireCapability(CAPABILITY.platformRead), planHistory);
+
+// ── Discount codes and billing credits (3.3 #10) ─
+/**
+ * Both give money away, so both need `billingWrite` to change and only
+ * `platformRead` to look at. Support answers "why was this customer charged
+ * ₹499" far more often than anyone creates a coupon.
+ */
+router.get('/coupons', requireCapability(CAPABILITY.platformRead), coupons.listCoupons);
+router.post('/coupons', requireCapability(CAPABILITY.billingWrite), validate(couponUpsertSchema), coupons.upsertCoupon);
+router.put('/coupons/:code', requireCapability(CAPABILITY.billingWrite), validate(couponUpsertSchema), coupons.upsertCoupon);
+router.delete('/coupons/:id', requireCapability(CAPABILITY.billingWrite), coupons.deactivateCoupon);
+router.get('/coupons/:id/redemptions', requireCapability(CAPABILITY.platformRead), coupons.couponRedemptions);
+
+router.get('/credits', requireCapability(CAPABILITY.platformRead), coupons.listCredits);
+router.post('/tenants/:id/credits', requireCapability(CAPABILITY.billingWrite), validate(creditCreateSchema), coupons.createCredit);
+router.post('/credits/:id/settle', requireCapability(CAPABILITY.billingWrite), validate(creditSettleSchema), coupons.settleCredit);
 
 // ── Platform configuration ───────────────────────
 router.get('/masters', requireCapability(CAPABILITY.platformRead), listMasters);

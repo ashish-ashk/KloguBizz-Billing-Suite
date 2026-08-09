@@ -177,6 +177,27 @@ enforces and reports* — not what the card is charged. Create matching Razorpay
 plans, and keep the prices in step by hand until
 `PlanVersion.versionedProviderPlanId` is wired up.
 
+**The same gap decides whether coupons work, and there it fails closed.** A
+discount applied only in our own records would show the customer ₹499 while the
+card is charged ₹999 — every month, silently — and our tax invoice would then
+disagree with their statement by exactly the discount. So a coupon requires a
+`providerOfferId`, and **without one it is refused at checkout** rather than
+applied. Before running any launch offer:
+
+1. Create the offer in the Razorpay dashboard.
+2. Record its id against the coupon at **Discounts & Credits** in the console.
+3. Confirm the list says **Usable** rather than **Needs offer id**.
+
+`/superadmin/coupons` names every coupon still in that state, and says so at the
+top of the page rather than leaving it to be inferred from a field.
+
+**Proration credits are recorded, not refunded automatically**, for the same
+reason: nothing here can reduce what the gateway collects. A mid-cycle upgrade
+raises a credit for the days already paid for; it appears on the console **and**
+on the customer's own subscription page, and a person has to do the refund and
+record how. Watch that list from the first week — an unsettled credit is money a
+customer is owed and has already been told about.
+
 ### SendGrid
 
 Without `SENDGRID_API_KEY` every send is recorded as `skipped` and nothing leaves.
@@ -234,7 +255,7 @@ Every background sweep is registered and reported on the console's **System
 health** panel (3.5 #11). The states to act on:
 
 - **`never`** — the scheduler did not start. Reminders, recurring invoices,
-  overdue marking and dunning are all not happening.
+  overdue marking, dunning and scheduled plan downgrades are all not happening.
 - **`late`** — the work is not getting done, whether from repeated failure or a
   dead timer. From outside those are the same problem.
 
@@ -262,7 +283,7 @@ Not defects. Deliberate gaps, with the reasoning recorded in the improvement pla
 | Gap | Blocks launch if… |
 |---|---|
 | **Warehouses** (2.5 #43) | A customer holds stock in more than one location |
-| **Coupons, proration, refunds** (3.3 #10) | You plan to run launch discounts or mid-cycle upgrades |
+| ~~Coupons, proration~~ | **Built.** But a coupon needs a matching **Razorpay offer id** before it can discount a card payment — without one it is refused at checkout rather than applied. See §3 |
 | ~~The platform's own GST invoices~~ | **Built.** But it issues nothing until the `platformBilling` setting has a legal name, GSTIN, address and state code — see §1 |
 | **Multi-GSTIN / branches** (2.1 #9) | A customer operates in more than one state under one business |
 | ~~Composition scheme, QRMP~~ | **Built.** A composition dealer's invoices carry no tax and the rule 49 declaration; CMP-08 and quarterly GSTR-1/3B are available |
@@ -275,7 +296,7 @@ Not defects. Deliberate gaps, with the reasoning recorded in the improvement pla
 ## 7. The pre-launch command
 
 ```
-cd backend  && npm run check   # lint + 410 tests
+cd backend  && npm run check   # lint + 454 tests
 cd frontend && npm run check   # lint + 18 unit tests + production build
 cd frontend && npm run test:e2e   # against a running stack
 ```
@@ -289,7 +310,7 @@ Before a release, confirm the count rather than the exit code:
 
 ```
 cd backend && npm test 2>&1 | grep -E "^# (pass|skipped)"
-# expect ~410 passing and 0 skipped
+# expect ~454 passing and 0 skipped
 ```
 
 A run reporting hundreds of skips is a run that proved nothing.

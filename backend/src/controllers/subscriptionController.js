@@ -5,10 +5,14 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { PlatformInvoice } = require('../models/PlatformInvoice');
 const { snapshotFor } = require('../services/planVersionService');
+const { CouponRedemption } = require('../models/CouponRedemption');
 const { env } = require('../config/env');
 const { createSubscription, cancelSubscription: cancelAtProvider } = require('../services/razorpayService');
 const { getUsage } = require('../services/planService');
 const { logAudit } = require('../services/auditService');
+const coupons = require('../services/couponService');
+const planChanges = require('../services/planChangeService');
+const { BillingCredit } = require('../models/BillingCredit');
 
 const listPlans = asyncHandler(async (req, res) => {
   res.json(await Plan.find({ active: true }).sort({ sortOrder: 1 }));
@@ -33,7 +37,78 @@ const myPlatformInvoices = asyncHandler(async (req, res) => {
 const currentSubscription = asyncHandler(async (req, res) => {
   const subscription = await Subscription.findOne({ orgId: req.orgId }).sort({ createdAt: -1 });
   const usage = await getUsage(req.orgId);
-  res.json({ subscription, usage });
+  /**
+   * Credits owed to this tenant (3.3 #10).
+   *
+   * Shown to the customer as well as to us. A credit that only an operator can
+   * see is a credit the customer has to remember to ask for, and the ones who
+   * forget are the ones it was owed to.
+   */
+  const credits = await BillingCredit.find({ orgId: req.orgId, status: 'owed' })
+    .sort({ createdAt: -1 }).lean();
+  const creditBalance = coupons.round2(credits.reduce((sum, c) => sum + (c.amount || 0), 0));
+  res.json({ subscription, usage, credits, creditBalance });
+});
+
+/** Whether a code is usable, and what it would be worth — before committing. */
+const checkCoupon = asyncHandler(async (req, res) => {
+  const { code, planCode, billingCycle = 'monthly' } = req.body;
+  const plan = await Plan.findOne({ code: planCode, active: true }).lean();
+  if (!plan) throw httpError(400, 'Unknown plan');
+
+  const price = planChanges.priceOf(plan, billingCycle);
+  const result = await coupons.evaluate({
+    code, planCode, billingCycle, price, orgId: req.orgId
+  });
+
+  /**
+   * The provider gate is checked here too, not only at checkout.
+   *
+   * Otherwise a customer is told "LAUNCH50 applied, ₹499" on the pricing page
+   * and refused at the moment they press pay, which is the worst possible place
+   * to discover it.
+   */
+  coupons.assertProviderCanHonour(result.coupon, {
+    providerWillCharge: price > 0 && env.billingConfigured
+  });
+
+  res.json({
+    code: result.coupon.code,
+    description: result.coupon.description,
+    duration: result.coupon.duration,
+    durationCycles: result.coupon.durationCycles,
+    listPrice: result.listPrice,
+    discountAmount: result.discountAmount,
+    finalPrice: result.finalPrice
+  });
+});
+
+/**
+ * What changing plan would do, before it is done.
+ *
+ * "You will be charged ₹1,999 and credited ₹412 for the 12 days left on Growth"
+ * is a different decision from an unlabelled Change Plan button, and the
+ * difference between an upgrade landing now and a downgrade landing in three
+ * weeks is the thing customers most often get wrong about their own billing.
+ */
+const previewPlanChange = asyncHandler(async (req, res) => {
+  const { planCode, billingCycle = 'monthly' } = req.query;
+  const plan = await Plan.findOne({ code: planCode, active: true }).lean();
+  if (!plan) throw httpError(400, 'Unknown plan');
+
+  const subscription = await Subscription.findOne({
+    orgId: req.orgId, status: { $in: ['trial', 'active', 'past_due'] }
+  }).sort({ createdAt: -1 });
+
+  if (!subscription) {
+    return res.json({
+      direction: 'new',
+      listPrice: planChanges.priceOf(plan, billingCycle),
+      message: `You will be moved to ${plan.name} as soon as payment clears.`
+    });
+  }
+
+  res.json(await planChanges.preview({ subscription, toPlan: plan, toBillingCycle: billingCycle }));
 });
 
 /**
@@ -53,12 +128,66 @@ const currentSubscription = asyncHandler(async (req, res) => {
  * collect.
  */
 const startSubscription = asyncHandler(async (req, res) => {
-  const { planCode, billingCycle = 'monthly' } = req.body;
+  const { planCode, billingCycle = 'monthly', couponCode } = req.body;
   const plan = await Plan.findOne({ code: planCode, active: true });
   if (!plan) throw httpError(400, 'Unknown plan');
 
-  const price = billingCycle === 'yearly' ? plan.yearlyPrice : plan.monthlyPrice;
-  const isFree = !price || Number(price) <= 0;
+  const listPrice = Number(planChanges.priceOf(plan, billingCycle));
+  const isFree = listPrice <= 0;
+
+  const existing = await Subscription.findOne({
+    orgId: req.orgId, status: { $in: ['trial', 'active', 'past_due'] }
+  }).sort({ createdAt: -1 });
+
+  const change = existing
+    ? planChanges.classify({ subscription: existing, toPlan: plan.toObject(), toBillingCycle: billingCycle })
+    : { direction: 'new' };
+
+  if (change.direction === 'none') {
+    throw httpError(409, `You are already on the ${plan.name} plan.`, 'ALREADY_ON_PLAN');
+  }
+
+  /**
+   * A downgrade is scheduled, not applied (3.3 #10).
+   *
+   * The customer paid through the end of this period, and moving them down now
+   * takes away something they bought. Nothing is charged and no checkout is
+   * created — there is nothing to collect until the new term starts, and asking
+   * for a card at the moment somebody chooses to spend less is a way to lose
+   * them entirely.
+   */
+  if (change.direction === 'downgrade') {
+    const period = planChanges.currentPeriod(existing);
+    if (period) {
+      existing.pendingChange = {
+        planCode,
+        billingCycle,
+        effectiveAt: period.end,
+        requestedAt: new Date(),
+        requestedBy: req.user?.email || String(req.user?._id || '')
+      };
+      await existing.save();
+
+      logAudit({
+        req,
+        action: 'subscription.downgrade_scheduled',
+        entity: 'subscription',
+        entityId: existing._id,
+        meta: { from: existing.planCode, to: planCode, effectiveAt: period.end }
+      });
+
+      return res.json({
+        subscription: existing,
+        scheduled: true,
+        effectiveAt: period.end,
+        message: `You keep ${existing.planCode} until ${period.end.toISOString().slice(0, 10)}, which you have already paid for. ${plan.name} starts then.`
+      });
+    }
+    // No paid-up period to protect — nothing is being taken away, so apply it
+    // through the ordinary path below.
+  }
+
+  const price = listPrice;
 
   // A paid plan with no payment provider configured has to fail closed. In
   // development there are no keys and razorpayService runs in local mode, which
@@ -74,7 +203,44 @@ const startSubscription = asyncHandler(async (req, res) => {
     req.log.warn('Razorpay not configured — activating plan without payment (development only)', { planCode });
   }
 
-  const provider = await createSubscription({ planCode, orgId: req.orgId });
+  /**
+   * The coupon, resolved and claimed before anything is created (3.3 #10).
+   *
+   * Deliberately ordered this way: `evaluate` and the provider gate both throw,
+   * and every one of their failures is a message the customer needs to see
+   * *instead of* a checkout, not after one. Claiming the redemption before the
+   * provider call also means a code capped at 100 uses cannot be handed to 101
+   * people by 101 simultaneous requests.
+   */
+  let discount = null;
+  let claimed = null;
+  let providerOfferId = null;
+  let priced = { listPrice: price, discountAmount: 0, finalPrice: price };
+
+  if (couponCode) {
+    const evaluated = await coupons.evaluate({
+      code: couponCode, planCode, billingCycle, price, orgId: req.orgId
+    });
+    coupons.assertProviderCanHonour(evaluated.coupon, {
+      providerWillCharge: !isFree && env.billingConfigured
+    });
+
+    claimed = await coupons.redeem({
+      coupon: evaluated.coupon,
+      orgId: req.orgId,
+      billingCycle,
+      listPrice: evaluated.listPrice,
+      discountAmount: evaluated.discountAmount,
+      finalPrice: evaluated.finalPrice
+    });
+    discount = coupons.subscriptionDiscountFrom(evaluated.coupon, evaluated.listPrice);
+    priced = evaluated;
+    providerOfferId = evaluated.coupon.providerOfferId || null;
+  }
+
+  const provider = await createSubscription({
+    planCode, orgId: req.orgId, offerId: providerOfferId || null
+  });
 
   // Free plans, and local development without Razorpay, activate straight
   // away. Everything else waits for the webhook.
@@ -92,17 +258,58 @@ const startSubscription = asyncHandler(async (req, res) => {
    */
   const snapshot = await snapshotFor(plan.toObject());
 
+  /**
+   * The discounted price is what goes into the snapshot.
+   *
+   * Not the list price with a discount recorded beside it. `pricing` is what
+   * every read uses — the billing page, the tax invoice, MRR — and leaving the
+   * list price there would have all of them quote a number the customer never
+   * pays. `discount.listPrice` keeps the "was ₹999" for display.
+   */
+  if (discount) {
+    const field = billingCycle === 'yearly' ? 'yearlyPrice' : 'monthlyPrice';
+    snapshot.pricing = { ...snapshot.pricing, [field]: priced.finalPrice };
+  }
+
   const subscription = await Subscription.create({
     orgId: req.orgId,
     planCode,
     billingCycle,
     status: activateNow ? 'active' : 'pending',
     razorpaySubscriptionId: provider.id,
+    /**
+     * The mandate this replaces, so the charge webhook can stop it (3.3 #10).
+     *
+     * Recorded now and acted on later. Cancelling the old subscription here
+     * would leave a customer whose payment then failed with nothing at all.
+     */
+    supersedes: existing && change.direction !== 'new' ? existing._id : null,
+    discount: discount || undefined,
     ...snapshot
   });
 
+  if (claimed) {
+    await CouponRedemption.updateOne({ _id: claimed._id }, { subscriptionId: subscription._id });
+  }
+
+  /**
+   * The credit an upgrade earns, raised at checkout rather than on activation.
+   *
+   * The unused days are unused from the moment the customer commits, and
+   * deferring the calculation to the webhook would measure them from whenever
+   * the payment happened to clear — which for a bank redirect can be the next
+   * day. Raised as *owed*, not applied; see `models/BillingCredit.js`.
+   */
+  let credit = null;
+  if (existing && change.direction === 'upgrade') {
+    credit = await planChanges.raiseUpgradeCredit({ subscription: existing, toPlanCode: planCode });
+  }
+
   if (activateNow) {
     await Organisation.findByIdAndUpdate(req.orgId, { plan: planCode, status: 'active' });
+    // Nothing is waiting on a webhook in this path, so the mandate this
+    // replaces has to be stopped here or it never is.
+    await planChanges.retirePredecessor(subscription);
   }
 
   logAudit({
@@ -110,12 +317,18 @@ const startSubscription = asyncHandler(async (req, res) => {
     action: activateNow ? 'subscription.started' : 'subscription.checkout_created',
     entity: 'subscription',
     entityId: subscription._id,
-    meta: { planCode, billingCycle, activated: activateNow }
+    meta: {
+      planCode, billingCycle, activated: activateNow, direction: change.direction,
+      couponCode: discount?.couponCode || null, creditRaised: credit?.amount || 0
+    }
   });
 
   res.status(201).json({
     subscription,
     provider,
+    direction: change.direction,
+    discount: discount ? { ...discount, discountAmount: priced.discountAmount } : null,
+    credit,
     // The frontend needs the key id to open Razorpay Checkout, and needs to
     // know whether it should wait for confirmation rather than showing success.
     checkout: activateNow ? null : { keyId: env.RAZORPAY_KEY_ID, subscriptionId: provider.id },
@@ -124,6 +337,33 @@ const startSubscription = asyncHandler(async (req, res) => {
       ? `You are now on the ${plan.name} plan.`
       : `Complete the payment to activate the ${plan.name} plan. Your current plan stays active until then.`
   });
+});
+
+/**
+ * Cancels a scheduled downgrade.
+ *
+ * The reason `pendingChange` is a field rather than an immediate write: a
+ * customer who downgrades in week one and changes their mind in week two should
+ * simply stay where they are, not have to downgrade and then buy the same plan
+ * back.
+ */
+const cancelPendingChange = asyncHandler(async (req, res) => {
+  const subscription = await Subscription.findOne({ orgId: req.orgId }).sort({ createdAt: -1 });
+  if (!subscription?.pendingChange?.planCode) {
+    throw httpError(404, 'There is no scheduled plan change to cancel.', 'NO_PENDING_CHANGE');
+  }
+
+  const was = subscription.pendingChange.planCode;
+  subscription.pendingChange = {
+    planCode: null, billingCycle: null, effectiveAt: null, requestedAt: null, requestedBy: null
+  };
+  await subscription.save();
+
+  logAudit({
+    req, action: 'subscription.downgrade_cancelled', entity: 'subscription',
+    entityId: subscription._id, meta: { was }
+  });
+  res.json({ subscription, message: `You will stay on ${subscription.planCode}.` });
 });
 
 /**
@@ -162,4 +402,6 @@ const cancelSubscription = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-  myPlatformInvoices, listPlans, currentSubscription, startSubscription, cancelSubscription };
+  myPlatformInvoices, listPlans, currentSubscription, startSubscription, cancelSubscription,
+  checkCoupon, previewPlanChange, cancelPendingChange
+};

@@ -469,7 +469,59 @@ const transferOwnershipSchema = z.object({
 
 const subscriptionStartSchema = z.object({
   planCode: shortText.min(1, 'is required'),
+  billingCycle: z.enum(['monthly', 'yearly']).optional(),
+  couponCode: shortText.optional()
+});
+
+const couponCheckSchema = z.object({
+  code: shortText.min(1, 'is required'),
+  planCode: shortText.min(1, 'is required'),
   billingCycle: z.enum(['monthly', 'yearly']).optional()
+});
+
+/**
+ * Creating and editing a discount code, from the platform console.
+ *
+ * `discountValue` is not bounded above here on purpose. A percent above 100 and
+ * a flat amount above the plan price are both clamped by `couponService`, which
+ * is where the price is known — a validator cannot decide whether ₹1,000 off is
+ * absurd without knowing what it is off.
+ */
+const couponUpsertSchema = z.object({
+  code: shortText.min(2, 'is required'),
+  description: longText.optional(),
+  discountType: z.enum(['percent', 'amount']),
+  discountValue: z.coerce.number().min(0),
+  duration: z.enum(['once', 'cycles', 'forever']).optional(),
+  durationCycles: z.coerce.number().int().min(1).nullable().optional(),
+  appliesToPlans: z.array(shortText).optional(),
+  appliesToCycles: z.array(z.enum(['monthly', 'yearly'])).optional(),
+  validFrom: z.coerce.date().nullable().optional(),
+  validUntil: z.coerce.date().nullable().optional(),
+  maxRedemptions: z.coerce.number().int().min(1).nullable().optional(),
+  oncePerOrg: z.boolean().optional(),
+  providerOfferId: shortText.nullable().optional(),
+  active: z.boolean().optional()
+});
+
+/** Recording how a credit was actually given back — see models/BillingCredit.js. */
+const creditSettleSchema = z.object({
+  method: z.enum(['refund', 'next-invoice', 'write-off']),
+  reference: shortText.optional(),
+  note: longText.optional()
+});
+
+/**
+ * A credit raised by hand, for a goodwill gesture or an off-system adjustment.
+ *
+ * The tenant is named by the URL rather than the body: server.js strips `orgId`
+ * from every request body unconditionally, because that field is the
+ * tenant-isolation boundary and must only ever come from the authenticated
+ * token.
+ */
+const creditCreateSchema = z.object({
+  amount: z.coerce.number().min(0.01, 'must be more than zero'),
+  note: longText.optional()
 });
 
 // ── Vendors and purchases (Phase 5) ──────────────
@@ -753,5 +805,6 @@ module.exports = {
   paymentLinkCreateSchema, gatewaySettingsSchema,
   userInviteSchema, userUpdateSchema,
   organisationUpdateSchema, transferOwnershipSchema,
-  subscriptionStartSchema
+  subscriptionStartSchema, couponCheckSchema, couponUpsertSchema,
+  creditSettleSchema, creditCreateSchema
 };

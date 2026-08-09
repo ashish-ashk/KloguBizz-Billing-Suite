@@ -2700,6 +2700,33 @@
         },
         "additionalProperties": false
       },
+      "PostSubscriptionsCouponCheckRequest": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "planCode": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "billingCycle": {
+            "type": "string",
+            "enum": [
+              "monthly",
+              "yearly"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "planCode"
+        ],
+        "additionalProperties": false
+      },
       "PostSubscriptionsStartRequest": {
         "type": "object",
         "properties": {
@@ -2714,6 +2741,10 @@
               "monthly",
               "yearly"
             ]
+          },
+          "couponCode": {
+            "type": "string",
+            "maxLength": 200
           }
         },
         "required": [
@@ -3817,6 +3848,222 @@
         },
         "required": [
           "name"
+        ],
+        "additionalProperties": false
+      },
+      "PostSuperadminCouponsRequest": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 2
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 5000
+          },
+          "discountType": {
+            "type": "string",
+            "enum": [
+              "percent",
+              "amount"
+            ]
+          },
+          "discountValue": {
+            "type": "number",
+            "minimum": 0
+          },
+          "duration": {
+            "type": "string",
+            "enum": [
+              "once",
+              "cycles",
+              "forever"
+            ]
+          },
+          "durationCycles": {
+            "type": "integer",
+            "minimum": 1,
+            "nullable": true
+          },
+          "appliesToPlans": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          "appliesToCycles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "monthly",
+                "yearly"
+              ]
+            }
+          },
+          "validFrom": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "validUntil": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "maxRedemptions": {
+            "type": "integer",
+            "minimum": 1,
+            "nullable": true
+          },
+          "oncePerOrg": {
+            "type": "boolean"
+          },
+          "providerOfferId": {
+            "type": "string",
+            "maxLength": 200,
+            "nullable": true
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "discountType",
+          "discountValue"
+        ],
+        "additionalProperties": false
+      },
+      "PutSuperadminCouponsCodeRequest": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 2
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 5000
+          },
+          "discountType": {
+            "type": "string",
+            "enum": [
+              "percent",
+              "amount"
+            ]
+          },
+          "discountValue": {
+            "type": "number",
+            "minimum": 0
+          },
+          "duration": {
+            "type": "string",
+            "enum": [
+              "once",
+              "cycles",
+              "forever"
+            ]
+          },
+          "durationCycles": {
+            "type": "integer",
+            "minimum": 1,
+            "nullable": true
+          },
+          "appliesToPlans": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          "appliesToCycles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "monthly",
+                "yearly"
+              ]
+            }
+          },
+          "validFrom": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "validUntil": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "maxRedemptions": {
+            "type": "integer",
+            "minimum": 1,
+            "nullable": true
+          },
+          "oncePerOrg": {
+            "type": "boolean"
+          },
+          "providerOfferId": {
+            "type": "string",
+            "maxLength": 200,
+            "nullable": true
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "discountType",
+          "discountValue"
+        ],
+        "additionalProperties": false
+      },
+      "PostSuperadminTenantsIdCreditsRequest": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number",
+            "minimum": 0.01
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 5000
+          }
+        },
+        "required": [
+          "amount"
+        ],
+        "additionalProperties": false
+      },
+      "PostSuperadminCreditsIdSettleRequest": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "refund",
+              "next-invoice",
+              "write-off"
+            ]
+          },
+          "reference": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 5000
+          }
+        },
+        "required": [
+          "method"
         ],
         "additionalProperties": false
       },
@@ -8625,6 +8872,91 @@
         }
       }
     },
+    "/api/v1/subscriptions/preview-change": {
+      "get": {
+        "summary": "GET /api/v1/subscriptions/preview-change",
+        "tags": [
+          "subscriptions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/subscriptions/coupon/check": {
+      "post": {
+        "summary": "POST /api/v1/subscriptions/coupon/check",
+        "tags": [
+          "subscriptions"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostSubscriptionsCouponCheckRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant",
+          "middleware"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
     "/api/v1/subscriptions/start": {
       "post": {
         "summary": "POST /api/v1/subscriptions/start",
@@ -8676,6 +9008,43 @@
     "/api/v1/subscriptions/cancel": {
       "post": {
         "summary": "POST /api/v1/subscriptions/cancel",
+        "tags": [
+          "subscriptions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/subscriptions/cancel-scheduled-change": {
+      "post": {
+        "summary": "POST /api/v1/subscriptions/cancel-scheduled-change",
         "tags": [
           "subscriptions"
         ],
@@ -12846,6 +13215,398 @@
         }
       }
     },
+    "/api/v1/superadmin/coupons": {
+      "get": {
+        "summary": "GET /api/v1/superadmin/coupons",
+        "tags": [
+          "superadmin"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "superadminIpAllowlist"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      },
+      "post": {
+        "summary": "POST /api/v1/superadmin/coupons",
+        "tags": [
+          "superadmin"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostSuperadminCouponsRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "superadminIpAllowlist",
+          "middleware"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/superadmin/coupons/{code}": {
+      "put": {
+        "summary": "PUT /api/v1/superadmin/coupons/{code}",
+        "tags": [
+          "superadmin"
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutSuperadminCouponsCodeRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "superadminIpAllowlist",
+          "middleware"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/superadmin/coupons/{id}": {
+      "delete": {
+        "summary": "DELETE /api/v1/superadmin/coupons/{id}",
+        "tags": [
+          "superadmin"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Document id"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "superadminIpAllowlist"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/superadmin/coupons/{id}/redemptions": {
+      "get": {
+        "summary": "GET /api/v1/superadmin/coupons/{id}/redemptions",
+        "tags": [
+          "superadmin"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Document id"
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "superadminIpAllowlist"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/superadmin/credits": {
+      "get": {
+        "summary": "GET /api/v1/superadmin/credits",
+        "tags": [
+          "superadmin"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "superadminIpAllowlist"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/superadmin/tenants/{id}/credits": {
+      "post": {
+        "summary": "POST /api/v1/superadmin/tenants/{id}/credits",
+        "tags": [
+          "superadmin"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Document id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostSuperadminTenantsIdCreditsRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "superadminIpAllowlist",
+          "middleware"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/superadmin/credits/{id}/settle": {
+      "post": {
+        "summary": "POST /api/v1/superadmin/credits/{id}/settle",
+        "tags": [
+          "superadmin"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Document id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostSuperadminCreditsIdSettleRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "superadminIpAllowlist",
+          "middleware"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
     "/api/v1/superadmin/masters": {
       "get": {
         "summary": "GET /api/v1/superadmin/masters",
@@ -13433,7 +14194,7 @@
     }
   },
   "x-undocumented": {
-    "count": 46,
+    "count": 47,
     "likelyGaps": [],
     "actions": [
       "POST /api/v1/auth/mfa/setup",
@@ -13466,6 +14227,7 @@
       "POST /api/v1/reports/stock/{id}/recompute",
       "POST /api/v1/sales-documents/{id}/restore",
       "POST /api/v1/subscriptions/cancel",
+      "POST /api/v1/subscriptions/cancel-scheduled-change",
       "POST /api/v1/superadmin/approvals/{id}/decide",
       "POST /api/v1/superadmin/break-glass",
       "POST /api/v1/superadmin/email/suppressions/release",

@@ -15,6 +15,7 @@ const SUPER_ADMIN_COMMANDS: CommandItem[] = [
   { label: 'Invoice Templates', route: '/super-admin/templates', icon: 'invoice' },
   { label: 'Reminders & Receipts', route: '/super-admin/reminders', icon: 'creditCard' },
   { label: 'Subscription Plans', route: '/super-admin/plans', icon: 'chart' },
+  { label: 'Discounts & Credits', route: '/super-admin/coupons', icon: 'percent' },
   { label: 'Branding & Logo', route: '/super-admin/branding', icon: 'palette' },
   { label: 'Profile & Security', route: '/super-admin/profile', icon: 'user' },
   { label: 'Tenant App', route: '/dashboard', icon: 'chevronLeft' }
@@ -50,6 +51,7 @@ const SUPER_ADMIN_COMMANDS: CommandItem[] = [
             <a routerLink="/super-admin/templates" routerLinkActive="active" title="Invoice Templates"><span class="nav-icon"><app-icon name="invoice" /></span><span class="nav-label">Invoice Templates</span></a>
             <a routerLink="/super-admin/reminders" routerLinkActive="active" title="Reminders &amp; Receipts"><span class="nav-icon"><app-icon name="creditCard" /></span><span class="nav-label">Reminders &amp; Receipts</span></a>
             <a routerLink="/super-admin/plans" routerLinkActive="active" title="Subscription Plans"><span class="nav-icon"><app-icon name="chart" /></span><span class="nav-label">Subscription Plans</span></a>
+            <a routerLink="/super-admin/coupons" routerLinkActive="active" title="Discounts & Credits"><span class="nav-icon"><app-icon name="percent" /></span><span class="nav-label">Discounts &amp; Credits</span></a>
             <a routerLink="/super-admin/branding" routerLinkActive="active" title="Branding &amp; Logo"><span class="nav-icon"><app-icon name="palette" /></span><span class="nav-label">Branding &amp; Logo</span></a>
             <a routerLink="/super-admin/profile" routerLinkActive="active" title="Profile &amp; Security"><span class="nav-icon"><app-icon name="user" /></span><span class="nav-label">Profile &amp; Security</span></a>
             <div class="nav-divider"></div>

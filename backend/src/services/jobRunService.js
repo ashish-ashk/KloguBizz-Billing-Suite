@@ -39,6 +39,7 @@ const JOBS = {
   'recycle-bin.purge': { label: 'Purge the recycle bin', intervalMs: 60 * 60 * 1000 },
   'reminders.send': { label: 'Send payment reminders', intervalMs: 60 * 60 * 1000 },
   'billing.dunning': { label: 'Chase failed subscription payments', intervalMs: 60 * 60 * 1000 },
+  'billing.scheduled-changes': { label: 'Apply scheduled plan downgrades', intervalMs: 60 * 60 * 1000 },
   'metrics.rollup': { label: 'Roll up platform metrics', intervalMs: 60 * 60 * 1000 }
 };
 

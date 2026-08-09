@@ -42,6 +42,68 @@ const subscriptionSchema = new mongoose.Schema({
     invoiceLimit: { type: Number, default: null }
   },
 
+  /**
+   * The coupon applied to this subscription, snapshotted (3.3 #10).
+   *
+   * Copied rather than referenced, for the reason `pricing` is copied: the
+   * coupon is editable and can be deleted, and a subscriber's own billing page
+   * telling them a different story next month than it did today is the failure
+   * the snapshot exists to prevent. `pricing` already holds the *discounted*
+   * price, so nothing has to re-derive it; this records why it is what it is.
+   */
+  discount: {
+    couponCode: { type: String, default: null },
+    discountType: { type: String, enum: ['percent', 'amount', null], default: null },
+    discountValue: { type: Number, default: null },
+    /** The undiscounted price, so "₹499 (was ₹999)" needs no join. */
+    listPrice: { type: Number, default: null },
+    duration: { type: String, enum: ['once', 'cycles', 'forever', null], default: null },
+    /**
+     * Charges left at the discounted price, counted down by the charge webhook.
+     *
+     * Null for `forever` and for `once` — `once` is expressed as 1 and reaches 0
+     * after the first charge. Counting down beats counting charges backwards
+     * from `startDate`, because a failed-then-retried charge is one charge to a
+     * customer and two rows to anyone reconstructing it later.
+     */
+    cyclesRemaining: { type: Number, default: null },
+    appliedAt: { type: Date, default: null }
+  },
+
+  /**
+   * A plan change that has been agreed but has not happened yet (3.3 #10).
+   *
+   * Only downgrades land here. A customer who downgrades has already paid
+   * through the end of the current period, and moving them down on the spot
+   * takes away something they bought — so the change is recorded, the customer
+   * is told the date, and `billing.scheduled-changes` applies it when the period
+   * ends. Cleared if they change their mind, which is the whole point of it
+   * being a field rather than an immediate write.
+   */
+  pendingChange: {
+    planCode: { type: String, default: null },
+    billingCycle: { type: String, enum: ['monthly', 'yearly', null], default: null },
+    effectiveAt: { type: Date, default: null },
+    requestedAt: { type: Date, default: null },
+    requestedBy: { type: String, default: null }
+  },
+
+  /**
+   * The subscription this one replaces, and whether its mandate has been stopped.
+   *
+   * A plan change creates a **new** provider subscription. Nothing used to stop
+   * the old one, so an upgrading customer was left with two live Razorpay
+   * mandates charging the same card every month — and because `resolveSubscription`
+   * matches the newest local subscription when an event carries no id, a failure
+   * on the dead mandate marked the live subscription past due.
+   *
+   * The old mandate is cancelled when the new one **activates**, not when
+   * checkout is created: cancelling first would leave a customer whose payment
+   * then failed with no subscription at all.
+   */
+  supersedes: { type: mongoose.Schema.Types.ObjectId, ref: 'Subscription', default: null },
+  supersededBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Subscription', default: null },
+
   billingCycle: { type: String, enum: ['monthly', 'yearly'], default: 'monthly' },
   // 'pending' means checkout was created but no payment has been confirmed
   // yet. A subscription only becomes 'active' — and the org only gets the plan
@@ -50,6 +112,16 @@ const subscriptionSchema = new mongoose.Schema({
   status: { type: String, enum: ['trial', 'pending', 'active', 'past_due', 'cancelled'], default: 'trial' },
   razorpaySubscriptionId: String,
   startDate: { type: Date, default: Date.now },
+  /**
+   * Start of the period currently paid for.
+   *
+   * Recorded because proration needs a denominator (3.3 #10): "how much of this
+   * period is unused" is unanswerable from the end date alone. `startDate` is
+   * not a substitute — after six charges it is six months before the period the
+   * customer is actually in, and using it would credit them for the whole
+   * subscription rather than the remainder of one month.
+   */
+  currentPeriodStart: Date,
   // End of the paid-up period. Cancelling sets cancelAtPeriodEnd rather than
   // revoking access on the spot — the customer paid through this date.
   currentPeriodEnd: Date,

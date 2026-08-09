@@ -7,6 +7,7 @@ const { verifyWebhookSignature } = require('../services/razorpayService');
 const { logAudit } = require('../services/auditService');
 const { restoreAfterPayment } = require('../services/tenantStatusService');
 const platformInvoices = require('../services/platformInvoiceService');
+const planChanges = require('../services/planChangeService');
 const { Plan } = require('../models/Plan');
 
 // Razorpay sends epoch seconds; Mongo wants a Date.
@@ -31,7 +32,17 @@ async function resolveSubscription(payload) {
   }
   const orgId = entity?.notes?.orgId || payload?.payment?.entity?.notes?.orgId;
   if (orgId) {
-    const found = await Subscription.findOne({ orgId }).sort({ createdAt: -1 });
+    /**
+     * Cancelled subscriptions are excluded from the fallback (3.3 #10).
+     *
+     * A tenant who has changed plan has more than one local subscription, and
+     * this fallback picks the newest. It previously included dead ones — so a
+     * `payment.failed` arriving late for a mandate that had already been
+     * replaced could mark the *live* subscription past due and start dunning a
+     * customer who had paid.
+     */
+    const found = await Subscription.findOne({ orgId, status: { $ne: 'cancelled' } })
+      .sort({ createdAt: -1 });
     if (found) return { subscription: found, entity };
   }
   return { subscription: null, entity };
@@ -59,8 +70,28 @@ async function applyEvent(event, payload) {
     case 'subscription.charged': {
       subscription.status = 'active';
       subscription.startDate = toDate(entity?.start_at) || subscription.startDate;
+      /**
+       * Both ends of the period, because proration needs the denominator (3.3 #10).
+       *
+       * Falling back to now for the start rather than leaving it null: a period
+       * whose end is known and whose start is not cannot be prorated at all, and
+       * "when the money arrived" is the honest approximation of when the period
+       * began for a charge that has just cleared.
+       */
+      subscription.currentPeriodStart = toDate(entity?.current_start) || new Date();
       subscription.currentPeriodEnd = toDate(entity?.current_end || entity?.charge_at) || subscription.currentPeriodEnd;
       subscription.lastPaymentAt = new Date();
+
+      /**
+       * The discount counts down one charge (3.3 #10).
+       *
+       * `forever` is a null count and is left alone. A `once` coupon was stored
+       * as one remaining cycle, so it reaches zero here and the next renewal is
+       * at list price — which is what the customer was told when they applied it.
+       */
+      if (subscription.discount?.couponCode && subscription.discount.cyclesRemaining != null) {
+        subscription.discount.cyclesRemaining = Math.max(0, subscription.discount.cyclesRemaining - 1);
+      }
       /**
        * The money arrived, so the whole dunning state resets (3.3 #10).
        *
@@ -75,6 +106,22 @@ async function applyEvent(event, payload) {
       subscription.lastDunningAt = null;
       subscription.dunningDelivered = false;
       await subscription.save();
+
+      /**
+       * Stop the mandate this subscription replaces (3.3 #10).
+       *
+       * A plan change created a new provider subscription and left the old one
+       * running, so an upgrading customer was charged for both plans every month
+       * indefinitely. Done here rather than at checkout because the replacement
+       * has now actually been paid for — cancelling first would leave a customer
+       * whose payment then failed with no subscription at all.
+       *
+       * Cannot throw: `retirePredecessor` swallows its own errors, because a
+       * failure here would return non-200 and make Razorpay retry a charge that
+       * already succeeded.
+       */
+      await planChanges.retirePredecessor(subscription);
+
       org.plan = subscription.planCode;
       /**
        * Restores an account **only** if dunning was what limited it.
@@ -143,6 +190,39 @@ async function applyEvent(event, payload) {
       subscription.status = 'cancelled';
       subscription.endDate = toDate(entity?.ended_at) || new Date();
       await subscription.save();
+
+      /**
+       * A superseded mandate ending must **not** drop the tenant to starter.
+       *
+       * Upgrading cancels the old mandate at the provider, and the provider
+       * duly reports that cancellation back here. Handling it the ordinary way
+       * would take the customer straight off the plan they had just paid to
+       * upgrade to — the upgrade cancelling itself, seconds after it succeeded.
+       *
+       * `supersededBy` is set by `retirePredecessor` at the moment we ask for
+       * the cancellation, so it is already true when this arrives.
+       */
+      if (subscription.supersededBy) {
+        return { handled: true, action: 'superseded mandate ended; plan left alone' };
+      }
+
+      /**
+       * Nor must it, if a newer subscription is live for this tenant.
+       *
+       * The belt to the previous braces: `resolveSubscription` falls back to the
+       * newest local subscription when an event carries no id, and a cancellation
+       * arriving for a mandate we never linked would otherwise revoke a plan the
+       * customer is paying for.
+       */
+      const live = await Subscription.findOne({
+        orgId: subscription.orgId,
+        _id: { $ne: subscription._id },
+        status: 'active'
+      }).lean();
+      if (live) {
+        return { handled: true, action: 'a newer subscription is active; plan left alone' };
+      }
+
       // Drop to the free tier rather than suspending — the tenant remains
       // entitled to their own invoice history.
       org.plan = 'starter';
