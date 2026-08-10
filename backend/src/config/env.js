@@ -51,6 +51,20 @@ const env = {
   IRP_CLIENT_ID: process.env.IRP_CLIENT_ID || '',
   IRP_CLIENT_SECRET: process.env.IRP_CLIENT_SECRET || '',
 
+  /**
+   * ── E-way bills ──
+   *
+   * `ewayBillService.isEwbConfigured()` has read `env.EWB_BASE_URL` since it was
+   * written, and these three were never declared here — so the value was always
+   * `undefined`, the check always false, and **setting the environment variables
+   * had no effect at all**. The console reported "not configured" to a deployment
+   * that was configured, and there was no way to tell the difference between
+   * that and a typo.
+   */
+  EWB_BASE_URL: process.env.EWB_BASE_URL || '',
+  EWB_USERNAME: process.env.EWB_USERNAME || '',
+  EWB_PASSWORD: process.env.EWB_PASSWORD || '',
+
   // ── SendGrid event webhook (delivery, bounces, complaints) ──
   // Without this the webhook route refuses every request: an unauthenticated
   // endpoint that writes delivery state is an endpoint anyone can use to mark a

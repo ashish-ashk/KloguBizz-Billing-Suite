@@ -30,7 +30,7 @@ failed. It has been removed deliberately in favour of the simpler flow above —
 which means **the check is now yours to run**, and it is one command:
 
 ```bash
-cd backend  && npm run check     # eslint + 247 tests (needs MongoDB running)
+cd backend  && npm run check     # eslint + 470 tests (needs MongoDB running)
 cd frontend && npm run check     # eslint + a production build
 ```
 

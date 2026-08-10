@@ -219,7 +219,12 @@ it means unpaid accounts run indefinitely until mail works.
 
 Both are stubs with precise contracts: `eInvoiceService#callIrp` and
 `ewayBillService#callEwbApi`. They throw `501` with a message naming the variables
-to set and the function to implement. Everything around them — eligibility, the
+to set and the function to implement.
+
+**A bug found while writing this section, now fixed:** `EWB_BASE_URL`,
+`EWB_USERNAME` and `EWB_PASSWORD` were read by the service but never declared in
+`config/env.js`, so setting them had no effect and the console reported "not
+configured" to a deployment that was. There is a test against it now. Everything around them — eligibility, the
 validation, the payload, the validity window — is real and tested.
 
 E-invoicing is mandatory above a turnover threshold; e-way bills are mandatory
@@ -298,7 +303,7 @@ Not defects. Deliberate gaps, with the reasoning recorded in the improvement pla
 ## 7. The pre-launch command
 
 ```
-cd backend  && npm run check   # lint + 469 tests
+cd backend  && npm run check   # lint + 470 tests
 cd frontend && npm run check   # lint + 18 unit tests + production build
 cd frontend && npm run test:e2e   # against a running stack
 ```
@@ -312,7 +317,7 @@ Before a release, confirm the count rather than the exit code:
 
 ```
 cd backend && npm test 2>&1 | grep -E "^# (pass|skipped)"
-# expect ~469 passing and 0 skipped
+# expect ~470 passing and 0 skipped
 ```
 
 A run reporting hundreds of skips is a run that proved nothing.

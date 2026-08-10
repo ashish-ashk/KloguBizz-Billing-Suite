@@ -1373,6 +1373,30 @@ test('generating without a provider fails with an actionable message', maybe(asy
   );
 }));
 
+test('the e-way bill provider settings are actually readable', maybe(async () => {
+  const { env } = require('../src/config/env');
+
+  /**
+   * A real bug this asserts against.
+   *
+   * `isEwbConfigured()` reads `env.EWB_BASE_URL`, and `config/env.js` never
+   * declared it — so the value was always `undefined`, the check always false,
+   * and **setting the environment variables had no effect at all**. The console
+   * reported "not configured" to a deployment that was configured, with no way
+   * to tell that apart from a typo.
+   *
+   * Asserting on the keys rather than on the values, because the test
+   * environment has no provider: what was missing was the plumbing, not the
+   * credentials.
+   */
+  for (const key of ['EWB_BASE_URL', 'EWB_USERNAME', 'EWB_PASSWORD']) {
+    assert.ok(key in env, `${key} must be exposed on env, or setting it does nothing`);
+  }
+  // And the gate reads all three, so a half-configured provider is not treated
+  // as configured.
+  assert.equal(ewb.isEwbConfigured(), false, 'nothing is configured in the test environment');
+}));
+
 // ── GSTR-2B reconciliation (2.1 #7) ──────────────
 
 test('the portal JSON is read in whichever shape it arrives', maybe(async () => {
