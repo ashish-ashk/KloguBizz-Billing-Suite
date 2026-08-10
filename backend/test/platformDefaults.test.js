@@ -126,3 +126,121 @@ test('a rendered PDF actually uses the platform default', async t => {
   });
   assert.equal(tenantChoice.length, standard.length, 'the tenant choice should render identically to picking it directly');
 });
+
+// ── Preparing a production database (`npm run bootstrap`) ──
+
+const { bootstrap } = require('../src/seed/bootstrap');
+const { Plan } = require('../src/models/Plan');
+const { Master, Reminder } = require('../src/models/Settings');
+const { User } = require('../src/models/User');
+const { Organisation } = require('../src/models/Organisation');
+const { Invoice } = require('../src/models/Invoice');
+
+/** Passed explicitly, because `config/env.js` resolves the environment once at
+ *  module load and would otherwise hand these tests the developer's own `.env`. */
+const OWNER = { email: 'owner@bootstrap.test', password: 'Bootstrap#Pass#1' };
+
+const maybeDb = fn => async t => {
+  if (!dbAvailable) return t.skip('MongoDB not available');
+  return fn(t);
+};
+
+test('bootstrap fills an empty database with what a platform needs to sell', maybeDb(async () => {
+  await mongoose.connection.dropDatabase();
+  const report = await bootstrap({ exit: false, ...OWNER });
+
+  /**
+   * The gap this closes. `npm run seed` was the only way to get plans into a
+   * database, and it also wipes every collection and inserts a demo tenant whose
+   * users share a password published in this repository. A fresh production
+   * database therefore *looked* fine until somebody opened the subscription page
+   * and found no plans on it.
+   */
+  assert.ok(report.plans > 0);
+  assert.equal(await Plan.countDocuments(), 4);
+  assert.ok(await Master.countDocuments({ type: 'gstRate' }) > 0, 'the tax-rate dropdown has options');
+  assert.ok(await Master.countDocuments({ type: 'paymentMethod' }) > 0);
+  assert.equal(await Reminder.countDocuments(), 4);
+  assert.equal(report.ownerCreated, true);
+}));
+
+test('bootstrap invents no tenant, unlike seed', maybeDb(async () => {
+  await mongoose.connection.dropDatabase();
+  await bootstrap({ exit: false, ...OWNER });
+
+  /**
+   * The whole point of it being a separate script. A production platform must
+   * not ship with a demo organisation whose four accounts all use `Admin@123`.
+   */
+  assert.equal(await Organisation.countDocuments(), 0);
+  assert.equal(await Invoice.countDocuments(), 0);
+  assert.equal(await User.countDocuments(), 1, 'the platform owner, and nobody else');
+
+  const owner = await User.findOne().lean();
+  assert.equal(owner.role, 'superadmin');
+  assert.equal(owner.platformRole, 'owner');
+}));
+
+test('bootstrap is safe to re-run against a live platform', maybeDb(async () => {
+  await mongoose.connection.dropDatabase();
+  await bootstrap({ exit: false, ...OWNER });
+
+  // Somebody repriced a plan in the console, and a tenant exists.
+  await Plan.updateOne({ code: 'growth' }, { $set: { monthlyPrice: 4999 } });
+  const org = await Organisation.create({ name: 'Real Customer', adminEmail: 'real@customer.test', stateCode: '27' });
+
+  const second = await bootstrap({ exit: false, ...OWNER });
+
+  /**
+   * This is the script somebody reaches for a year later to add a plan, so it
+   * has to be harmless on a database with paying customers in it. `$setOnInsert`
+   * is what stops a re-run resetting a price that was changed deliberately.
+   */
+  assert.equal(second.plans, 0);
+  assert.equal(second.ownerCreated, false);
+  assert.equal((await Plan.findOne({ code: 'growth' }).lean()).monthlyPrice, 4999, 'the console price survives');
+  assert.equal(await Organisation.countDocuments({ _id: org._id }), 1, 'and so does the customer');
+  assert.equal(await User.countDocuments({ role: 'superadmin' }), 1, 'no second owner');
+}));
+
+test('bootstrap will not create an owner with the published default password', maybeDb(async () => {
+  await mongoose.connection.dropDatabase();
+
+  /**
+   * `process.exit` is intercepted rather than letting the guard end the test
+   * run. What is being asserted is that it refuses **before writing anything** —
+   * it originally refused after inserting the plans and masters, which is a
+   * refusal that leaves the database changed, and that is not what the word
+   * means.
+   */
+  const realExit = process.exit;
+  let exitCode = null;
+  process.exit = code => { exitCode = code; throw new Error('exited'); };
+  try {
+    await bootstrap({ exit: false, email: 'owner@bootstrap.test', password: 'SuperAdmin@123' });
+  } catch (error) {
+    assert.equal(error.message, 'exited');
+  } finally {
+    process.exit = realExit;
+  }
+
+  assert.equal(exitCode, 1);
+  assert.equal(await Plan.countDocuments(), 0, 'a refusal leaves the database untouched');
+  assert.equal(await Master.countDocuments(), 0);
+  assert.equal(await User.countDocuments(), 0);
+}));
+
+test('requiring the seed script does not wipe a database', maybeDb(async () => {
+  await mongoose.connection.dropDatabase();
+  await Organisation.create({ name: 'Still Here', adminEmail: 'still@here.test', stateCode: '27' });
+
+  /**
+   * `seed.js` deletes thirteen collections as its first act, and used to run on
+   * import. Importing it — from a test, a script, or a one-liner checking the
+   * file still parses after a refactor — wiped whatever database `MONGO_URI`
+   * pointed at, with no confirmation. That is exactly how it went wrong once.
+   */
+  const seedModule = require('../src/seed/seed');
+  assert.equal(typeof seedModule.seed, 'function', 'it still exports the function');
+  assert.equal(await Organisation.countDocuments(), 1, 'and importing it destroyed nothing');
+}));

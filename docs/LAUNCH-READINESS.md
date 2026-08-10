@@ -111,12 +111,31 @@ breaks the consecutiveness of a legally-consecutive series; and the
 `platformInvoiceCounter` setting, which is deliberately separate so that saving the identity
 cannot reset it.
 
-### Set a real superadmin password before seeding
+### Prepare the database with `npm run bootstrap`, not `npm run seed`
 
-`npm run seed` refuses to run with the documented default, which is the correct
-behaviour — but set `SUPER_ADMIN_PASSWORD` and `SUPER_ADMIN_EMAIL` deliberately,
-and then **enrol MFA on that account immediately**. It is mandatory on platform
-accounts and the console is blocked until it is done.
+**Do not run `npm run seed` against production.** It deletes thirteen collections
+and inserts a demo tenant whose four accounts all use `Admin@123`, a password
+published in this repository. It exists to make a *developer's* machine useful.
+
+```
+cd backend && npm run migrate     # schema and data migrations
+npm run bootstrap                 # plans, tax rates, payment methods, reminder
+                                  # templates, and the platform owner
+```
+
+`bootstrap` deletes nothing, creates no tenant, and is safe to re-run — it is
+also what you reach for a year from now to add a plan. It refuses to create the
+owner while `SUPER_ADMIN_PASSWORD` is the documented default, and refuses
+*before* writing anything.
+
+**Migrations alone are not enough.** They bring the schema up to date; they do
+not create the plans. A database with migrations applied and no bootstrap looks
+perfectly healthy until somebody opens the subscription page and finds nothing
+to buy.
+
+Set `SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD` deliberately, then **enrol MFA
+on that account immediately**. It is mandatory on platform accounts in production
+and the console is blocked until it is done.
 
 ---
 
