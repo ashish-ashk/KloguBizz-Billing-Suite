@@ -244,3 +244,102 @@ test('requiring the seed script does not wipe a database', maybeDb(async () => {
   assert.equal(typeof seedModule.seed, 'function', 'it still exports the function');
   assert.equal(await Organisation.countDocuments(), 1, 'and importing it destroyed nothing');
 }));
+
+// ── An MFA secret encrypted with a key we no longer have ──
+
+const { verifySecondFactor } = require('../src/controllers/mfaController');
+const { resetMfa } = require('../src/seed/reset-mfa');
+const totpUtil = require('../src/utils/totp');
+
+test('an unreadable secret says so, instead of throwing a 500', maybeDb(async () => {
+  const user = {
+    _id: new mongoose.Types.ObjectId(),
+    email: 'locked@example.test',
+    // Well-formed, and encrypted under a key this process does not have.
+    mfa: { enabled: true, secret: 'AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:CCCCCCCC', backupCodes: [] }
+  };
+
+  /**
+   * The failure met in production. `decryptSecret` threw straight out of
+   * `verifySecondFactor`, so signing in returned a bare 500 — "Something went
+   * wrong on our side" — on the one screen the user cannot get past. The most
+   * dangerous configuration change in the system announced itself as a generic
+   * server error.
+   */
+  const result = verifySecondFactor(user, '123456');
+  assert.equal(result.valid, false);
+  assert.equal(result.code, 'MFA_SECRET_UNREADABLE');
+  assert.match(result.reason, /recovery code/i, 'and it names the route that still works');
+  // Not counted toward the lockout: locking the account over a server-side
+  // misconfiguration would take away the recovery route as well.
+  assert.equal(result.notCountedAsFailure, true);
+}));
+
+test('a recovery code still works when the secret cannot be read', maybeDb(async () => {
+  const code = 'ABCD-1234';
+  const user = {
+    _id: new mongoose.Types.ObjectId(),
+    email: 'recovering@example.test',
+    mfa: {
+      enabled: true,
+      secret: 'AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:CCCCCCCC',
+      backupCodes: [totpUtil.hashBackupCode(code)]
+    }
+  };
+
+  /**
+   * Recovery codes are **hashed, not encrypted**, so they are precisely the
+   * mechanism that survives a key change — and throwing on decryption made the
+   * one path designed for this situation unreachable. This is the difference
+   * between "locked out until an operator intervenes" and "recoverable by the
+   * person holding their own recovery codes".
+   */
+  const result = verifySecondFactor(user, code);
+  assert.equal(result.valid, true);
+  assert.equal(result.method, 'backup-code');
+  assert.equal(user.mfa.backupCodes.length, 0, 'and it is consumed');
+}));
+
+test('the command-line reset clears the factor and cuts every session', maybeDb(async () => {
+  await mongoose.connection.dropDatabase();
+  const created = await User.create({
+    name: 'Locked Owner',
+    email: 'owner@locked.test',
+    passwordHash: 'x',
+    role: 'superadmin',
+    status: 'active',
+    sessionVersion: 3,
+    mfa: { enabled: true, secret: 'AAAA:BBBB:CCCC', backupCodes: ['deadbeef'] }
+  });
+
+  const result = await resetMfa('owner@locked.test', { exit: false });
+  assert.equal(result.ok, true);
+
+  const after = await User.findById(created._id).lean();
+  assert.equal(after.mfa.enabled, false);
+  assert.ok(!after.mfa.secret);
+  assert.equal((after.mfa.backupCodes || []).length, 0);
+  /**
+   * Sessions issued *under* the second factor must not outlive it — and if this
+   * is being run over a suspected compromise rather than a lost key, the
+   * sessions are the thing that matters most.
+   */
+  assert.equal(after.sessionVersion, 4);
+  assert.equal(after.passwordHash, 'x', 'the password is untouched');
+}));
+
+test('resetting MFA leaves a trail', maybeDb(async () => {
+  await mongoose.connection.dropDatabase();
+  await User.create({
+    name: 'Traced', email: 'traced@locked.test', passwordHash: 'x',
+    role: 'admin', status: 'active', mfa: { enabled: true, secret: 'A:B:C', backupCodes: [] }
+  });
+  await resetMfa('traced@locked.test', { exit: false });
+
+  // An operation that quietly weakens an account's authentication and leaves no
+  // trace is indistinguishable from an attacker who reached the same shell.
+  const { AuditLog } = require('../src/models/Settings');
+  const entry = await AuditLog.findOne({ action: 'user.mfa_reset_by_operator' }).lean();
+  assert.ok(entry, 'the reset is audited');
+  assert.equal(entry.meta.email, 'traced@locked.test');
+}));

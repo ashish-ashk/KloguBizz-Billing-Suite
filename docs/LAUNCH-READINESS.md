@@ -41,6 +41,27 @@ Set it now, before anyone enrols. Once secrets are encrypted with it, this value
 can never change either — but at least it is then a value nobody has a reason to
 rotate.
 
+**If it has already happened**, the damage is bounded and recoverable:
+
+- **Recovery codes still work.** They are hashed, not encrypted, so a key change
+  does not touch them. Sign in with one, then re-enrol the authenticator.
+- **The sign-in says so.** An unreadable secret returns `MFA_SECRET_UNREADABLE`
+  and tells the user to use a recovery code, and does **not** count toward the
+  account lockout — locking somebody out over a configuration change they did not
+  make would take away the recovery route too. The server log names the cause and
+  the remedy.
+- **For an account with no recovery codes left**, there is a command-line escape
+  hatch, deliberately outside the application because it needs shell and database
+  access:
+
+  ```
+  cd backend && npm run reset-mfa -- someone@example.com
+  ```
+
+  It clears the second factor and nothing else — the password is unchanged, every
+  session is cut, a platform account must enrol again at the next sign-in, and the
+  reset is written to the audit log.
+
 ### Run the migrations, in order, before the first request
 
 ```

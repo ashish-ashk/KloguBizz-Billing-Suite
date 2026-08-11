@@ -8,6 +8,7 @@
     "start": "node server.js",
     "seed": "node src/seed/seed.js",
     "bootstrap": "node src/seed/bootstrap.js",
+    "reset-mfa": "node src/seed/reset-mfa.js",
     "test": "node --test",
     "migrate": "node src/migrations/runner.js",
     "openapi": "node scripts/generate-openapi.js",

@@ -495,6 +495,18 @@ const verifyMfa = asyncHandler(async (req, res) => {
   }
 
   const result = mfa.verifySecondFactor(user, req.body?.code);
+
+  /**
+   * An unreadable secret is the server's fault, not the user's (see
+   * `verifySecondFactor`). Counting it toward the lockout would take away the
+   * recovery-code route as well — locking somebody out of the only door still
+   * open to them, over a configuration change they did not make.
+   */
+  if (!result.valid && result.notCountedAsFailure) {
+    logAudit({ req: auditContext(req, user), action: 'auth.mfa_unreadable', entity: 'user', entityId: user._id });
+    throw httpError(409, result.reason, result.code);
+  }
+
   if (!result.valid) {
     const windowStart = Date.now() - ATTEMPT_WINDOW_MINUTES * 60000;
     const recent = user.lastFailedLoginAt && user.lastFailedLoginAt.getTime() > windowStart;

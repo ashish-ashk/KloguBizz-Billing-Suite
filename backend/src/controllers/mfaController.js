@@ -6,6 +6,7 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { logAudit } = require('../services/auditService');
 const totp = require('../utils/totp');
+const { logger } = require('../utils/logger');
 
 /**
  * Two-factor authentication (#7).
@@ -99,7 +100,29 @@ const enableMfa = asyncHandler(async (req, res) => {
   if (!user.mfa?.secret) throw httpError(400, 'Start the setup first.', 'MFA_NOT_STAGED');
   if (user.mfa.enabled) throw httpError(409, 'Two-factor authentication is already enabled.', 'MFA_ALREADY_ENABLED');
 
-  const result = totp.verifyCode(totp.decryptSecret(user.mfa.secret), req.body?.code);
+  /**
+   * A staged secret can be unreadable too, for the same reason a live one can:
+   * the encryption key changed between starting the setup and confirming it.
+   *
+   * Unguarded, this was a 500 in the middle of enrolment — and the fix is
+   * trivial and entirely in the user's hands, because starting again re-stages a
+   * fresh secret under the current key. Saying so beats a generic server error.
+   */
+  let stagedSecret;
+  try {
+    stagedSecret = totp.decryptSecret(user.mfa.secret);
+  } catch (error) {
+    logger.error('staged MFA secret could not be decrypted — the encryption key changed mid-enrolment', {
+      userId: String(user._id), email: user.email, err: error
+    });
+    throw httpError(
+      409,
+      'This setup was started before the server\'s encryption key changed, so the code cannot be checked. Start the setup again to get a fresh QR code.',
+      'MFA_SETUP_STALE'
+    );
+  }
+
+  const result = totp.verifyCode(stagedSecret, req.body?.code);
   if (!result.valid) throw httpError(400, result.reason, 'MFA_CODE_INVALID');
 
   const backupCodes = totp.generateBackupCodes();
@@ -181,15 +204,58 @@ function verifySecondFactor(user, code, { allowBackupCode = true } = {}) {
   const supplied = String(code || '').trim();
   if (!supplied) return { valid: false, reason: 'A verification code is required.' };
 
+  /**
+   * Whether the stored TOTP secret could not be read at all.
+   *
+   * Distinct from "the code was wrong", and the distinction is the whole point:
+   * an unreadable secret is a **server** problem — the encryption key changed —
+   * and no code the user types will ever work. Telling them "that code is not
+   * correct" sends them to re-check their authenticator, resync their clock and
+   * eventually lock themselves out, chasing a fault that is not theirs.
+   */
+  let secretUnreadable = false;
+
   if (user.mfa?.secret) {
-    const result = totp.verifyCode(totp.decryptSecret(user.mfa.secret), supplied, {
-      lastUsedCounter: user.mfa.lastUsedCounter ?? null
-    });
-    if (result.valid) return { valid: true, counter: result.counter, method: 'totp' };
-    // A replayed code is reported as such rather than as "wrong": the user typed
-    // something correct, and telling them to wait for the next code is actionable
-    // where "incorrect" would send them looking for a different problem.
-    if (result.replay) return { valid: false, reason: result.reason };
+    let plainSecret = null;
+    try {
+      plainSecret = totp.decryptSecret(user.mfa.secret);
+    } catch (error) {
+      /**
+       * The one-way door in `docs/LAUNCH-READINESS.md`, met in practice.
+       *
+       * `secretBox` derives its key from `MFA_ENCRYPTION_KEY`, falling back to
+       * `JWT_SECRET` when that is unset. Setting `MFA_ENCRYPTION_KEY` on a
+       * deployment where people enrolled under the fallback — or rotating
+       * `JWT_SECRET` while it was doubling as the encryption key — makes every
+       * enrolled secret undecryptable.
+       *
+       * This threw straight out of `verifySecondFactor`, so the sign-in returned
+       * a bare 500 saying "Something went wrong on our side". The most dangerous
+       * configuration change in the system announced itself as a generic server
+       * error, on the one screen where the user cannot get past it.
+       */
+      secretUnreadable = true;
+      logger.error('MFA secret could not be decrypted — the encryption key has changed since enrolment', {
+        userId: String(user._id),
+        email: user.email,
+        err: error,
+        // Named explicitly: the fix is a configuration decision, and whoever
+        // reads this log is the only person who can make it.
+        remedy: 'Restore the previous MFA_ENCRYPTION_KEY (or JWT_SECRET if it was the fallback), '
+          + 'or reset MFA on the affected accounts. Recovery codes still work — they are hashed, not encrypted.'
+      });
+    }
+
+    if (plainSecret) {
+      const result = totp.verifyCode(plainSecret, supplied, {
+        lastUsedCounter: user.mfa.lastUsedCounter ?? null
+      });
+      if (result.valid) return { valid: true, counter: result.counter, method: 'totp' };
+      // A replayed code is reported as such rather than as "wrong": the user typed
+      // something correct, and telling them to wait for the next code is actionable
+      // where "incorrect" would send them looking for a different problem.
+      if (result.replay) return { valid: false, reason: result.reason };
+    }
   }
 
   if (allowBackupCode && user.mfa?.backupCodes?.length) {
@@ -199,6 +265,30 @@ function verifySecondFactor(user, code, { allowBackupCode = true } = {}) {
       user.mfa.backupCodes.splice(index, 1);
       return { valid: true, method: 'backup-code', remainingBackupCodes: user.mfa.backupCodes.length };
     }
+  }
+
+  /**
+   * An unreadable secret is reported as itself, and reaches this point only
+   * because the recovery code did not match either.
+   *
+   * The backup-code branch above is deliberately still tried: recovery codes are
+   * **hashed, not encrypted**, so they are exactly the mechanism that survives a
+   * key change — and throwing on decryption made the one path designed for this
+   * situation unreachable.
+   *
+   * `notCountedAsFailure` because the account must not be locked out over a
+   * server-side misconfiguration: that would take away the recovery route as
+   * well. The per-IP credential limiter still applies.
+   */
+  if (secretUnreadable) {
+    return {
+      valid: false,
+      code: 'MFA_SECRET_UNREADABLE',
+      notCountedAsFailure: true,
+      reason: 'Your authenticator cannot be verified because this account\'s two-factor secret was '
+        + 'encrypted with a key the server no longer has. Enter one of your recovery codes instead — '
+        + 'those still work — then set up your authenticator again.'
+    };
   }
 
   return { valid: false, reason: 'That code is not correct or has expired.' };
