@@ -238,8 +238,22 @@ const startSubscription = asyncHandler(async (req, res) => {
     providerOfferId = evaluated.coupon.providerOfferId || null;
   }
 
+  /**
+   * The Razorpay plan for *this cycle* (3.3 #10).
+   *
+   * Monthly and yearly are two different plans at the provider, each with its
+   * own id — this system models them as one plan with two prices, so the mapping
+   * has to be resolved here. An unconfigured cycle is refused by
+   * `createSubscription` with a message naming the plan and the cycle.
+   */
   const provider = await createSubscription({
-    planCode, orgId: req.orgId, offerId: providerOfferId || null
+    planCode,
+    orgId: req.orgId,
+    providerPlanId: billingCycle === 'yearly'
+      ? plan.providerPlanIds?.yearly
+      : plan.providerPlanIds?.monthly,
+    billingCycle,
+    offerId: providerOfferId || null
   });
 
   // Free plans, and local development without Razorpay, activate straight

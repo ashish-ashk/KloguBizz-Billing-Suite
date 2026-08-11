@@ -775,6 +775,13 @@ const planUpsertSchema = z.object({
   features: z.array(shortText).max(50).optional(),
   active: z.coerce.boolean().optional(),
   sortOrder: z.coerce.number().int().optional(),
+  /** The Razorpay plan id per cycle. Nullable and loose on format: the provider
+   *  owns the shape, and refusing an id they issued would be worse than
+   *  accepting one that is wrong, which checkout reports plainly. */
+  providerPlanIds: z.object({
+    monthly: shortText.optional().nullable(),
+    yearly: shortText.optional().nullable()
+  }).optional(),
   changeNote: shortText.optional().nullable(),
   /** Moves existing subscribers off their grandfathered terms. Explicit, because
    *  the default is not to. */

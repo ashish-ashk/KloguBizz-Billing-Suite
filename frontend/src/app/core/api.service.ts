@@ -916,7 +916,19 @@ export class ApiService {
       NS.superadmin
     );
   }
-  superPlans() { return this.cache.through(`${NS.superadmin}:plans`, () => this.http.get<Plan[]>(`${this.api}/superadmin/plans`)); }
+  /**
+   * Plans as the console sees them, with whether each can actually be sold.
+   *
+   * Returns an envelope rather than a bare array: a plan with no Razorpay plan
+   * id fails at the moment a customer presses pay, and the operator's only clue
+   * would otherwise be a support ticket.
+   */
+  superPlans() {
+    return this.cache.through(
+      `${NS.superadmin}:plans`,
+      () => this.http.get<{ plans: Plan[]; billingConfigured: boolean; providerNote: string }>(`${this.api}/superadmin/plans`)
+    );
+  }
   superSavePlan(code: string, payload: Partial<Plan> & { changeNote?: string; applyToExisting?: boolean }) {
     // The response reports how many subscribers each choice affected — the whole
     // point of the grandfathering decision, so the caller can say so.

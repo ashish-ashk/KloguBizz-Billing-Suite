@@ -3922,6 +3922,22 @@
           "sortOrder": {
             "type": "integer"
           },
+          "providerPlanIds": {
+            "type": "object",
+            "properties": {
+              "monthly": {
+                "type": "string",
+                "maxLength": 200,
+                "nullable": true
+              },
+              "yearly": {
+                "type": "string",
+                "maxLength": 200,
+                "nullable": true
+              }
+            },
+            "additionalProperties": false
+          },
           "changeNote": {
             "type": "string",
             "maxLength": 200,
@@ -3983,6 +3999,22 @@
           },
           "sortOrder": {
             "type": "integer"
+          },
+          "providerPlanIds": {
+            "type": "object",
+            "properties": {
+              "monthly": {
+                "type": "string",
+                "maxLength": 200,
+                "nullable": true
+              },
+              "yearly": {
+                "type": "string",
+                "maxLength": 200,
+                "nullable": true
+              }
+            },
+            "additionalProperties": false
           },
           "changeNote": {
             "type": "string",

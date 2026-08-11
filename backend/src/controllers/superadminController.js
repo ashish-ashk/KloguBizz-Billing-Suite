@@ -17,6 +17,7 @@ const { PaymentLink } = require('../models/PaymentLink');
 const { ReminderLog } = require('../models/ReminderLog');
 const { Subscription } = require('../models/Subscription');
 const { asyncHandler } = require('../utils/asyncHandler');
+const { env } = require('../config/env');
 const { httpError } = require('../utils/httpError');
 const { logAudit } = require('../services/auditService');
 const { pickFields } = require('../utils/pickFields');
@@ -321,7 +322,41 @@ const deleteOrganisation = asyncHandler(async (req, res) => {
 });
 
 const listPlansAdmin = asyncHandler(async (req, res) => {
-  res.json(await Plan.find().sort({ sortOrder: 1 }));
+  const plans = await Plan.find().sort({ sortOrder: 1 }).lean();
+
+  /**
+   * Whether each plan can actually be sold, per cycle (3.3 #10).
+   *
+   * A Razorpay plan id is required to open a subscription, and the ids are
+   * provider-generated so they cannot be inferred from the plan code. Without
+   * this the console showed four healthy-looking plans that would every one of
+   * them fail at the moment a customer pressed pay — and the operator's only
+   * clue would be a support ticket.
+   *
+   * A free plan needs nothing: no charge is created, so no provider plan exists.
+   */
+  const sellable = plan => ({
+    monthly: !(Number(plan.monthlyPrice) > 0) || Boolean(plan.providerPlanIds?.monthly),
+    yearly: !(Number(plan.yearlyPrice) > 0) || Boolean(plan.providerPlanIds?.yearly)
+  });
+
+  const decorated = plans.map(plan => ({ ...plan, sellable: sellable(plan) }));
+  const blocked = decorated.filter(p => p.active && (!p.sellable.monthly || !p.sellable.yearly));
+
+  res.json({
+    plans: decorated,
+    billingConfigured: env.billingConfigured,
+    /**
+     * Stated once, plainly. Only meaningful when Razorpay is actually wired up:
+     * a deployment with no keys refuses paid plans anyway, and warning about
+     * missing plan ids there would be noise about a door that is already shut.
+     */
+    providerNote: !env.billingConfigured
+      ? 'No payment provider is configured, so paid plans are refused at checkout regardless of these ids.'
+      : blocked.length
+        ? `${blocked.map(p => p.code).join(', ')} cannot be sold yet: create the plan in Razorpay and paste its id (plan_...) below. Razorpay charges what its own plan says, and monthly and yearly are two separate plans there.`
+        : 'Every active plan has a Razorpay plan id for each cycle it is priced on.'
+  });
 });
 
 /**
@@ -346,7 +381,16 @@ const upsertPlan = asyncHandler(async (req, res) => {
   // these routes carry no validator — an unfiltered upsert would let a caller
   // set `currentVersion` and desynchronise the plan from its own history.
   const changes = pickFields(req.body, [
-    'name', 'monthlyPrice', 'yearlyPrice', 'userLimit', 'invoiceLimit', 'features', 'active', 'sortOrder'
+    'name', 'monthlyPrice', 'yearlyPrice', 'userLimit', 'invoiceLimit', 'features', 'active', 'sortOrder',
+    /**
+     * The Razorpay plan ids (3.3 #10).
+     *
+     * Deliberately *not* part of `planVersionService.differs()`, so editing one
+     * does not mint a price version: it is plumbing to the gateway, not a
+     * commercial term anybody was sold on, and a version history full of
+     * "changed the plan id" entries buries the price changes that matter.
+     */
+    'providerPlanIds'
   ]);
 
   const result = await planVersions.publish({

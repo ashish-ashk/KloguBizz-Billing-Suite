@@ -2782,3 +2782,101 @@ test('scheduled plan changes are a registered job, so one that stops is visible'
   assert.ok(entry, 'the sweep is declared in the registry, not discovered from its own history');
   assert.equal(entry.label, 'Apply scheduled plan downgrades');
 }));
+
+// ── Razorpay plan ids (3.3 #10) ──────────────────
+
+const razorpay = require('../src/services/razorpayService');
+
+test('a subscription cannot be opened without the provider plan id', maybe(async () => {
+  /**
+   * The launch blocker this holds shut.
+   *
+   * `createSubscription` used to send `plan_id: planCode` — our own `"growth"`.
+   * Razorpay plan ids are provider-generated (`plan_NRxyz123abc`) and cannot be
+   * chosen, so **every real checkout would have been rejected by the gateway**.
+   * It was invisible in development because without credentials the service
+   * returns a local stub and never calls Razorpay at all.
+   */
+  assert.throws(
+    () => razorpay.assertProviderPlan({ planCode: 'growth', providerPlanId: '', billingCycle: 'yearly' }),
+    err => err.code === 'PROVIDER_PLAN_NOT_CONFIGURED' && /yearly/.test(err.message)
+  );
+  // Naming the cycle matters: monthly and yearly are separate plans at the
+  // provider, so "growth is not configured" would send someone to check the one
+  // that already works.
+  razorpay.assertProviderPlan({ planCode: 'growth', providerPlanId: 'plan_ok', billingCycle: 'monthly' });
+
+  /**
+   * And a deployment with no credentials still returns the local stub without
+   * ever reaching the guard — development has no Razorpay plans and does not
+   * need any, because it never calls the gateway.
+   */
+  const local = await razorpay.createSubscription({
+    planCode: 'growth', orgId: 'x', providerPlanId: '', billingCycle: 'monthly'
+  });
+  assert.equal(local.localMode, true);
+}));
+
+test('the mandate length is counted in periods, not months', maybe(async () => {
+  /**
+   * Razorpay's `total_count` counts *periods*. The fixed 120 meant ten years on
+   * a monthly plan and **one hundred and twenty years** on an annual one — a
+   * mandate outliving everyone involved, which some banks refuse outright.
+   */
+  assert.equal(razorpay.totalCountFor('monthly'), 120);
+  assert.equal(razorpay.totalCountFor('yearly'), 10);
+}));
+
+test('the console names the plans that cannot be sold yet', maybe(async () => {
+  await Plan.updateOne(
+    { code: 'growth' },
+    { $set: { monthlyPrice: 999, yearlyPrice: 9990, active: true, providerPlanIds: { monthly: 'plan_real123', yearly: '' } } },
+    { upsert: true }
+  );
+  const { token } = await platformAccount('owner');
+  const { status, body } = await call('GET', '/superadmin/plans', { token });
+
+  assert.equal(status, 200);
+  assert.ok(Array.isArray(body.plans), 'the envelope carries the plans');
+  const growth = body.plans.find(p => p.code === 'growth');
+  /**
+   * Per cycle, because they are two different plans at the provider. A plan
+   * with a monthly id and no yearly one is half-sellable, and the console has to
+   * say which half — otherwise the operator ticks it off and a yearly customer
+   * finds out for them.
+   */
+  assert.equal(growth.sellable.monthly, true);
+  assert.equal(growth.sellable.yearly, false);
+  assert.ok(body.providerNote.length);
+}));
+
+test('a free plan needs no provider plan id', maybe(async () => {
+  await Plan.updateOne(
+    { code: 'starter' },
+    { $set: { monthlyPrice: 0, yearlyPrice: 0, active: true, providerPlanIds: { monthly: '', yearly: '' } } },
+    { upsert: true }
+  );
+  const { token } = await platformAccount('owner');
+  const { body } = await call('GET', '/superadmin/plans', { token });
+  const starter = body.plans.find(p => p.code === 'starter');
+  // No charge is created, so there is no provider plan to point at. Flagging it
+  // would be noise about a door that is already shut.
+  assert.equal(starter.sellable.monthly, true);
+  assert.equal(starter.sellable.yearly, true);
+}));
+
+test('the provider plan ids survive a save', maybe(async () => {
+  const { token } = await platformAccount('owner');
+  const saved = await call('PUT', '/superadmin/plans/growth', {
+    token,
+    body: {
+      code: 'growth', name: 'Growth', monthlyPrice: 999, yearlyPrice: 9990,
+      providerPlanIds: { monthly: 'plan_month_1', yearly: 'plan_year_1' }
+    }
+  });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+
+  const stored = await Plan.findOne({ code: 'growth' }).lean();
+  assert.equal(stored.providerPlanIds.monthly, 'plan_month_1');
+  assert.equal(stored.providerPlanIds.yearly, 'plan_year_1');
+}));

@@ -62,6 +62,14 @@ interface EditablePlan extends Plan {
     @if (loading()) {
       <div class="card flush"><app-skeleton-rows [count]="5" /></div>
     } @else {
+      @if (providerNote()) {
+        <!--
+          Said once and plainly. A plan with no Razorpay plan id looks perfectly
+          healthy here and fails at the moment a customer presses pay, and the
+          operator's only clue would otherwise be a support ticket.
+        -->
+        <div class="info-box" style="margin-bottom:16px;line-height:1.6">{{ providerNote() }}</div>
+      }
       <div class="grid grid-2" style="margin-bottom:16px;">
         @for (p of plans(); track p.code) {
           <section class="card">
@@ -81,6 +89,30 @@ interface EditablePlan extends Plan {
               <div class="field"><label>Max Users</label><input type="number" [(ngModel)]="p.userLimit" /></div>
               <div class="field"><label>Max Invoices / month</label><input type="number" [(ngModel)]="p.invoiceLimit" /></div>
             </div>
+            <!--
+              The Razorpay plan ids (3.3 #10).
+              Provider-generated, so they cannot be derived from the code — and
+              monthly and yearly are two separate plans there, because a Razorpay
+              plan carries a fixed period and amount.
+            -->
+            @if (billingConfigured()) {
+              <div class="grid grid-2" style="gap:12px;margin-top:12px;">
+                <div class="field">
+                  <label>Razorpay plan id — monthly</label>
+                  <input class="mono" [(ngModel)]="p.providerPlanIds!.monthly" placeholder="plan_..." />
+                  @if (p.monthlyPrice && !p.providerPlanIds?.monthly) {
+                    <span class="err">Priced at {{ fmtINR(p.monthlyPrice) }} but not sellable — checkout will be refused.</span>
+                  }
+                </div>
+                <div class="field">
+                  <label>Razorpay plan id — yearly</label>
+                  <input class="mono" [(ngModel)]="p.providerPlanIds!.yearly" placeholder="plan_..." />
+                  @if (p.yearlyPrice && !p.providerPlanIds?.yearly) {
+                    <span class="err">Priced at {{ fmtINR(p.yearlyPrice) }} but not sellable — checkout will be refused.</span>
+                  }
+                </div>
+              </div>
+            }
             <div class="field" style="margin-top:12px;">
               <label>Features (one per line)</label>
               <textarea rows="4" [(ngModel)]="p.featuresText"></textarea>
@@ -171,6 +203,9 @@ export class SuperPlansComponent implements OnInit {
   historyPlan = signal('');
   history = signal<PlanVersion[]>([]);
   plans = signal<EditablePlan[]>([]);
+  /** Whether every active plan can actually be sold, and why not (3.3 #10). */
+  providerNote = signal('');
+  billingConfigured = signal(false);
   orgs = signal<OrgSummary[]>([]);
   trialOrgs = signal<OrgSummary[]>([]);
   overrideOrgId = '';
@@ -191,7 +226,16 @@ export class SuperPlansComponent implements OnInit {
       trials: this.api.superOrganisations({ status: 'trial', limit: 200 })
     }).subscribe({
       next: ({ plans, orgs, trials }) => {
-        this.plans.set(plans.map(p => ({ ...p, featuresText: (p.features || []).join('\n') })));
+        this.providerNote.set(plans.providerNote);
+        this.billingConfigured.set(plans.billingConfigured);
+        this.plans.set(plans.plans.map(p => ({
+          ...p,
+          featuresText: (p.features || []).join('\n'),
+          // Copied into a concrete object so the inputs bind to something that
+          // always exists, rather than to an optional the template would have to
+          // guard on every keystroke.
+          providerPlanIds: { monthly: p.providerPlanIds?.monthly || '', yearly: p.providerPlanIds?.yearly || '' }
+        })));
         this.orgs.set(orgs.data);
         this.trialOrgs.set(trials.data);
         this.loading.set(false);

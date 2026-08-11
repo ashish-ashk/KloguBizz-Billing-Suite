@@ -1138,6 +1138,17 @@ export interface Plan {
   features: string[];
   active?: boolean;
   sortOrder?: number;
+  /**
+   * The Razorpay plan each cycle maps to (3.3 #10).
+   *
+   * Provider-generated (`plan_NRxyz...`) and therefore not derivable from
+   * `code`. Monthly and yearly are two separate plans at Razorpay, because a
+   * plan there carries a fixed period and amount.
+   */
+  providerPlanIds?: { monthly?: string; yearly?: string };
+  /** Computed by the console: whether a subscription can actually be opened on
+   *  this cycle. A free cycle needs no provider plan. */
+  sellable?: { monthly: boolean; yearly: boolean };
 }
 
 /** A plan as it stood at a point in time. Immutable — a wrong version is

@@ -435,7 +435,7 @@ export class SuperOrganisationsComponent implements OnInit, OnDestroy {
 
   ngOnInit() {
     this.load();
-    this.api.superPlans().subscribe({ next: p => this.plans.set(p), error: () => {} });
+    this.api.superPlans().subscribe({ next: res => this.plans.set(res.plans), error: () => {} });
   }
 
   ngOnDestroy() { this.list.dispose(); }
