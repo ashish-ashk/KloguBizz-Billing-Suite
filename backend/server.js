@@ -37,7 +37,32 @@ app.use(requestLogger);
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || env.FRONTEND_URLS.includes(origin.replace(/\/$/, ''))) return callback(null, true);
-    return callback(new Error(`Origin ${origin} is not allowed by CORS`));
+
+    /**
+     * An unlisted origin is refused by **omitting** the CORS headers, not by
+     * raising an error.
+     *
+     * Passing an `Error` here hands it to `next()`, and the error handler turns
+     * anything without a `statusCode` into a **500** — so a misconfigured
+     * `FRONTEND_URL` presented as "Something went wrong on our side" on every
+     * preflight, for every origin, including the ones that were allowed a moment
+     * earlier. Indistinguishable from a broken server, and it is the first thing
+     * anyone hits after a deploy: the browser reports a CORS failure, the
+     * operator reads a 500 in the logs, and the two never point at the same
+     * cause.
+     *
+     * `callback(null, false)` is the correct refusal: the response completes
+     * normally without `Access-Control-Allow-Origin`, and the *browser* blocks
+     * it — which is what a CORS rejection is supposed to look like.
+     */
+    logger.warn('CORS: refused an origin that is not in FRONTEND_URL', {
+      origin,
+      // Named, because the whole failure is "these two strings do not match" and
+      // a log that omits one of them cannot settle it. A trailing slash or
+      // http-versus-https is the usual culprit.
+      allowed: env.FRONTEND_URLS
+    });
+    return callback(null, false);
   },
   credentials: true
 }));

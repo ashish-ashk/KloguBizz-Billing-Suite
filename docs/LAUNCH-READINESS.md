@@ -150,9 +150,27 @@ reasoning, so the errors make sense when you hit them.
 | `MONGO_URI` | **Hard error.** Would otherwise try a local database that does not exist |
 | `JWT_SECRET`, `JWT_REFRESH_SECRET` | **Hard error** on the dev defaults. A known signing key is the ability to mint a token for any account |
 | `RAZORPAY_WEBHOOK_SECRET` | **Hard error** if Razorpay is configured and this is the default. A forged `subscription.charged` upgrades an account for free |
-| `FRONTEND_URL` | Warning. CORS allows only `localhost:4200` without it, so the deployed frontend cannot call the API. Accepts a comma-separated list |
+| `FRONTEND_URL` | Warning. CORS allows only `localhost:4200` without it, so the deployed frontend cannot call the API. Accepts a comma-separated list — see below |
 | `STORAGE_DRIVER` | Warning, and the one worth reading twice — see below |
 | `SENDGRID_API_KEY` | Warning. Every email is *skipped*, not queued. Invites, reminders and dunning silently do nothing |
+
+### `FRONTEND_URL` has to match the browser's origin exactly
+
+Scheme, host and port, comma-separated for more than one. `https://example.com`
+and `https://www.example.com` are two different origins and both need listing; a
+trailing slash is tolerated, `http` versus `https` is not.
+
+When it does not match, the browser reports a CORS failure and the API logs
+`CORS: refused an origin that is not in FRONTEND_URL` **with both the rejected
+origin and the allowed list**, because the whole failure is those two strings not
+matching and a log naming only one of them cannot settle it.
+
+Verify from a terminal rather than guessing — a `204` with the header echoed back
+is a pass:
+
+```bash
+curl -i -X OPTIONS https://<api-host>/api/v1/auth/login   -H "Origin: https://<your-frontend>" -H "Access-Control-Request-Method: POST"
+```
 
 ### `STORAGE_DRIVER` deserves its own paragraph
 

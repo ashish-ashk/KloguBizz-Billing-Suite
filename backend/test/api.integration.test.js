@@ -13,6 +13,9 @@ process.env.MONGO_URI = 'mongodb://127.0.0.1:27017/klogubizz_integration_test';
 process.env.NODE_ENV = 'test';
 process.env.RAZORPAY_WEBHOOK_SECRET = 'test_webhook_secret';
 process.env.JWT_SECRET = 'test_jwt_secret_used_only_by_the_integration_suite';
+/** Set before `server.js` is required, because `config/env.js` resolves the
+ *  allowlist once at load. Two entries, so the comma-separated form is exercised. */
+process.env.FRONTEND_URL = 'https://app.example.com, https://www.app.example.com';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -678,3 +681,62 @@ test('adding a schema to a route moves it out of the gap list', maybe(async () =
   assert.match(doc['x-undocumented'].actions[0], /undocumented/);
 }));
 
+
+// ── CORS (the deploy-day failure) ────────────────
+
+test('an allowed origin gets the CORS headers back', maybe(async () => {
+  const response = await fetch(`${baseUrl}/auth/login`, {
+    method: 'OPTIONS',
+    headers: { Origin: 'https://app.example.com', 'Access-Control-Request-Method': 'POST' }
+  });
+  assert.ok(response.status < 300, `preflight should succeed, got ${response.status}`);
+  assert.equal(response.headers.get('access-control-allow-origin'), 'https://app.example.com');
+  assert.equal(response.headers.get('access-control-allow-credentials'), 'true');
+}));
+
+test('a second listed origin works too, so apex and www can both be served', maybe(async () => {
+  const response = await fetch(`${baseUrl}/auth/login`, {
+    method: 'OPTIONS',
+    headers: { Origin: 'https://www.app.example.com', 'Access-Control-Request-Method': 'POST' }
+  });
+  assert.equal(response.headers.get('access-control-allow-origin'), 'https://www.app.example.com');
+}));
+
+test('an unlisted origin is refused without the headers, not with a 500', maybe(async () => {
+  const response = await fetch(`${baseUrl}/auth/login`, {
+    method: 'OPTIONS',
+    headers: { Origin: 'https://not-mine.example.com', 'Access-Control-Request-Method': 'POST' }
+  });
+
+  /**
+   * The deploy-day bug this holds shut.
+   *
+   * The rejection used to be `callback(new Error(...))`, which `cors` hands to
+   * `next()` and the error handler turns into a **500** — so a misconfigured
+   * `FRONTEND_URL` reported "Something went wrong on our side" on every
+   * preflight. Indistinguishable from a broken server, and it is the first thing
+   * anyone hits after a deploy: the browser reports a CORS failure, the operator
+   * reads a 500, and the two never point at the same cause.
+   *
+   * The correct refusal is to omit the header and let the *browser* block it.
+   */
+  assert.notEqual(response.status, 500, 'a refused origin is not a server fault');
+  assert.equal(response.headers.get('access-control-allow-origin'), null);
+}));
+
+test('a request with no Origin at all is allowed through', maybe(async () => {
+  // Health checks, server-to-server calls and curl send none. Browsers always
+  // do, so this cannot be used to bypass the allowlist from a page.
+  const response = await fetch(`${baseUrl}/public/branding`);
+  assert.equal(response.status, 200);
+}));
+
+test('a trailing slash on the configured origin still matches', maybe(async () => {
+  // The single most common way to get this wrong, and it used to produce the
+  // same indistinguishable 500 as a genuinely wrong domain.
+  const response = await fetch(`${baseUrl}/auth/login`, {
+    method: 'OPTIONS',
+    headers: { Origin: 'https://app.example.com/', 'Access-Control-Request-Method': 'POST' }
+  });
+  assert.notEqual(response.status, 500);
+}));
