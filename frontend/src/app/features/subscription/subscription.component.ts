@@ -7,6 +7,8 @@ import { ModalComponent, PillComponent, EmptyStateComponent, SkeletonRowsCompone
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
 import { BillingCredit, CouponQuote, Plan, PlanChangePreview, PlanUsage, Subscription } from '../../core/models';
+import { RazorpayCheckoutService } from '../../core/razorpay-checkout.service';
+import { AuthService } from '../../core/auth.service';
 import { fmtDate, fmtINR } from '../../core/format';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -381,7 +383,12 @@ export class SubscriptionComponent implements OnInit {
     return d.listPrice === this.bannerPrice() ? null : d.listPrice;
   });
 
-  constructor(private api: ApiService, private toast: ToastService) {}
+  constructor(
+    private api: ApiService,
+    private toast: ToastService,
+    private checkout: RazorpayCheckoutService,
+    private auth: AuthService
+  ) {}
 
   ngOnInit() {
     this.load();
@@ -570,15 +577,94 @@ export class SubscriptionComponent implements OnInit {
         // changed yet, so it is reported as the arrangement it is.
         if (result?.scheduled) {
           this.toast.info(result.message || `${plan.name} starts at the end of your current period.`);
-        } else if (result?.pendingPayment) {
-          this.toast.info(result.message || `Complete the payment to activate ${plan.name}. Your current plan stays active until then.`);
-        } else {
-          this.toast.success(result?.message || `Plan updated to ${plan.name}`);
+          this.load();
+          return;
         }
+
+        /**
+         * Open the payment window (3.3 #10).
+         *
+         * The API has returned everything needed to do this since billing
+         * shipped — `checkout.keyId` and `checkout.subscriptionId` — and nothing
+         * ever used it. Pressing "Confirm Upgrade" on a paid plan showed a toast
+         * saying "complete the payment" and then offered no way to complete it.
+         * There was no payment step at all, which is why no subscription could
+         * ever be bought.
+         */
+        if (result?.pendingPayment && result.checkout) {
+          this.payForSubscription(result.checkout, plan);
+          return;
+        }
+
+        this.toast.success(result?.message || `Plan updated to ${plan.name}`);
         this.load();
       },
       error: err => { this.saving.set(false); this.toast.httpError(err); }
     });
+  }
+
+  /**
+   * Opens Razorpay's window for a subscription that is waiting on payment.
+   *
+   * A subscription checkout takes `subscription_id` and **no amount**: what is
+   * charged is fixed by the Razorpay plan the subscription was opened against,
+   * so there is deliberately no field here that could disagree with it.
+   */
+  private async payForSubscription(checkout: { keyId: string; subscriptionId: string }, plan: Plan) {
+    this.saving.set(true);
+    const ready = await this.checkout.load();
+    if (!ready) {
+      this.saving.set(false);
+      this.toast.error('The secure payment window could not be loaded. Check your connection and try again — nothing has been charged.');
+      this.load();
+      return;
+    }
+
+    const rzp = this.checkout.open({
+      key: checkout.keyId,
+      subscription_id: checkout.subscriptionId,
+      name: 'Klogu Bizz',
+      description: `${plan.name} subscription`,
+      prefill: { email: this.auth.user()?.email || '' },
+      theme: { color: '#4f46e5' },
+      /**
+       * The plan is granted by the verified webhook, never by this callback —
+       * anything the browser reports can be forged. So this says the payment
+       * arrived and reloads; the plan appears once the provider confirms it.
+       */
+      handler: () => {
+        this.saving.set(false);
+        this.toast.success('Payment received. Your plan will switch over as soon as the payment provider confirms it — usually a few seconds.');
+        this.load();
+        // One delayed re-read, because the webhook usually lands within a second
+        // or two and a page that still says the old plan reads as a failure.
+        setTimeout(() => this.load(), 6000);
+      },
+      modal: {
+        // Closing the window is not a failure — they decided not to pay now, and
+        // saying something went wrong would be a lie.
+        ondismiss: () => {
+          this.saving.set(false);
+          this.toast.info('Payment cancelled. You are still on your current plan.');
+          this.load();
+        }
+      }
+    });
+
+    if (!rzp) {
+      this.saving.set(false);
+      this.toast.error('The secure payment window could not be opened. Nothing has been charged.');
+      return;
+    }
+
+    rzp.on('payment.failed', (response: unknown) => {
+      this.saving.set(false);
+      const reason = (response as { error?: { description?: string } })?.error?.description;
+      this.toast.error(reason || 'The payment did not go through. Nothing has been charged — please try again.');
+      this.load();
+    });
+
+    rzp.open();
   }
 
   /** Calls off a scheduled downgrade — the reason it is a plan rather than a write. */

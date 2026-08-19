@@ -2,6 +2,7 @@ import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
+import { RazorpayCheckoutService } from '../../core/razorpay-checkout.service';
 import { environment } from '../../../environments/environment';
 import { IconComponent } from '../../shared/icons';
 import { fmtINR, fmtDate } from '../../core/format';
@@ -31,14 +32,13 @@ interface OrderResponse {
   invoiceNumber: string;
 }
 
-/** Razorpay's checkout script, loaded on demand. */
+/** Razorpay's checkout object, as this page uses it. */
 interface RazorpayCheckout {
   open(): void;
   on(event: string, handler: (response: unknown) => void): void;
 }
 type RazorpayConstructor = new (options: Record<string, unknown>) => RazorpayCheckout;
 
-const CHECKOUT_SCRIPT = 'https://checkout.razorpay.com/v1/checkout.js';
 
 /**
  * The hosted pay page (2.3 #21, #23).
@@ -215,7 +215,11 @@ export class PayComponent implements OnInit {
   private token = '';
   private api = environment.apiUrl;
 
-  constructor(private route: ActivatedRoute, private http: HttpClient) {}
+  constructor(
+    private route: ActivatedRoute,
+    private http: HttpClient,
+    private checkoutLoader: RazorpayCheckoutService
+  ) {}
 
   ngOnInit() {
     this.token = this.route.snapshot.paramMap.get('token') || '';
@@ -252,23 +256,12 @@ export class PayComponent implements OnInit {
   }
 
   /**
-   * Loads the gateway's checkout script on demand.
-   *
-   * Not in `index.html`: every visitor to the app would download a payment script
-   * they will never use, and a third-party script on every page of a billing
-   * product is a larger surface than it needs to be. Resolves `false` rather than
-   * throwing so the caller can show a real message.
+   * Loading moved to `RazorpayCheckoutService` once the subscription page needed
+   * it too — one copy, because a payment path that behaves differently in two
+   * places depending on which copy was fixed is the worst kind of duplication.
    */
   private loadCheckout(): Promise<boolean> {
-    const w = window as unknown as { Razorpay?: RazorpayConstructor };
-    if (w.Razorpay) return Promise.resolve(true);
-    return new Promise(resolve => {
-      const script = document.createElement('script');
-      script.src = CHECKOUT_SCRIPT;
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.head.appendChild(script);
-    });
+    return this.checkoutLoader.load();
   }
 
   async pay() {

@@ -249,6 +249,13 @@ The console names every active plan priced on a cycle with no id against it, and
 checkout refuses that cycle saying which plan and which cycle — rather than
 letting the gateway reject it with something generic.
 
+Once the ids are in, pressing **Confirm Upgrade** on a paid plan opens Razorpay's
+payment window. **The plan is granted by the webhook, never by the browser** — so
+after a successful payment the page says the payment arrived and switches over a
+moment later, when the provider confirms it. If the plan does not appear within a
+few seconds, the webhook is not reaching you: check its delivery log in the
+Razorpay dashboard before looking anywhere else.
+
 **Razorpay's amount wins.** If its plan says ₹4,999 and yours says ₹2,499, the
 card is charged ₹4,999: this codebase never writes the amount. Keep the two in
 step by hand. Local plan versioning governs what the product *displays, enforces
