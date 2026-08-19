@@ -740,3 +740,62 @@ test('a trailing slash on the configured origin still matches', maybe(async () =
   });
   assert.notEqual(response.status, 500);
 }));
+
+// ── What the session payload says about MFA ──────
+
+const totpUtil = require('../src/utils/totp');
+
+/** A live six-digit code for a secret, so enrolment can be completed in a test. */
+function totpFor(secret) {
+  return totpUtil.codeForCounter(secret, Math.floor(Date.now() / 1000 / totpUtil.STEP_SECONDS));
+}
+
+test('the session tells the client whether MFA is on', maybe(async () => {
+  const tenant = await registerOrg();
+
+  /**
+   * The reported bug. `authPayload` returned `{ id, name, email, role, status }`
+   * and nothing else, so the shared enrolment component — which reads
+   * `user.mfa.enabled` — saw `undefined` on every account. It showed "Off" and a
+   * "Set up" button to somebody who had already enrolled, and never showed the
+   * "Turn off" or "New recovery codes" controls at all. In both the tenant
+   * security page and the platform console, because they share one component.
+   */
+  const login = await call('POST', '/auth/login', {
+    body: { email: tenant.email, password: 'Password@123' }
+  });
+  assert.equal(login.status, 200);
+  assert.equal(login.body.user.mfa.enabled, false, 'stated, not absent');
+  assert.equal(typeof login.body.user.mfa.backupCodesRemaining, 'number');
+}));
+
+test('the session never carries the TOTP secret or the recovery-code hashes', maybe(async () => {
+  const tenant = await registerOrg();
+
+  const setup = await call('POST', '/auth/mfa/setup', { token: tenant.token });
+  assert.equal(setup.status, 200, JSON.stringify(setup.body));
+  const code = totpFor(setup.body.secret);
+  const enabled = await call('POST', '/auth/mfa/enable', { token: tenant.token, body: { code } });
+  assert.equal(enabled.status, 200, JSON.stringify(enabled.body));
+
+  const me = await call('GET', '/auth/me', { token: tenant.token });
+  assert.equal(me.status, 200);
+  assert.equal(me.body.user.mfa.enabled, true);
+
+  /**
+   * `/auth/me` returned `req.user` wholesale, which is the Mongoose document
+   * with only `passwordHash` deselected — so **the encrypted TOTP secret and the
+   * hashed recovery codes were sent to the browser on every page load**.
+   *
+   * The recovery-code hashes are the serious half: forty bits of entropy under a
+   * single unsalted SHA-256, which is minutes of offline brute force on ordinary
+   * hardware. Anything that can read one response — an XSS, a browser extension,
+   * a shared machine, a logging proxy — recovers working codes and walks past the
+   * second factor entirely.
+   */
+  assert.equal(me.body.user.mfa.secret, undefined, 'the encrypted secret must never leave the server');
+  assert.equal(me.body.user.mfa.backupCodes, undefined, 'nor the recovery-code hashes');
+  assert.equal(me.body.user.passwordHash, undefined);
+  // The count is safe and is what the UI actually needs, so it is sent instead.
+  assert.equal(me.body.user.mfa.backupCodesRemaining, 8);
+}));

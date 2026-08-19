@@ -68,21 +68,57 @@ function signToken(user, orgId, role) {
   );
 }
 
+/**
+ * What a client is told about a user's second factor.
+ *
+ * Three facts, deliberately, and never the secret or the recovery-code hashes.
+ *
+ * `enabled` because the security page reads it to decide whether to offer
+ * "Set up" or "Turn off" — it was absent from this payload entirely, so an
+ * enrolled account was shown "Off" and a Set up button, with no way to turn it
+ * off or reissue recovery codes. One shared component, so both the tenant page
+ * and the platform console were wrong the same way.
+ *
+ * `backupCodesRemaining` because zero left plus a lost phone is a locked account,
+ * and a count nobody is shown is a warning nobody gets.
+ *
+ * **What it deliberately omits is the point.** `/auth/me` returned `req.user`
+ * whole — the Mongoose document with only `passwordHash` deselected — so the
+ * encrypted TOTP secret and the hashed recovery codes went to the browser on
+ * every page load. The hashes are the serious half: forty bits of entropy under
+ * a single unsalted SHA-256, which is minutes of offline brute force. Anything
+ * that can read one response walks straight past the second factor.
+ */
+function mfaSummary(user) {
+  return {
+    enabled: Boolean(user?.mfa?.enabled),
+    enrolledAt: user?.mfa?.enrolledAt || null,
+    backupCodesRemaining: (user?.mfa?.backupCodes || []).length
+  };
+}
+
+/** The user fields a client may see. An allowlist, so a field added to the model
+ *  is never exposed by default — which is how the MFA secret got out. */
+function publicUser(user, role) {
+  return {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    // The role for *this* organisation/session, not necessarily user.role
+    // (which is meaningless once a membership exists — see models/User.js).
+    role: role ?? user.role,
+    status: user.status,
+    mfa: mfaSummary(user)
+  };
+}
+
 function authPayload(user, organisation, orgId, role) {
   return {
     token: signToken(user, orgId, role),
     // Seconds, not the JWT's raw `exp`, so the client doesn't need to decode
     // the token just to know when to refresh.
     expiresIn: sessionService.ACCESS_TOKEN_TTL_SECONDS,
-    user: {
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      // The role for *this* organisation/session, not necessarily user.role
-      // (which is meaningless once a membership exists — see models/User.js).
-      role,
-      status: user.status
-    },
+    user: publicUser(user, role),
     // The organisation's logo and letterhead are replaced with cacheable asset
     // URLs. They are base64 data URIs of up to 500KB and 700KB, and this payload
     // is returned by login, register, accept-invite *and* /auth/me — which the
@@ -320,7 +356,15 @@ const me = asyncHandler(async (req, res) => {
     (req.user.role === 'superadmin' || req.impersonation) ? [] : listMemberships(req.user._id)
   ]);
   res.json({
-    user: req.user,
+    /**
+     * Filtered, not the raw document.
+     *
+     * This returned `req.user` whole, which `protect` loads with only
+     * `passwordHash` deselected — so the encrypted TOTP secret and the
+     * recovery-code hashes were sent to the browser on every page load. An
+     * allowlist means a field added to the model is never exposed by accident.
+     */
+    user: { ...publicUser(req.user, req.user.role), platformRole: req.user.platformRole },
     organisation: serialiseOrganisation(organisation),
     flags,
     notices,

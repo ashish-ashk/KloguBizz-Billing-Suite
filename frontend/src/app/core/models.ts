@@ -33,6 +33,22 @@ export interface AuthUser {
   email: string;
   role: 'superadmin' | 'admin' | 'accountant' | 'viewer';
   status: string;
+  /**
+   * The second factor's state — never its secret.
+   *
+   * The server sends exactly these three facts. `enabled` drives whether the
+   * security page offers "Set up" or "Turn off"; it was missing from the session
+   * payload entirely, so an enrolled account was shown "Off" and a Set up button
+   * with no way to turn it off. `backupCodesRemaining` is here because zero left
+   * plus a lost phone is a locked account, and a count nobody sees is a warning
+   * nobody gets.
+   */
+  mfa?: {
+    enabled: boolean;
+    enrolledAt?: string | null;
+    backupCodesRemaining: number;
+  };
+  platformRole?: string;
 }
 
 export interface Organisation {

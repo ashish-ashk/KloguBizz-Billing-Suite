@@ -47,6 +47,22 @@ import { MfaSetup } from '../core/models';
           <app-icon name="lock" [size]="15" style="flex-shrink:0;margin-top:1px" />
           <span>This account asks for a code from your authenticator app at every sign-in.</span>
         </div>
+        @if (backupCodesLeft() !== null && backupCodesLeft()! <= 2) {
+          <!-- Running out is otherwise silent: codes are consumed on use, and
+               nobody counts them until the day they need one. -->
+          <div class="info-box warn" style="margin-top:10px;display:flex;gap:8px;align-items:flex-start">
+            <app-icon name="alertTriangle" [size]="15" style="flex-shrink:0;margin-top:1px" />
+            <span>
+              @if (backupCodesLeft() === 0) {
+                <strong>No recovery codes left.</strong> If you lose your phone you will be locked
+                out of this account. Generate a new set now.
+              } @else {
+                <strong>{{ backupCodesLeft() }} recovery code{{ backupCodesLeft() === 1 ? '' : 's' }} left.</strong>
+                Generate a new set before you run out.
+              }
+            </span>
+          </div>
+        }
         <div class="actions" style="justify-content:flex-end;margin-top:12px">
           <button class="btn secondary sm" type="button" (click)="openRegenerate()">New recovery codes</button>
           @if (!required()) {
@@ -194,10 +210,16 @@ export class MfaEnrolmentComponent {
    * returns the user, and a second request for one boolean would be a request per
    * page load for information already in hand.
    */
-  enabled = computed(() => {
-    const user = this.auth.user() as unknown as Record<string, unknown> | null;
-    return Boolean((user?.['mfa'] as { enabled?: boolean } | undefined)?.enabled);
-  });
+  enabled = computed(() => Boolean(this.auth.user()?.mfa?.enabled));
+
+  /**
+   * How many recovery codes are left.
+   *
+   * Surfaced because running out is silent otherwise: each one is consumed on
+   * use, and a user with none left who then loses their phone has no way back in
+   * that does not involve an operator with shell access.
+   */
+  backupCodesLeft = computed(() => this.auth.user()?.mfa?.backupCodesRemaining ?? null);
 
   constructor(private api: ApiService, private auth: AuthService, private toast: ToastService) {}
 
@@ -264,6 +286,9 @@ export class MfaEnrolmentComponent {
         this.password = '';
         this.code = '';
         this.toast.info(res.message);
+        // Forced, for the same reason enrolment forces it: the on/off state is
+        // read from the session, so a cached one would leave the page claiming
+        // the factor is still on.
         this.auth.refreshSession(true).subscribe({ error: () => {} });
       },
       error: err => { this.busy.set(false); this.toast.httpError(err); }

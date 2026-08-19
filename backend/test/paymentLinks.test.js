@@ -127,11 +127,25 @@ async function createClient(token, overrides = {}) {
 /** An **issued** invoice. `status: 'pending'` is explicit because the model
  *  defaults to 'draft', and a draft correctly refuses a payment link — there is
  *  no number a customer should see and the figures may still change. */
+/**
+ * Dates relative to today, not hardcoded.
+ *
+ * `dueDate: '2026-08-15'` with an assertion of `status: 'pending'` was a time
+ * bomb: correct when written, and wrong from the moment the calendar passed the
+ * due date, because the API derives `overdue` from the due date and the hourly
+ * sweep writes it. A test that changes meaning while nobody edits it is worse
+ * than no test — it fails long after the change that "caused" it, and the first
+ * person to see it goes looking for a regression that is not there.
+ */
+function daysFromNow(days) {
+  return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+}
+
 async function createInvoice(token, clientId, overrides = {}) {
   const { status, body } = await call('POST', '/invoices', {
     token,
     body: {
-      clientId, date: '2026-08-01', dueDate: '2026-08-15', status: 'pending',
+      clientId, date: daysFromNow(-7), dueDate: daysFromNow(30), status: 'pending',
       items: [{ desc: 'Services', qty: 1, rate: 10000, gstRate: 18 }],
       ...overrides
     }
@@ -247,7 +261,7 @@ test('a draft, a cancelled and a fully-paid invoice each refuse with their own r
   // Draft: no number a customer should see, and the figures may still change.
   const draft = await call('POST', '/invoices', {
     token: tenant.token,
-    body: { clientId: client._id, date: '2026-08-01', dueDate: '2026-08-15', status: 'draft', items: [{ desc: 'x', qty: 1, rate: 100, gstRate: 18 }] }
+    body: { clientId: client._id, date: daysFromNow(-7), dueDate: daysFromNow(30), status: 'draft', items: [{ desc: 'x', qty: 1, rate: 100, gstRate: 18 }] }
   });
   const draftLink = await call('POST', '/payment-links', { token: tenant.token, body: { invoiceId: draft.body._id } });
   assert.equal(draftLink.status, 409);
