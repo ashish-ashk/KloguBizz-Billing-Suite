@@ -22,6 +22,7 @@ const { httpError } = require('../utils/httpError');
 const { logAudit } = require('../services/auditService');
 const { pickFields } = require('../utils/pickFields');
 const planVersions = require('../services/planVersionService');
+const { capabilitiesFor } = require('../services/planCapabilities');
 const { paginate, parsePageParams, buildEnvelope, escapeRegex, parseSort } = require('../utils/pagination');
 const { streamCsv } = require('../services/csvService');
 const { invalidateMasterCache } = require('../services/masterService');
@@ -340,7 +341,18 @@ const listPlansAdmin = asyncHandler(async (req, res) => {
     yearly: !(Number(plan.yearlyPrice) > 0) || Boolean(plan.providerPlanIds?.yearly)
   });
 
-  const decorated = plans.map(plan => ({ ...plan, sellable: sellable(plan) }));
+  /**
+   * Capabilities are *resolved*, not read raw.
+   *
+   * A plan stored before this field existed has an empty list, and an empty list
+   * would render as "this plan includes nothing" — so the catalogue's answer for
+   * the code is used as the fallback, which is the same thing the gate does.
+   */
+  const decorated = plans.map(plan => ({
+    ...plan,
+    sellable: sellable(plan),
+    capabilities: plan.capabilities?.length ? plan.capabilities : capabilitiesFor(plan.code)
+  }));
   const blocked = decorated.filter(p => p.active && (!p.sellable.monthly || !p.sellable.yearly));
 
   res.json({
@@ -390,7 +402,15 @@ const upsertPlan = asyncHandler(async (req, res) => {
      * commercial term anybody was sold on, and a version history full of
      * "changed the plan id" entries buries the price changes that matter.
      */
-    'providerPlanIds'
+    'providerPlanIds',
+    /**
+     * The capability keys a gate reads.
+     *
+     * Editable so a bespoke plan can be composed for one customer, and
+     * defaulted from `planCapabilities` when a plan is created without them —
+     * an empty list would otherwise read as "this plan includes nothing".
+     */
+    'capabilities'
   ]);
 
   const result = await planVersions.publish({

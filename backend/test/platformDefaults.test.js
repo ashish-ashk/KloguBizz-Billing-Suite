@@ -343,3 +343,110 @@ test('resetting MFA leaves a trail', maybeDb(async () => {
   assert.ok(entry, 'the reset is audited');
   assert.equal(entry.meta.email, 'traced@locked.test');
 }));
+
+// ── Item 2: the plans advertise what the product actually does ──
+
+const capabilities = require('../src/services/planCapabilities');
+const { PLANS } = require('../src/seed/platformDefaults');
+
+test('no plan advertises a capability the product does not have', maybeDb(async () => {
+  /**
+   * The failure this whole catalogue exists to prevent.
+   *
+   * The shipped plans advertised Client Portal, API Access, Dedicated Manager,
+   * SLA 99.9%, an on-premise option and 24/7 phone support. None existed. A
+   * customer who bought Business for the API had a fair complaint, and no test
+   * anywhere would have caught it because the list was free text.
+   */
+  const banned = [
+    /client portal/i, /api access/i, /dedicated manager/i, /\bsla\b/i,
+    /on-?premise/i, /24\/7/i, /custom integrations/i, /custom contracts/i
+  ];
+
+  for (const plan of PLANS) {
+    for (const line of plan.features) {
+      for (const pattern of banned) {
+        assert.ok(!pattern.test(line), `${plan.code} still advertises "${line}"`);
+      }
+    }
+  }
+}));
+
+test('e-invoicing and e-way bills are not advertised while the provider call is a stub', maybeDb(async () => {
+  /**
+   * Everything around them is real and tested — eligibility, validation, the
+   * payload, the validity window — and `callIrp` / `callEwbApi` both throw 501.
+   * Nothing can actually be filed, so nothing may be sold on it. They join the
+   * list the day the adapter is written, which is the rule this file enforces.
+   */
+  const advertised = capabilities.CAPABILITIES.map(c => c.label.toLowerCase()).join(' | ');
+  assert.ok(!/e-?invoic/.test(advertised), 'e-invoicing must not be advertised yet');
+  assert.ok(!/e-?way/.test(advertised), 'e-way bills must not be advertised yet');
+}));
+
+test('every capability names where it is enforced', maybeDb(async () => {
+  // The same discipline `featureFlagService` uses: a capability an operator
+  // believes in but which does nothing is worse than an absent one, because
+  // they will promise it to a customer.
+  for (const capability of capabilities.CAPABILITIES) {
+    assert.ok(capability.key, 'a capability needs a key a gate can read');
+    assert.ok(capability.label, `${capability.key} needs a label`);
+    assert.ok(capability.enforcedBy, `${capability.key} must say where it is enforced`);
+  }
+}));
+
+test('the tiers are cumulative, so a more expensive plan never loses something', maybeDb(async () => {
+  const starter = capabilities.capabilitiesFor('starter');
+  const growth = capabilities.capabilitiesFor('growth');
+  const business = capabilities.capabilitiesFor('business');
+  const enterprise = capabilities.capabilitiesFor('enterprise');
+
+  /**
+   * "Everything in Growth" has to be true, not just printed. A tier that
+   * silently dropped a capability the cheaper one had would be the worst kind of
+   * pricing bug: the customer paid more and lost a feature.
+   */
+  starter.forEach(key => assert.ok(growth.includes(key), `growth lost ${key}`));
+  growth.forEach(key => assert.ok(business.includes(key), `business lost ${key}`));
+  business.forEach(key => assert.ok(enterprise.includes(key), `enterprise lost ${key}`));
+
+  assert.ok(growth.length > starter.length, 'and each tier actually adds something');
+  assert.ok(business.length > growth.length);
+}));
+
+test('the cheapest plan can still do the things a billing product is for', maybeDb(async () => {
+  const starter = capabilities.capabilitiesFor('starter');
+  // Core is listed rather than assumed, so the cheapest card says what it *can*
+  // do instead of only what it cannot.
+  ['invoicing', 'clientsAndItems', 'payments', 'gstReturns', 'reminders'].forEach(key => {
+    assert.ok(starter.includes(key), `starter must include ${key}`);
+  });
+  // And genuinely does not include the paid tiers' work.
+  ['warehouses', 'profitLoss', 'gstr2b'].forEach(key => {
+    assert.ok(!starter.includes(key), `starter must not include ${key}`);
+  });
+}));
+
+test('an unknown plan code still gets the core set, so a tenant can keep billing', maybeDb(async () => {
+  const orphan = capabilities.capabilitiesFor('a-plan-that-was-deleted');
+  /**
+   * A tenant whose plan was renamed or removed out from under them must keep
+   * being able to invoice. Losing the ability to bill because of a pricing change
+   * nobody told them about is far worse than a missing report.
+   */
+  assert.deepEqual(orphan.sort(), [...capabilities.CORE_KEYS].sort());
+  assert.ok(orphan.includes('invoicing'));
+}));
+
+test('the card copy is generated from the same list the gate reads', maybeDb(async () => {
+  const business = capabilities.capabilitiesFor('business');
+  const copy = capabilities.featureCopyFor('business');
+
+  // Every line after the "Everything in Growth" header must correspond to a real
+  // capability the plan holds — that is what makes the card unable to lie.
+  copy.slice(1).forEach(line => {
+    const match = capabilities.CAPABILITIES.find(c => c.label === line);
+    assert.ok(match, `"${line}" is not a catalogue label`);
+    assert.ok(business.includes(match.key), `business does not actually include ${match.key}`);
+  });
+}));

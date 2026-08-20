@@ -20,7 +20,7 @@ guesses.
 | # | Item | State before starting | Size |
 |---|---|---|---|
 | 1 | Payment starts the plan, and the tenant gets an invoice | **DONE** — verified end to end; see below | Verify |
-| 2 | Plan benefits listed honestly, dummy copy removed | Advertises Client Portal, API Access, SLA 99.9%, on-premise — none exist. Omits GST returns, e-way bills, inventory, P&L, dunning, which do | Rewrite |
+| 2 | Plan benefits listed honestly, dummy copy removed | **DONE** — see below | Rewrite |
 | 3 | Plan entitlements: in-plan unlocked, out-of-plan hidden **and** refused | Does not exist. `Plan.features` gates nothing | Build |
 | 4 | Signature appears on the invoice | `pdfService` already renders it — so this is a configuration or upload path problem | Diagnose |
 | 5 | "Notes / Terms" → "Notes / Terms & Conditions" in the footer | Label change, plus the payment-terms line | Small |
@@ -60,6 +60,40 @@ invoice and no reason why. It now parks above every number already issued. Worth
 recording because the swallowing is deliberate and right — a webhook must not fail
 a charge that already succeeded — which makes anything downstream of it
 diagnosable only by looking.
+
+## 2. Plan benefits listed honestly — DONE
+
+The four plans advertised **Client Portal, API Access, Dedicated Manager, SLA
+99.9%, an on-premise option and 24/7 phone support**. None exist. They never
+mentioned GST returns, GSTR-2B reconciliation, inventory, warehouses, FIFO
+valuation, profit and loss, batch and expiry tracking, recurring invoices,
+payment links or credit notes — all of which do. A customer who bought Business
+for the API had a fair complaint.
+
+`services/planCapabilities.js` is now the single catalogue. Two things come out of
+it: the **keys** a gate will read (item 3) and the **copy** a card prints, so the
+card cannot advertise something the plan does not include. Twenty-two
+capabilities, each naming where it is enforced — the same discipline
+`featureFlagService` uses, because a capability an operator believes in but which
+does nothing is worse than an absent one.
+
+Starter 6, Growth 14, Business 22, Enterprise 22 plus the ceiling. Tiers are
+cumulative and a test asserts it: a more expensive plan silently losing something
+the cheaper one had would be the worst kind of pricing bug.
+
+**What is deliberately still absent: e-invoicing and e-way bills.** Everything
+around them is real — eligibility, validation, payload, validity window — and the
+provider call is a stub that throws 501, so nothing can be filed. A test asserts
+they stay off the list until the adapter exists.
+
+Migration 012 rewrote the four shipped plans in place. **Prices and limits were
+not touched** — those are the terms a customer agreed to, and a migration is the
+wrong place to change what somebody pays. A plan code that is not one of the four
+is left exactly as somebody wrote it and reported instead, because guessing at a
+bespoke plan's list is worse than leaving it.
+
+Applied to both live databases; the console now shows the capability keys
+read-only beside the editable copy, with the copy labelled as display-only.
 
 ## Order, and why
 

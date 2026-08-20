@@ -69,7 +69,7 @@ cd backend && npm run migrate
 npm run migrate:status   # confirm every version is applied
 ```
 
-Eleven migrations, applied in filename order, recorded in a `migrations`
+Twelve migrations, applied in filename order, recorded in a `migrations`
 collection so a re-run is a no-op. Three are **deployment-blocking** rather than
 tidying:
 

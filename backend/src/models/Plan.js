@@ -36,6 +36,19 @@ const planSchema = new mongoose.Schema({
   userLimit: Number,
   invoiceLimit: Number,
   features: { type: [String], default: [] },
+
+  /**
+   * What this plan actually unlocks, as keys.
+   *
+   * `features` above is display copy; this is what a gate reads. They are both
+   * generated from `services/planCapabilities.js` so a card cannot advertise
+   * something the plan does not include — the previous list promised a client
+   * portal, API access and an SLA, none of which exist.
+   *
+   * Empty means "fall back to the catalogue for this plan code", which is what
+   * every plan created before this field existed does.
+   */
+  capabilities: { type: [String], default: [] },
   active: { type: Boolean, default: true },
   sortOrder: { type: Number, default: 0 },
   /**

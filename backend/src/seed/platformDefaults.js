@@ -11,12 +11,27 @@
  * into an empty database or upserting into a live one.
  */
 
-const PLANS = [
-  { code: 'starter', name: 'Starter', monthlyPrice: 999, yearlyPrice: 9990, userLimit: 3, invoiceLimit: 100, sortOrder: 1, features: ['GST Invoicing', 'Bill Generator', 'Payment Tracking', 'Email Support'] },
-  { code: 'growth', name: 'Growth', monthlyPrice: 2499, yearlyPrice: 24990, userLimit: 10, invoiceLimit: 500, sortOrder: 2, features: ['Everything in Starter', 'Multi-user & Roles', 'Client Portal', 'Priority Support', 'Custom Branding'] },
-  { code: 'business', name: 'Business', monthlyPrice: 5999, yearlyPrice: 59990, userLimit: 25, invoiceLimit: 2000, sortOrder: 3, features: ['Everything in Growth', 'Advanced Reports', 'API Access', 'Dedicated Manager', 'SLA 99.9%'] },
-  { code: 'enterprise', name: 'Enterprise', monthlyPrice: null, yearlyPrice: null, userLimit: 999, invoiceLimit: 999999, sortOrder: 4, features: ['Unlimited users', 'Custom integrations', 'On-premise option', '24/7 Phone Support', 'Custom contracts'] }
+const { capabilitiesFor, featureCopyFor } = require('../services/planCapabilities');
+
+/**
+ * The shipped plans.
+ *
+ * Prices and ceilings are stated here; the feature list and the capability keys
+ * are **generated** from `services/planCapabilities.js`, so the card and the gate
+ * cannot disagree and neither can drift from what the product does.
+ */
+const PLAN_PRICING = [
+  { code: 'starter', name: 'Starter', monthlyPrice: 999, yearlyPrice: 9990, userLimit: 3, invoiceLimit: 100, sortOrder: 1 },
+  { code: 'growth', name: 'Growth', monthlyPrice: 2499, yearlyPrice: 24990, userLimit: 10, invoiceLimit: 500, sortOrder: 2 },
+  { code: 'business', name: 'Business', monthlyPrice: 5999, yearlyPrice: 59990, userLimit: 25, invoiceLimit: 2000, sortOrder: 3 },
+  { code: 'enterprise', name: 'Enterprise', monthlyPrice: null, yearlyPrice: null, userLimit: 999, invoiceLimit: 999999, sortOrder: 4 }
 ];
+
+const PLANS = PLAN_PRICING.map(plan => ({
+  ...plan,
+  features: featureCopyFor(plan.code),
+  capabilities: capabilitiesFor(plan.code)
+}));
 
 const MASTERS = [
   { type: 'gstRate', rate: 0, label: 'Nil rated / exempt supplies', active: true, sortOrder: 0 },

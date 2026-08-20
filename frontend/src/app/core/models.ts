@@ -1165,6 +1165,14 @@ export interface Plan {
   /** Computed by the console: whether a subscription can actually be opened on
    *  this cycle. A free cycle needs no provider plan. */
   sellable?: { monthly: boolean; yearly: boolean };
+  /**
+   * What the plan unlocks, as keys.
+   *
+   * `features` is the display copy; this is what a gate reads. Both are
+   * generated from one catalogue on the server so a card cannot advertise
+   * something the plan does not include.
+   */
+  capabilities?: string[];
 }
 
 /** A plan as it stood at a point in time. Immutable — a wrong version is

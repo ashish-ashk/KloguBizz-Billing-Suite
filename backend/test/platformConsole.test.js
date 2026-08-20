@@ -3000,3 +3000,22 @@ test('a failed charge does not start the plan', maybe(async () => {
   assert.equal(sub.status, 'past_due');
   assert.ok(sub.pastDueSince, 'and the dunning clock starts');
 }));
+
+// ── Item 2: plan capabilities, console side ──
+
+test('the console reports capabilities even for a plan saved before the field existed', maybe(async () => {
+  await Plan.updateOne(
+    { code: 'growth' },
+    { $set: { name: 'Growth', monthlyPrice: 2499, active: true }, $unset: { capabilities: '' } },
+    { upsert: true }
+  );
+  const { token } = await platformAccount('owner');
+  const { status, body } = await call('GET', '/superadmin/plans', { token });
+  assert.equal(status, 200);
+
+  const growth = body.plans.find(p => p.code === 'growth');
+  // An empty stored list would render as "this plan includes nothing", so the
+  // catalogue answers for the code instead — the same fallback the gate uses.
+  assert.ok(growth.capabilities.length > 0);
+  assert.ok(growth.capabilities.includes('inventory'));
+}));

@@ -114,9 +114,28 @@ interface EditablePlan extends Plan {
               </div>
             }
             <div class="field" style="margin-top:12px;">
-              <label>Features (one per line)</label>
+              <label>What the card says (one per line)</label>
               <textarea rows="4" [(ngModel)]="p.featuresText"></textarea>
+              <span class="muted" style="font-size:11.5px;line-height:1.6">
+                Display copy only. It does not decide what the plan can do — the capabilities
+                below do. Do not write anything here the product cannot actually do.
+              </span>
             </div>
+            @if (p.capabilities?.length) {
+              <!--
+                Shown read-only. These are what a gate reads, generated from one
+                catalogue on the server, and the previous version of this page let
+                an operator write free text that decided nothing at all.
+              -->
+              <div class="field" style="margin-top:4px">
+                <label>What the plan unlocks ({{ p.capabilities!.length }})</label>
+                <div style="display:flex;flex-wrap:wrap;gap:6px">
+                  @for (c of p.capabilities; track c) {
+                    <span class="pill mono" style="font-size:11px">{{ c }}</span>
+                  }
+                </div>
+              </div>
+            }
             <div class="field" style="margin-top:12px;">
               <label>Why is this changing? (recorded against the version)</label>
               <input [(ngModel)]="p.changeNote" placeholder="e.g. Annual price review" />
