@@ -19,7 +19,7 @@ guesses.
 
 | # | Item | State before starting | Size |
 |---|---|---|---|
-| 1 | Payment starts the plan, and the tenant gets an invoice | Wired, never verified end to end | Verify |
+| 1 | Payment starts the plan, and the tenant gets an invoice | **DONE** — verified end to end; see below | Verify |
 | 2 | Plan benefits listed honestly, dummy copy removed | Advertises Client Portal, API Access, SLA 99.9%, on-premise — none exist. Omits GST returns, e-way bills, inventory, P&L, dunning, which do | Rewrite |
 | 3 | Plan entitlements: in-plan unlocked, out-of-plan hidden **and** refused | Does not exist. `Plan.features` gates nothing | Build |
 | 4 | Signature appears on the invoice | `pdfService` already renders it — so this is a configuration or upload path problem | Diagnose |
@@ -31,6 +31,35 @@ guesses.
 | 10 | Dashboard and charts fit the mobile screen, compact scrolling | Same | Audit + fix |
 | 11 | Sales deck for promotion and branding | Does not exist | Build |
 | 12 | User guide: plain language, screenshots, numbered steps | Existing docs are engineering prose, wrong audience | Build |
+
+## 1. Payment starts the plan, and the tenant gets an invoice — DONE
+
+The wiring was already right, and now there is a test that says so. One verified
+charge has to do three things at once, and each has failed independently before,
+so each is asserted separately:
+
+- **The plan starts.** `Organisation.plan` moves and the subscription goes active.
+- **The ceiling moves with it.** A plan that changes the name on the banner and
+  not the user or invoice limit is the failure worth guarding: the customer paid
+  for headroom, and the only thing they would notice is the one thing that did not
+  change.
+- **The customer ends up with a tax invoice they can retrieve** — not merely one
+  that exists in the database. A registered supplier must issue one, and this
+  system used to take the money and issue nothing.
+
+Plus the two directions that must *not* happen: a retried webhook issues no second
+invoice (two tax invoices for one payment is worse than none — both carry
+consecutive numbers from a legally-consecutive series), and a failed charge starts
+no plan but does start the dunning clock.
+
+**A test-suite bug found on the way, twice.** `parkInvoiceCounter()` set the
+platform invoice counter to a flat 5000, which is correct exactly once — the
+second caller re-issues 5001, hits the unique index on `invoiceNumber`, and
+`issueForChargeSafely` swallows the error by design. The next test then saw no
+invoice and no reason why. It now parks above every number already issued. Worth
+recording because the swallowing is deliberate and right — a webhook must not fail
+a charge that already succeeded — which makes anything downstream of it
+diagnosable only by looking.
 
 ## Order, and why
 

@@ -2022,9 +2022,19 @@ async function configurePlatformBilling(overrides = {}) {
  */
 async function parkInvoiceCounter() {
   const fy = platformInvoices.financialYearOf(new Date());
+
+  /**
+   * Parked *above every number already issued*, not at a constant.
+   *
+   * It used to set 5000 flat, which is correct exactly once: the second caller
+   * re-issues 5001, hits the unique index on `invoiceNumber`, and
+   * `issueForChargeSafely` swallows the error by design — so the test that
+   * followed saw no invoice and no reason why. Found the hard way, twice.
+   */
+  const issued = await PlatformInvoice.countDocuments();
   await GlobalSetting.findOneAndUpdate(
     { key: 'platformInvoiceCounter' },
-    { $set: { key: 'platformInvoiceCounter', value: { sequence: 5000, sequenceFY: String(fy) } } },
+    { $set: { key: 'platformInvoiceCounter', value: { sequence: 5000 + issued + 1, sequenceFY: String(fy) } } },
     { upsert: true }
   );
 }
@@ -2879,4 +2889,114 @@ test('the provider plan ids survive a save', maybe(async () => {
   const stored = await Plan.findOne({ code: 'growth' }).lean();
   assert.equal(stored.providerPlanIds.monthly, 'plan_month_1');
   assert.equal(stored.providerPlanIds.yearly, 'plan_year_1');
+}));
+
+// ── Item 1: payment starts the plan, and the tenant gets an invoice ──
+
+test('a paid charge starts the plan and leaves the tenant an invoice they can see', maybe(async () => {
+  await configurePlatformBilling();
+  await parkInvoiceCounter();
+  const tenant = await registerOrg();
+
+  // Checkout, as the subscription page creates it: pending, plan not yet granted.
+  const started = await call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: 'growth', billingCycle: 'monthly' }
+  });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  const providerId = started.body.subscription.razorpaySubscriptionId;
+
+  /**
+   * The whole point of this test: one verified charge has to do three things at
+   * once, and each has failed independently before. The plan has to move, the
+   * subscription has to go active, and the customer has to end up with a tax
+   * invoice they can actually retrieve — a registered supplier must issue one,
+   * and this system used to take the money and issue nothing.
+   */
+  const nowSec = Math.floor(Date.now() / 1000);
+  const result = await applyRazorpayEvent('subscription.charged', {
+    id: providerId,
+    current_start: nowSec - 86400,
+    current_end: nowSec + 29 * 86400
+  });
+  assert.equal(result.handled, true, JSON.stringify(result));
+
+  const org = await Organisation.findById(tenant.org._id).lean();
+  assert.equal(org.plan, 'growth', 'the plan actually starts');
+  assert.equal(org.status, 'active');
+
+  const sub = await Subscription.findOne({ orgId: tenant.org._id }).sort({ createdAt: -1 }).lean();
+  assert.equal(sub.status, 'active');
+  assert.ok(sub.currentPeriodEnd, 'and the paid-up period is recorded, which proration needs');
+
+  // Retrievable by the tenant, not merely present in the database — the reason
+  // it exists is that a customer needs it to claim input tax credit.
+  const mine = await call('GET', '/subscriptions/invoices', { token: tenant.token });
+  assert.equal(mine.status, 200);
+  assert.equal(mine.body.invoices.length, 1, 'exactly one invoice for one charge');
+  const invoice = mine.body.invoices[0];
+  assert.ok(invoice.invoiceNumber, 'and it carries a number from the platform series');
+  assert.equal(invoice.billTo.name, org.name);
+  assert.ok(invoice.totals.total > 0);
+}));
+
+test('the usage limits move to the new plan, not just the label', maybe(async () => {
+  await configurePlatformBilling();
+  await parkInvoiceCounter();
+  const tenant = await registerOrg();
+  const started = await call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: 'business', billingCycle: 'monthly' }
+  });
+  await applyRazorpayEvent('subscription.charged', { id: started.body.subscription.razorpaySubscriptionId });
+
+  const { body } = await call('GET', '/subscriptions/current', { token: tenant.token });
+  /**
+   * A plan that changes the name on the banner and not the ceiling is the
+   * failure this asserts against: the customer paid for more headroom, and the
+   * only thing they would notice is the one thing that did not change.
+   */
+  assert.equal(body.usage.plan, 'business');
+  assert.equal(body.usage.userLimit, 25);
+  assert.equal(body.usage.invoiceLimit, 5000);
+}));
+
+test('a retried webhook does not issue a second invoice or double-charge the plan', maybe(async () => {
+  await configurePlatformBilling();
+  await parkInvoiceCounter();
+  const tenant = await registerOrg();
+  const started = await call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: 'growth', billingCycle: 'monthly' }
+  });
+  const providerId = started.body.subscription.razorpaySubscriptionId;
+
+  // Razorpay retries deliberately and often.
+  await applyRazorpayEvent('subscription.charged', { id: providerId });
+  await applyRazorpayEvent('subscription.charged', { id: providerId });
+
+  const mine = await call('GET', '/subscriptions/invoices', { token: tenant.token });
+  /**
+   * Two tax invoices for one payment is worse than none: both carry consecutive
+   * numbers from a legally-consecutive series, and cancelling one leaves a gap to
+   * explain to an assessing officer.
+   */
+  assert.equal(mine.body.invoices.length, 1);
+  assert.equal((await Organisation.findById(tenant.org._id).lean()).plan, 'growth');
+}));
+
+test('a failed charge does not start the plan', maybe(async () => {
+  const tenant = await registerOrg();
+  const started = await call('POST', '/subscriptions/start', {
+    token: tenant.token, body: { planCode: 'business', billingCycle: 'monthly' }
+  });
+  const before = (await Organisation.findById(tenant.org._id).lean()).plan;
+
+  await applyEvent('payment.failed', {
+    payment: { entity: { notes: { orgId: String(tenant.org._id) } } }
+  });
+
+  // The money did not arrive, so nothing is granted — the whole reason
+  // `startSubscription` leaves the subscription pending.
+  assert.equal((await Organisation.findById(tenant.org._id).lean()).plan, before);
+  const sub = await Subscription.findById(started.body.subscription._id).lean();
+  assert.equal(sub.status, 'past_due');
+  assert.ok(sub.pastDueSince, 'and the dunning clock starts');
 }));
