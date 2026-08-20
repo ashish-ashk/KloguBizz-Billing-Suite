@@ -332,6 +332,20 @@ const organisationSchema = new mongoose.Schema({
    * `toObject()` leaves a Map as a Map, which `JSON.stringify` renders as `{}` —
    * the flags would silently vanish from every API response.
    */
+  /**
+   * Per-tenant capability grants and revocations (item 3).
+   *
+   * Beats the plan in both directions: `true` grants something outside it — a
+   * bespoke deal, or letting a customer try a feature while they decide — and
+   * `false` takes one away. Stored explicitly rather than as "present means on",
+   * for the same reason `featureFlags` is: otherwise there is no way to express
+   * "off for this tenant even though the plan includes it".
+   *
+   * Empty for almost every tenant. The plan is the answer in the normal case, and
+   * this exists so an exception does not require inventing a plan.
+   */
+  capabilityOverrides: { type: Map, of: Boolean, default: () => ({}) },
+
   featureFlags: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
   notice: { type: noticeSchema, default: null },
   support: { type: supportSchema, default: () => ({}) },

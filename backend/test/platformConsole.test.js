@@ -3019,3 +3019,200 @@ test('the console reports capabilities even for a plan saved before the field ex
   assert.ok(growth.capabilities.length > 0);
   assert.ok(growth.capabilities.includes('inventory'));
 }));
+
+// ── Item 3: the plan actually gates, on the server ──
+
+const entitlements = require('../src/services/entitlementService');
+
+/** Puts a tenant on a real plan, out of trial — trials deliberately get more. */
+async function onPlan(tenant, planCode) {
+  await Organisation.updateOne(
+    { _id: tenant.org._id },
+    { $set: { plan: planCode, status: 'active' }, $unset: { capabilityOverrides: '' } }
+  );
+}
+
+test('a Starter tenant is refused a Business feature by the server, not just the UI', maybe(async () => {
+  const tenant = await registerOrg();
+  await onPlan(tenant, 'starter');
+
+  /**
+   * The point of the whole item. A hidden button with a live endpoint behind it
+   * is not a plan limit; it is a plan limit anybody can skip with `curl`, and the
+   * customers most likely to try are the ones reading the pricing page closely.
+   */
+  const pnl = await call('GET', '/expenses/profit-loss', { token: tenant.token });
+  assert.equal(pnl.status, 403);
+  assert.equal(pnl.body.code, 'PLAN_UPGRADE_REQUIRED');
+  // The refusal has to be actionable: "forbidden" on something somebody can
+  // legitimately buy is a dead end.
+  assert.match(pnl.body.message, /upgrade/i);
+
+  const warehouses = await call('GET', '/reports/stock/locations', { token: tenant.token });
+  assert.equal(warehouses.status, 403);
+  // POST, because reconciling takes the portal's JSON — and a POST that happens
+  // to only read is still a use of the feature, which is why the writes-only
+  // variant is not used here.
+  const gstr2b = await call('POST', '/reports/gstr-2b/reconcile', {
+    token: tenant.token, body: { period: '2026-06', data: {} }
+  });
+  assert.equal(gstr2b.status, 403);
+}));
+
+test('a Starter tenant keeps everything a billing product is for', maybe(async () => {
+  const tenant = await registerOrg();
+  await onPlan(tenant, 'starter');
+  const client = await createClient(tenant.token);
+
+  /**
+   * The gate must never take away the reason somebody bought the product. Core
+   * capabilities are on every plan, and a Starter tenant that cannot invoice is
+   * a worse outcome than one that cannot see a stock report.
+   */
+  const invoice = await createInvoice(tenant.token, client._id);
+  assert.ok(invoice.invoiceNumber);
+
+  const gstr1 = await call('GET', '/reports/gstr1?month=2026-07', { token: tenant.token });
+  assert.equal(gstr1.status, 200, 'GSTR-1 is core, not a paid extra');
+  const gstr3b = await call('GET', '/reports/gstr3b?month=2026-07', { token: tenant.token });
+  assert.equal(gstr3b.status, 200);
+}));
+
+test('a downgrade does not hide the records the tenant already created', maybe(async () => {
+  const tenant = await registerOrg();
+  // On Growth they record a purchase, then drop to Starter.
+  await onPlan(tenant, 'growth');
+  const vendor = await call('POST', '/purchases/vendors', {
+    token: tenant.token, body: { name: 'Supplier Ltd', stateCode: '27' }
+  });
+  assert.equal(vendor.status, 201, JSON.stringify(vendor.body));
+
+  await onPlan(tenant, 'starter');
+
+  /**
+   * Reading stays open. A tenant who downgrades still owns their own books, and
+   * a purchase register is an input-tax-credit record they may be legally
+   * required to produce — hiding it behind a pricing tier would be taking away
+   * their data rather than a feature.
+   */
+  const list = await call('GET', '/purchases/vendors', { token: tenant.token });
+  assert.equal(list.status, 200, 'their own records stay readable');
+
+  // Creating more does not.
+  const another = await call('POST', '/purchases/vendors', {
+    token: tenant.token, body: { name: 'Second Supplier', stateCode: '27' }
+  });
+  assert.equal(another.status, 403);
+  assert.equal(another.body.code, 'PLAN_UPGRADE_REQUIRED');
+}));
+
+test('a trial can evaluate the tier it is being sold', maybe(async () => {
+  const tenant = await registerOrg();
+  // registerOrg leaves the tenant on trial, which is the state being tested.
+  const pnl = await call('GET', '/expenses/profit-loss', { token: tenant.token });
+
+  /**
+   * Deliberate, and stated rather than buried: a trial resolves to the tier it is
+   * meant to sell. Giving a trial only the cheapest plan means nobody can
+   * evaluate what they would be paying for, and the first thing they meet is a
+   * locked door rather than the product.
+   */
+  assert.equal(pnl.status, 200, 'a trial is not gated down to Starter');
+  assert.equal(entitlements.TRIAL_TIER, 'business');
+}));
+
+test('an operator can grant one capability outside the plan, and take one away', maybe(async () => {
+  const tenant = await registerOrg();
+  await onPlan(tenant, 'starter');
+
+  // Granting: a bespoke deal, or letting somebody try a feature while deciding.
+  await Organisation.updateOne(
+    { _id: tenant.org._id },
+    { $set: { 'capabilityOverrides.profitLoss': true } }
+  );
+  const granted = await call('GET', '/expenses/profit-loss', { token: tenant.token });
+  assert.equal(granted.status, 200, 'an explicit grant beats the plan');
+
+  // Revoking, on a plan that does include it — the case "present means on" could
+  // not express, which is why the override is a boolean and not a list.
+  await onPlan(tenant, 'business');
+  await Organisation.updateOne(
+    { _id: tenant.org._id },
+    { $set: { 'capabilityOverrides.profitLoss': false } }
+  );
+  const revoked = await call('GET', '/expenses/profit-loss', { token: tenant.token });
+  assert.equal(revoked.status, 403, 'an explicit revoke beats the plan too');
+}));
+
+test('a plan whose capability list is empty is not treated as granting nothing', maybe(async () => {
+  const tenant = await registerOrg();
+  await Plan.updateOne(
+    { code: 'growth' },
+    { $set: { name: 'Growth', monthlyPrice: 2499, active: true }, $unset: { capabilities: '' } },
+    { upsert: true }
+  );
+  await onPlan(tenant, 'growth');
+
+  /**
+   * Every plan saved before capabilities existed has an empty array, and an
+   * empty array read literally means "this plan includes nothing" — which would
+   * lock a paying customer out of everything they bought, on deploy, silently.
+   * The catalogue answers for the code instead.
+   */
+  const stock = await call('GET', '/reports/stock/ledger', { token: tenant.token });
+  assert.equal(stock.status, 200);
+}));
+
+test('a tenant on a plan that no longer exists can still invoice', maybe(async () => {
+  const tenant = await registerOrg();
+  await onPlan(tenant, 'a-plan-somebody-deleted');
+  const client = await createClient(tenant.token);
+
+  /**
+   * Losing the ability to bill because of a pricing change nobody told them
+   * about is not a recoverable inconvenience for a business. Core survives an
+   * unknown plan code.
+   */
+  const invoice = await createInvoice(tenant.token, client._id);
+  assert.ok(invoice.invoiceNumber);
+}));
+
+test('branding is refused rather than silently discarded', maybe(async () => {
+  const tenant = await registerOrg();
+  await onPlan(tenant, 'starter');
+
+  const refused = await call('PUT', '/organisations/current', {
+    token: tenant.token, body: { brandingConfig: { invoicePrefix: 'ACME' } }
+  });
+  /**
+   * `PUT /organisations/current` also carries the GSTIN and address, so the gate
+   * sits on the fields rather than the route — and it **refuses** instead of
+   * stripping, because quietly discarding an uploaded logo leaves somebody
+   * staring at a save that appeared to work and changed nothing.
+   */
+  assert.equal(refused.status, 403);
+  assert.equal(refused.body.code, 'PLAN_UPGRADE_REQUIRED');
+
+  // The rest of the same endpoint still works: every tenant must be able to fix
+  // their own GSTIN whatever they pay.
+  const allowed = await call('PUT', '/organisations/current', {
+    token: tenant.token, body: { phone: '+91 98100 00002' }
+  });
+  assert.equal(allowed.status, 200);
+}));
+
+test('the session tells the app what to render', maybe(async () => {
+  const tenant = await registerOrg();
+  await onPlan(tenant, 'starter');
+
+  const me = await call('GET', '/auth/me', { token: tenant.token });
+  assert.equal(me.status, 200);
+  assert.ok(Array.isArray(me.body.capabilities));
+  /**
+   * Sent so the app can hide what is not included rather than offering a button
+   * that 403s. The server refuses either way — hiding is a courtesy, not the
+   * control — but a menu full of doors that slam is a worse product.
+   */
+  assert.ok(me.body.capabilities.includes('invoicing'));
+  assert.ok(!me.body.capabilities.includes('warehouses'));
+}));

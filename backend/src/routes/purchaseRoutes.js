@@ -7,6 +7,7 @@ const {
 const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { requireTenant } = require('../middleware/tenantMiddleware');
+const { requireCapabilityForWrites } = require('../services/entitlementService');
 const { validate } = require('../middleware/validate');
 const {
   vendorCreateSchema, vendorUpdateSchema,
@@ -22,7 +23,19 @@ const {
  * return, so removing it is an admin decision for the same reason writing off revenue
  * is.
  */
-router.use(protect, requireTenant);
+router.use(protect, requireTenant, requireCapabilityForWrites('purchases'));
+/**
+ * Gated at the mount point, and **writes only**.
+ *
+ * At the mount point because a per-route list is one somebody adds to and
+ * forgets, and the forgotten route is a live endpoint behind a hidden button — a
+ * plan limit anyone can skip with `curl`.
+ *
+ * Writes only because a tenant who downgrades still owns the records they
+ * created. A purchase register is an input-tax-credit record they may be required
+ * to produce; hiding it behind a pricing tier would be taking away their data
+ * rather than a feature.
+ */
 
 // ── Vendors ──
 router.get('/vendors', listVendors);

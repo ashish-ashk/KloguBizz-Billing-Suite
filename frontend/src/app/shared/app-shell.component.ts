@@ -62,15 +62,25 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
             <a routerLink="/invoices" routerLinkActive="active" title="Invoices"><span class="nav-icon"><app-icon name="invoice" /></span><span class="nav-label">Invoices</span></a>
             <a routerLink="/bill-generator" routerLinkActive="active" title="Bill Generator"><span class="nav-icon"><app-icon name="calculator" /></span><span class="nav-label">Bill Generator</span></a>
             <a routerLink="/sales-documents" routerLinkActive="active" title="Quotes &amp; Challans"><span class="nav-icon"><app-icon name="fileText" /></span><span class="nav-label">Quotes &amp; Challans</span></a>
-            <a routerLink="/recurring" routerLinkActive="active" title="Recurring Invoices"><span class="nav-icon"><app-icon name="clock" /></span><span class="nav-label">Recurring</span></a>
+            @if (can('recurringInvoices')) {
+              <a routerLink="/recurring" routerLinkActive="active" title="Recurring Invoices"><span class="nav-icon"><app-icon name="clock" /></span><span class="nav-label">Recurring</span></a>
+            }
             <div class="nav-section">Management</div>
             <a routerLink="/clients" routerLinkActive="active" title="Clients"><span class="nav-icon"><app-icon name="users" /></span><span class="nav-label">Clients</span></a>
             <a routerLink="/items" routerLinkActive="active" title="Items"><span class="nav-icon"><app-icon name="box" /></span><span class="nav-label">Items</span></a>
-            <a routerLink="/inventory" routerLinkActive="active" title="Inventory"><span class="nav-icon"><app-icon name="package" /></span><span class="nav-label">Inventory</span></a>
+            @if (can('inventory')) {
+              <a routerLink="/inventory" routerLinkActive="active" title="Inventory"><span class="nav-icon"><app-icon name="package" /></span><span class="nav-label">Inventory</span></a>
+            }
             <a routerLink="/payments" routerLinkActive="active" title="Payments"><span class="nav-icon"><app-icon name="creditCard" /></span><span class="nav-label">Payments</span></a>
-            <a routerLink="/purchases" routerLinkActive="active" title="Purchases"><span class="nav-icon"><app-icon name="inbox" /></span><span class="nav-label">Purchases</span></a>
-            <a routerLink="/receivables" routerLinkActive="active" title="Receivables"><span class="nav-icon"><app-icon name="clock" /></span><span class="nav-label">Receivables</span></a>
-            <a routerLink="/profit-loss" routerLinkActive="active" title="Profit &amp; Loss"><span class="nav-icon"><app-icon name="rupee" /></span><span class="nav-label">Profit &amp; Loss</span></a>
+            @if (can('purchases')) {
+              <a routerLink="/purchases" routerLinkActive="active" title="Purchases"><span class="nav-icon"><app-icon name="inbox" /></span><span class="nav-label">Purchases</span></a>
+            }
+            @if (can('receivables')) {
+              <a routerLink="/receivables" routerLinkActive="active" title="Receivables"><span class="nav-icon"><app-icon name="clock" /></span><span class="nav-label">Receivables</span></a>
+            }
+            @if (can('profitLoss')) {
+              <a routerLink="/profit-loss" routerLinkActive="active" title="Profit &amp; Loss"><span class="nav-icon"><app-icon name="rupee" /></span><span class="nav-label">Profit &amp; Loss</span></a>
+            }
             <a routerLink="/reports" routerLinkActive="active" title="Reports"><span class="nav-icon"><app-icon name="chart" /></span><span class="nav-label">Reports</span></a>
             <a routerLink="/gst-returns" routerLinkActive="active" title="GST Returns"><span class="nav-icon"><app-icon name="percent" /></span><span class="nav-label">GST Returns</span></a>
             <a routerLink="/users" routerLinkActive="active" title="Users &amp; Roles"><span class="nav-icon"><app-icon name="shieldUser" /></span><span class="nav-label">Users &amp; Roles</span></a>
@@ -82,7 +92,9 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
             @if (auth.user()?.role === 'admin') {
               <div class="nav-section">Customize</div>
               <a routerLink="/appearance" routerLinkActive="active" title="Appearance"><span class="nav-icon"><app-icon name="palette" /></span><span class="nav-label">Appearance</span></a>
+              @if (can('customBranding')) {
               <a routerLink="/invoice-templates" routerLinkActive="active" title="Invoice Templates"><span class="nav-icon"><app-icon name="template" /></span><span class="nav-label">Invoice Templates</span></a>
+            }
             }
             @if (auth.isSuperAdmin()) {
               <div class="nav-section">Platform</div>
@@ -262,6 +274,17 @@ export class AppShellComponent {
     return status === 'suspended' || status === 'cancelled';
   });
 
+  /**
+   * Whether the plan includes a capability.
+   *
+   * Hiding rather than disabling: a greyed-out menu of things somebody has not
+   * bought is a permanent advertisement inside the product they are paying for.
+   * The Subscription page is where the upsell belongs, and it lists every plan.
+   */
+  can(key: string): boolean {
+    return this.auth.can(key);
+  }
+
   commandItems = computed<CommandItem[]>(() => {
     const items: CommandItem[] = [
       { label: 'Dashboard', route: '/dashboard', icon: 'dashboard' },
@@ -269,18 +292,20 @@ export class AppShellComponent {
       { label: 'Bill Generator', route: '/bill-generator', icon: 'calculator' },
       { label: 'Quotations', route: '/sales-documents', icon: 'fileText' },
       { label: 'Delivery Challans', route: '/sales-documents', icon: 'fileText' },
-      { label: 'Recurring Invoices', route: '/recurring', icon: 'clock' },
+      ...(this.can('recurringInvoices') ? [{ label: 'Recurring Invoices', route: '/recurring', icon: 'clock' }] : []),
       { label: 'Clients', route: '/clients', icon: 'users' },
       { label: 'Items', route: '/items', icon: 'box' },
-      { label: 'Inventory', route: '/inventory', icon: 'package' },
-      { label: 'Stock ledger', route: '/inventory', icon: 'package' },
-      { label: 'Low stock', route: '/inventory', icon: 'package' },
-      { label: 'Stock valuation', route: '/inventory', icon: 'package' },
+      ...(this.can('inventory') ? [
+        { label: 'Inventory', route: '/inventory', icon: 'package' },
+        { label: 'Stock ledger', route: '/inventory', icon: 'package' },
+        { label: 'Low stock', route: '/inventory', icon: 'package' }
+      ] : []),
+      ...(this.can('stockValuation') ? [{ label: 'Stock valuation', route: '/inventory', icon: 'package' }] : []),
       { label: 'Payments', route: '/payments', icon: 'creditCard' },
-      { label: 'Purchases', route: '/purchases', icon: 'inbox' },
-      { label: 'Receivables', route: '/receivables', icon: 'clock' },
-      { label: 'Profit & Loss', route: '/profit-loss', icon: 'rupee' },
-      { label: 'Expenses', route: '/profit-loss', icon: 'rupee' },
+      ...(this.can('purchases') ? [{ label: 'Purchases', route: '/purchases', icon: 'inbox' }] : []),
+      ...(this.can('receivables') ? [{ label: 'Receivables', route: '/receivables', icon: 'clock' }] : []),
+      ...(this.can('profitLoss') ? [{ label: 'Profit & Loss', route: '/profit-loss', icon: 'rupee' }] : []),
+      ...(this.can('expenses') ? [{ label: 'Expenses', route: '/profit-loss', icon: 'rupee' }] : []),
       { label: 'Reports', route: '/reports', icon: 'chart' },
       { label: 'GST Returns', route: '/gst-returns', icon: 'percent' },
       { label: 'Security & Privacy', route: '/security', icon: 'lock' },
@@ -290,7 +315,7 @@ export class AppShellComponent {
     if (this.auth.user()?.role === 'admin') {
       items.push(
         { label: 'Appearance', route: '/appearance', icon: 'palette' },
-        { label: 'Invoice Templates', route: '/invoice-templates', icon: 'template' }
+        ...(this.can('customBranding') ? [{ label: 'Invoice Templates', route: '/invoice-templates', icon: 'template' }] : [])
       );
     }
     if (this.auth.isSuperAdmin()) {

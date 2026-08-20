@@ -11,6 +11,7 @@ const { httpError } = require('../utils/httpError');
 const { validate } = require('../middleware/validate');
 const { itemCreateSchema, itemUpdateSchema } = require('../validators/schemas');
 const { requireFlag } = require('../services/featureFlagService');
+const { requireCapability } = require('../services/entitlementService');
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const upload = multer({
@@ -38,8 +39,8 @@ router.get('/', listItems);
 // Bulk import is behind a per-tenant feature flag, so the platform console can
 // enable it for a pilot or withdraw it from a tenant abusing it without inventing
 // a plan tier. See services/featureFlagService.js.
-router.get('/bulk-upload/template', requireRole('admin', 'accountant'), requireFlag('bulkUpload'), downloadItemTemplate);
-router.post('/bulk-upload', requireRole('admin', 'accountant'), requireFlag('bulkUpload'), excelUpload, bulkUploadItems);
+router.get('/bulk-upload/template', requireRole('admin', 'accountant'), requireFlag('bulkUpload'), requireCapability('bulkUpload'), downloadItemTemplate);
+router.post('/bulk-upload', requireRole('admin', 'accountant'), requireFlag('bulkUpload'), requireCapability('bulkUpload'), excelUpload, bulkUploadItems);
 /**
  * Before `/:id`, or a barcode would be parsed as an id and 400 on the cast.
  * Readable by every role: scanning to look something up is not an admin action.

@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { authGuard, superAdminGuard, tenantAdminGuard } from './core/auth.guard';
+import { requireCapability } from './core/capability.guard';
 
 export const routes: Routes = [
   { path: 'login', loadComponent: () => import('./features/auth/login.component').then(m => m.LoginComponent) },
@@ -38,25 +39,25 @@ export const routes: Routes = [
       { path: 'bill-generator/:id/edit', loadComponent: () => import('./features/bill-generator/bill-generator.component').then(m => m.BillGeneratorComponent) },
       { path: 'clients', loadComponent: () => import('./features/clients/clients.component').then(m => m.ClientsComponent) },
       { path: 'items', loadComponent: () => import('./features/items/items.component').then(m => m.ItemsComponent) },
-      { path: 'inventory', loadComponent: () => import('./features/inventory/inventory.component').then(m => m.InventoryComponent) },
-      { path: 'profit-loss', loadComponent: () => import('./features/profit-loss/profit-loss.component').then(m => m.ProfitLossComponent) },
+      { path: 'inventory', canActivate: [requireCapability('inventory', 'Inventory')], loadComponent: () => import('./features/inventory/inventory.component').then(m => m.InventoryComponent) },
+      { path: 'profit-loss', canActivate: [requireCapability('profitLoss', 'Profit & Loss')], loadComponent: () => import('./features/profit-loss/profit-loss.component').then(m => m.ProfitLossComponent) },
       { path: 'payments', loadComponent: () => import('./features/payments/payments.component').then(m => m.PaymentsComponent) },
       { path: 'reports', loadComponent: () => import('./features/reports/reports.component').then(m => m.ReportsComponent) },
       // Phase 5: the section-wise return, which is what can actually be filed.
       { path: 'gst-returns', loadComponent: () => import('./features/reports/gst-returns.component').then(m => m.GstReturnsComponent) },
-      { path: 'purchases', loadComponent: () => import('./features/purchases/purchases.component').then(m => m.PurchasesComponent) },
+      { path: 'purchases', canActivate: [requireCapability('purchases', 'Purchases')], loadComponent: () => import('./features/purchases/purchases.component').then(m => m.PurchasesComponent) },
       // Quotations, proforma invoices and delivery challans — the paperwork
       // before the invoice (2.2 #11–#13).
       { path: 'sales-documents', loadComponent: () => import('./features/sales-documents/sales-documents.component').then(m => m.SalesDocumentsComponent) },
       // Standing instructions that raise an invoice every period (2.2 #14).
-      { path: 'recurring', loadComponent: () => import('./features/recurring/recurring-invoices.component').then(m => m.RecurringInvoicesComponent) },
-      { path: 'receivables', loadComponent: () => import('./features/reports/receivables.component').then(m => m.ReceivablesComponent) },
+      { path: 'recurring', canActivate: [requireCapability('recurringInvoices', 'Recurring invoices')], loadComponent: () => import('./features/recurring/recurring-invoices.component').then(m => m.RecurringInvoicesComponent) },
+      { path: 'receivables', canActivate: [requireCapability('receivables', 'Receivables')], loadComponent: () => import('./features/reports/receivables.component').then(m => m.ReceivablesComponent) },
       { path: 'activity', loadComponent: () => import('./features/account/activity.component').then(m => m.ActivityComponent) },
       { path: 'security', loadComponent: () => import('./features/account/security.component').then(m => m.AccountSecurityComponent) },
       { path: 'users', loadComponent: () => import('./features/users/users.component').then(m => m.UsersComponent) },
       { path: 'subscription', loadComponent: () => import('./features/subscription/subscription.component').then(m => m.SubscriptionComponent) },
       { path: 'appearance', canActivate: [tenantAdminGuard], loadComponent: () => import('./features/appearance/appearance.component').then(m => m.AppearanceComponent) },
-      { path: 'invoice-templates', canActivate: [tenantAdminGuard], loadComponent: () => import('./features/invoice-templates/invoice-templates.component').then(m => m.InvoiceTemplatesComponent) },
+      { path: 'invoice-templates', canActivate: [tenantAdminGuard, requireCapability('customBranding', 'Invoice templates')], loadComponent: () => import('./features/invoice-templates/invoice-templates.component').then(m => m.InvoiceTemplatesComponent) },
       { path: '', pathMatch: 'full', redirectTo: 'dashboard' }
     ]
   },

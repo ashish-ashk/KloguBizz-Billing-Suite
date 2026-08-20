@@ -7094,6 +7094,7 @@
         "x-guards": [
           "requireTenant",
           "guard",
+          "methodScoped",
           "middleware"
         ],
         "responses": {
@@ -7785,7 +7786,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -7831,6 +7833,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "methodScoped",
           "middleware"
         ],
         "responses": {
@@ -7868,7 +7871,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -7916,7 +7920,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -7973,6 +7978,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "methodScoped",
           "middleware"
         ],
         "responses": {
@@ -8019,7 +8025,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -8067,7 +8074,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -8126,6 +8134,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "methodScoped",
           "middleware"
         ],
         "responses": {
@@ -8174,7 +8183,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -8222,7 +8232,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -8259,7 +8270,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -8305,6 +8317,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "methodScoped",
           "middleware"
         ],
         "responses": {
@@ -8342,7 +8355,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -8388,6 +8402,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "methodScoped",
           "middleware"
         ],
         "responses": {
@@ -8435,7 +8450,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -8483,7 +8499,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -9307,7 +9324,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -9381,7 +9399,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -9418,7 +9437,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -9492,7 +9512,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -9529,7 +9550,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -9660,7 +9682,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -9734,7 +9757,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -9771,7 +9795,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -9808,7 +9833,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -9867,6 +9893,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "guard",
           "middleware"
         ],
         "responses": {
@@ -9915,7 +9942,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -9989,7 +10017,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -10037,7 +10066,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -10074,7 +10104,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -10120,6 +10151,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "guard",
           "middleware"
         ],
         "responses": {
@@ -10179,6 +10211,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "guard",
           "middleware"
         ],
         "responses": {
@@ -10227,6 +10260,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "guard",
           "middleware"
         ],
         "responses": {
@@ -10275,7 +10309,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -10534,7 +10569,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -10715,7 +10751,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -10752,7 +10789,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -10798,6 +10836,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "methodScoped",
           "middleware"
         ],
         "responses": {
@@ -10846,7 +10885,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -10905,6 +10945,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "methodScoped",
           "middleware"
         ],
         "responses": {
@@ -10951,7 +10992,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -10988,7 +11030,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -11025,7 +11068,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -11062,7 +11106,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -11108,6 +11153,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "methodScoped",
           "middleware"
         ],
         "responses": {
@@ -11167,6 +11213,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "methodScoped",
           "middleware"
         ],
         "responses": {
@@ -11215,7 +11262,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -11263,7 +11311,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -11320,6 +11369,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "methodScoped",
           "middleware"
         ],
         "responses": {
@@ -11366,7 +11416,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -11403,7 +11454,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -11440,7 +11492,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -11560,6 +11613,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "methodScoped",
           "middleware"
         ],
         "responses": {
@@ -11656,6 +11710,7 @@
         ],
         "x-guards": [
           "requireTenant",
+          "methodScoped",
           "middleware"
         ],
         "responses": {
@@ -11702,7 +11757,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {
@@ -11750,7 +11806,8 @@
           }
         ],
         "x-guards": [
-          "requireTenant"
+          "requireTenant",
+          "methodScoped"
         ],
         "responses": {
           "200": {

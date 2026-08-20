@@ -6,6 +6,7 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { logAudit } = require('../services/auditService');
 const { pickFields } = require('../utils/pickFields');
+const { resolveCapabilities } = require('../services/entitlementService');
 const { serialiseOrganisation, storeImage } = require('../services/brandingAssetService');
 const { resolveFlags } = require('../services/featureFlagService');
 const { noticesFor } = require('../services/noticeService');
@@ -151,6 +152,32 @@ async function placeUploadedImages(flat, orgId) {
 
 const updateOrganisation = asyncHandler(async (req, res) => {
   const update = pickFields(req.body, TENANT_EDITABLE_FIELDS);
+
+  /**
+   * Branding is a paid capability, and this endpoint is not.
+   *
+   * `PUT /organisations/current` also carries the GSTIN, the address and the
+   * state code, which every tenant must be able to edit whatever they pay. So the
+   * gate cannot sit on the route; it has to sit on the fields.
+   *
+   * **Refused, not silently stripped.** Quietly discarding an uploaded logo would
+   * leave somebody staring at a save that appeared to work and changed nothing —
+   * the exact silent failure this codebase keeps finding and removing. A 403
+   * naming the reason is recoverable; a no-op is not.
+   */
+  const brandingKeys = ['brandingConfig', 'themeConfig'].filter(key => update[key] !== undefined);
+  if (brandingKeys.length) {
+    const org = await Organisation.findById(req.orgId).select('plan status capabilityOverrides').lean();
+    const granted = await resolveCapabilities(org);
+    if (!granted.has('customBranding')) {
+      throw httpError(
+        403,
+        'Your logo, letterhead, signature and invoice templates are not included in your current plan. Upgrade from the Subscription page to use them.',
+        'PLAN_UPGRADE_REQUIRED'
+      );
+    }
+  }
+
   const flat = flattenForMerge(update);
   const images = await placeUploadedImages(flat, req.orgId);
 

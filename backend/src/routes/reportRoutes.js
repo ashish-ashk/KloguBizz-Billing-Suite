@@ -9,6 +9,7 @@ const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { requireTenant } = require('../middleware/tenantMiddleware');
 const { requireFlag } = require('../services/featureFlagService');
+const { requireCapability } = require('../services/entitlementService');
 const { validate } = require('../middleware/validate');
 const {
   stockAdjustSchema, stockLocationCreateSchema, stockLocationUpdateSchema, stockTransferSchema
@@ -25,7 +26,7 @@ const {
 
 router.use(protect, requireTenant);
 router.get('/gst-summary', gstSummary);
-router.get('/gst-summary/export.csv', exportGstSummaryCsv);
+router.get('/gst-summary/export.csv', requireCapability('exports'), exportGstSummaryCsv);
 
 /**
  * GSTR-1 and GSTR-3B (Phase 5).
@@ -34,8 +35,8 @@ router.get('/gst-summary/export.csv', exportGstSummaryCsv);
  * checking is the point of showing it before it is filed.
  */
 router.get('/gstr1', gstr1);
-router.get('/gstr1/export.json', gstr1Json);
-router.get('/gstr1/export.csv', gstr1Csv);
+router.get('/gstr1/export.json', requireCapability('exports'), gstr1Json);
+router.get('/gstr1/export.csv', requireCapability('exports'), gstr1Csv);
 router.get('/gstr3b', gstr3b);
 
 /**
@@ -51,22 +52,22 @@ router.get('/gstr3b', gstr3b);
  * All readable by any role: these answer "who owes us what", and a viewer who cannot
  * see it cannot help chase it.
  */
-router.get('/ageing', ageingReport);
-router.get('/ageing/export.xlsx', ageingExcel);
+router.get('/ageing', requireCapability('receivables'), ageingReport);
+router.get('/ageing/export.xlsx', requireCapability('exports'), ageingExcel);
 router.get('/statement/:clientId', customerStatement);
 router.get('/statement/:clientId/export.xlsx', customerStatementExcel);
-router.get('/collections', collectionMetrics);
+router.get('/collections', requireCapability('receivables'), collectionMetrics);
 router.get('/sales-breakdown', salesBreakdown);
-router.get('/invoices/export.xlsx', invoicesExcel);
+router.get('/invoices/export.xlsx', requireCapability('exports'), invoicesExcel);
 
 /**
  * Stock (2.5 #37–#39). Adjusting is an admin action: it moves a balance without a
  * document behind it, which is exactly the operation that needs to be attributable.
  */
-router.get('/stock/ledger', stockLedger);
-router.get('/stock/low', lowStock);
-router.post('/stock/:id/adjust', requireRole('admin'), validate(stockAdjustSchema), adjustStock);
-router.post('/stock/:id/recompute', requireRole('admin'), recomputeStock);
+router.get('/stock/ledger', requireCapability('inventory'), stockLedger);
+router.get('/stock/low', requireCapability('inventory'), lowStock);
+router.post('/stock/:id/adjust', requireRole('admin'), requireCapability('inventory'), validate(stockAdjustSchema), adjustStock);
+router.post('/stock/:id/recompute', requireRole('admin'), requireCapability('inventory'), recomputeStock);
 /**
  * Valuation and expiry (2.5 #41, #42).
  *
@@ -75,8 +76,8 @@ router.post('/stock/:id/recompute', requireRole('admin'), recomputeStock);
  * Changing it still needs admin.
  */
 router.get('/stock/valuation', stockValuation);
-router.get('/stock/expiring', expiringStock);
-router.get('/stock/:id/layers', itemStockLayers);
+router.get('/stock/expiring', requireCapability('inventory'), expiringStock);
+router.get('/stock/:id/layers', requireCapability('stockValuation'), itemStockLayers);
 
 /**
  * Warehouses and transfers (2.5 #42).
@@ -87,11 +88,11 @@ router.get('/stock/:id/layers', itemStockLayers);
  * with no customer document behind them, which is exactly what needs a name
  * against it.
  */
-router.get('/stock/locations', stockLocations.listLocations);
-router.post('/stock/locations', requireRole('admin'), validate(stockLocationCreateSchema), stockLocations.createLocation);
-router.put('/stock/locations/:id', requireRole('admin'), validate(stockLocationUpdateSchema), stockLocations.updateLocation);
-router.post('/stock/transfer', requireRole('admin'), validate(stockTransferSchema), stockLocations.transferStock);
-router.get('/stock/:id/locations', stockLocations.itemLocations);
+router.get('/stock/locations', requireCapability('warehouses'), stockLocations.listLocations);
+router.post('/stock/locations', requireCapability('warehouses'), requireRole('admin'), validate(stockLocationCreateSchema), stockLocations.createLocation);
+router.put('/stock/locations/:id', requireCapability('warehouses'), requireRole('admin'), validate(stockLocationUpdateSchema), stockLocations.updateLocation);
+router.post('/stock/transfer', requireCapability('warehouses'), requireRole('admin'), validate(stockTransferSchema), stockLocations.transferStock);
+router.get('/stock/:id/locations', requireCapability('warehouses'), stockLocations.itemLocations);
 
 /**
  * The tenant's own audit trail (2.6 #50).
@@ -115,7 +116,7 @@ router.post('/e-invoice/:id/cancel', requireRole('admin'), requireFlag('einvoici
  * Generating one is a filing with the government, so it is not.
  */
 /** CMP-08 — the composition dealer's quarterly statement (2.1 #10). */
-router.get('/gst/cmp-08', cmp08);
+router.get('/gst/cmp-08', requireCapability('compositionAndQrmp'), cmp08);
 
 router.get('/eway-bill/:id/check', checkEwayBill);
 router.post('/eway-bill/:id/preview', requireRole('admin', 'accountant'), previewEwayBill);
@@ -128,6 +129,6 @@ router.post('/eway-bill/:id/generate', requireRole('admin'), generateEwayBill);
  * A POST because it carries a document, not because it changes anything: nothing
  * is written, and the report is computed and returned.
  */
-router.post('/gstr-2b/reconcile', requireRole('admin', 'accountant'), reconcileGstr2b);
+router.post('/gstr-2b/reconcile', requireCapability('gstr2b'), requireRole('admin', 'accountant'), reconcileGstr2b);
 
 module.exports = router;

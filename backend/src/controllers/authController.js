@@ -17,6 +17,7 @@ const { sendPasswordResetEmail } = require('../services/emailService');
 const { serialiseOrganisation } = require('../services/brandingAssetService');
 const { recordEvent, EVENT } = require('../services/usageEventService');
 const { resolveFlags } = require('../services/featureFlagService');
+const { capabilityListFor } = require('../services/entitlementService');
 const { noticesFor } = require('../services/noticeService');
 const { sendEmailVerification } = require('../services/emailService');
 const mfa = require('./mfaController');
@@ -346,14 +347,23 @@ const me = asyncHandler(async (req, res) => {
   const organisation = req.orgId
     ? await Organisation.findById(req.orgId).select('-support')
     : null;
-  const [flags, notices, memberships] = await Promise.all([
+  const [flags, notices, memberships, capabilities] = await Promise.all([
     resolveFlags(organisation),
     noticesFor(organisation),
     // The org-switcher's data. A platform account has no memberships — it
     // isn't a tenant identity — and impersonation shows the tenant's own
     // memberships, not the operator's, which would be actively misleading
     // inside a "view as" session.
-    (req.user.role === 'superadmin' || req.impersonation) ? [] : listMemberships(req.user._id)
+    (req.user.role === 'superadmin' || req.impersonation) ? [] : listMemberships(req.user._id),
+    /**
+     * What this tenant's plan actually unlocks (item 3).
+     *
+     * Sent so the app can hide what is not included rather than offering a
+     * button that 403s. The server refuses it either way — hiding is a courtesy,
+     * not the control — but a menu full of doors that slam is a worse product
+     * than a menu of the ones that open.
+     */
+    capabilityListFor(organisation)
   ]);
   res.json({
     /**
@@ -367,6 +377,7 @@ const me = asyncHandler(async (req, res) => {
     user: { ...publicUser(req.user, req.user.role), platformRole: req.user.platformRole },
     organisation: serialiseOrganisation(organisation),
     flags,
+    capabilities,
     notices,
     memberships,
     impersonation: req.impersonation || null

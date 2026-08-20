@@ -21,7 +21,7 @@ guesses.
 |---|---|---|---|
 | 1 | Payment starts the plan, and the tenant gets an invoice | **DONE** — verified end to end; see below | Verify |
 | 2 | Plan benefits listed honestly, dummy copy removed | **DONE** — see below | Rewrite |
-| 3 | Plan entitlements: in-plan unlocked, out-of-plan hidden **and** refused | Does not exist. `Plan.features` gates nothing | Build |
+| 3 | Plan entitlements: in-plan unlocked, out-of-plan hidden **and** refused | **DONE** — see below | Build |
 | 4 | Signature appears on the invoice | `pdfService` already renders it — so this is a configuration or upload path problem | Diagnose |
 | 5 | "Notes / Terms" → "Notes / Terms & Conditions" in the footer | Label change, plus the payment-terms line | Small |
 | 6 | Invoice template: line header and section CSS, theme colour follows the selected theme | Templates exist; the accent is not wired to the tenant theme | Medium |
@@ -94,6 +94,52 @@ bespoke plan's list is worse than leaving it.
 
 Applied to both live databases; the console now shows the capability keys
 read-only beside the editable copy, with the copy labelled as display-only.
+
+## 3. Plan entitlements — DONE
+
+`services/entitlementService.js` resolves what a tenant may do, and
+`requireCapability` refuses it **on the server**. A hidden button with a live
+endpoint behind it is not a plan limit; it is a plan limit anybody can skip with
+`curl`, and the customers most likely to try are the ones reading the pricing page
+closely.
+
+Four decisions worth stating, because each one is a place this could have been
+quietly wrong:
+
+**Reads of a tenant's own records stay open.** Purchases, expenses, credit notes,
+recurring definitions and payment links gate *writes* only. A tenant who
+downgrades still owns their own books, and a purchase register is an
+input-tax-credit record they may be legally required to produce — hiding it behind
+a pricing tier would be taking away their data rather than a feature. Derived
+reports and tools (P&L, GSTR-2B, CMP-08, ageing, valuation, warehouses, exports)
+*are* the feature, so those are gated outright.
+
+**A trial gets the tier it is being sold**, not the cheapest plan. Giving a trial
+only Starter means nobody can evaluate what they would pay for, and the first
+thing they meet is a locked door rather than the product.
+
+**Core survives everything.** An unknown plan code, an empty capability array, a
+plan deleted out from under a tenant — all still resolve to invoicing, clients,
+payments, reminders and GST returns. Losing the ability to bill because of a
+pricing change nobody told them about is not a recoverable inconvenience for a
+business.
+
+**Branding is refused, not stripped.** `PUT /organisations/current` also carries
+the GSTIN and address, so the gate sits on the fields rather than the route — and
+it returns 403 instead of silently discarding an uploaded logo, which would leave
+somebody staring at a save that appeared to work and changed nothing.
+
+Per-tenant `capabilityOverrides` grant or revoke one capability against the plan,
+in both directions, so a bespoke deal does not require inventing a plan.
+
+**Two corrections to my own work.** `multiUser` was on the capability list until
+the user *limit* was checked: Starter already permits three users and
+`assertUserQuota` already enforces the ceiling, so selling "more than one user" as
+a Growth feature would have been the same untruth item 2 removed. And the route
+guard let deep links straight through on a cold load — `can()` is optimistic on an
+empty list, which is right for a menu and wrong for a guard. Found by driving it:
+the nav hid correctly and `/profit-loss` opened anyway. Capabilities are persisted
+now, and the guard waits for the session when it has none.
 
 ## Order, and why
 

@@ -64,6 +64,8 @@ interface SessionResponse {
   user: AuthUser;
   organisation: Organisation | null;
   flags: FeatureFlags;
+  /** What this tenant's plan unlocks. See the backend's entitlementService. */
+  capabilities?: string[];
   notices: TenantNotice[];
   memberships: OrgMembership[];
   impersonation: ImpersonationContext | null;
@@ -74,6 +76,10 @@ export class AuthService {
   private readonly tokenKey = 'klogubizz_token';
   private readonly refreshTokenKey = 'klogubizz_refresh';
   private readonly userKey = 'klogubizz_user';
+  /** Persisted so a cold page load can decide what to render before `/auth/me`
+   *  returns — a route guard that has to wait would otherwise let a locked page
+   *  render for a moment, which is worse than a stale list the server refuses. */
+  private readonly capabilitiesKey = 'klogubizz_capabilities';
   private readonly orgKey = 'klogubizz_org';
   /**
    * Where the operator's own session is parked while they view a tenant.
@@ -89,6 +95,16 @@ export class AuthService {
   readonly organisation = signal<Organisation | null>(this.readJson<Organisation>(this.orgKey));
   /** Effective feature flags, resolved server-side over the platform defaults. */
   readonly flags = signal<FeatureFlags>({});
+
+  /**
+   * What the tenant's plan includes, resolved server-side.
+   *
+   * Used to hide what is not included rather than offering a button that 403s.
+   * The server refuses it either way — this is a courtesy, not the control — but
+   * a menu full of doors that slam is a worse product than a menu of the ones
+   * that open.
+   */
+  readonly capabilities = signal<string[]>(this.readJson<string[]>(this.capabilitiesKey) || []);
   /** Operator-authored banners: this tenant's own, plus any platform-wide notice. */
   readonly notices = signal<TenantNotice[]>([]);
   /** Every organisation this identity can act in (#53, #54) — empty for a
@@ -238,6 +254,8 @@ export class AuthService {
         }
         if (res.organisation) this.setOrganisation(res.organisation);
         this.flags.set(res.flags || {});
+        this.capabilities.set(res.capabilities || []);
+        localStorage.setItem(this.capabilitiesKey, JSON.stringify(res.capabilities || []));
         this.notices.set(res.notices || []);
         this.memberships.set(res.memberships || []);
         this.setImpersonation(res.impersonation ? { ...this.impersonation(), ...res.impersonation } : null);
@@ -248,6 +266,19 @@ export class AuthService {
   /** Whether a named feature is on for this tenant. Unknown keys are off. */
   hasFeature(key: string): boolean {
     return this.flags()[key] === true;
+  }
+
+  /**
+   * Whether the plan includes a capability.
+   *
+   * Defaults to **true** while the session is still loading, so a page does not
+   * flash "upgrade to use this" at somebody who has paid for it and is simply on
+   * a slow connection. The server is the real gate, so an optimistic answer here
+   * costs nothing and a pessimistic one looks like a bug.
+   */
+  can(key: string): boolean {
+    const list = this.capabilities();
+    return list.length === 0 ? true : list.includes(key);
   }
 
   /**
@@ -441,6 +472,7 @@ export class AuthService {
     localStorage.removeItem(this.tokenKey);
     localStorage.removeItem(this.refreshTokenKey);
     localStorage.removeItem(this.userKey);
+    localStorage.removeItem(this.capabilitiesKey);
     localStorage.removeItem(this.orgKey);
     // The stashed operator session goes too. Leaving it behind would mean the next
     // person to use this browser could step back into a platform session that was
@@ -448,6 +480,7 @@ export class AuthService {
     localStorage.removeItem(this.stashKey);
     localStorage.removeItem(this.impersonationKey);
     this.user.set(null);
+    this.capabilities.set([]);
     this.organisation.set(null);
     this.impersonation.set(null);
     this.flags.set({});

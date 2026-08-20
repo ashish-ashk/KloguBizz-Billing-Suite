@@ -28,6 +28,13 @@
  *
  * ── What is deliberately absent ───────────────────────────────────────
  *
+ * Multi-user is also absent, and that is a correction rather than an omission: it
+ * was on this list until the user *limit* was checked. Starter already permits
+ * three users and `planService.assertUserQuota` already enforces the ceiling, so
+ * selling "more than one user" as a Growth feature would have been the same kind
+ * of untruth this file exists to remove. The card states the ceiling, which is
+ * what actually differs.
+ *
  * E-invoicing (IRN) and e-way bills. Everything around them is real and tested —
  * eligibility, validation, the payload, the validity window — but the provider
  * call itself is a stub that throws 501, so nothing can actually be filed. They
@@ -109,11 +116,6 @@ const CAPABILITIES = [
     label: 'Your logo, letterhead, signature and invoice templates',
     enforcedBy: 'organisationRoutes branding, invoice templates'
   },
-  {
-    key: 'multiUser',
-    label: 'More than one user, with roles',
-    enforcedBy: 'userRoutes invite, plus the plan user limit'
-  },
 
   // ── Business: accounting depth and the harder compliance ──
   {
@@ -175,7 +177,7 @@ const PLAN_TIERS = [
     code: 'growth',
     adds: [
       'purchases', 'inventory', 'stockValuation', 'creditNotes',
-      'recurringInvoices', 'paymentLinks', 'customBranding', 'multiUser'
+      'recurringInvoices', 'paymentLinks', 'customBranding'
     ]
   },
   {
