@@ -22,7 +22,7 @@ guesses.
 | 1 | Payment starts the plan, and the tenant gets an invoice | **DONE** — verified end to end; see below | Verify |
 | 2 | Plan benefits listed honestly, dummy copy removed | **DONE** — see below | Rewrite |
 | 3 | Plan entitlements: in-plan unlocked, out-of-plan hidden **and** refused | **DONE** — see below | Build |
-| 4 | Signature appears on the invoice | `pdfService` already renders it — so this is a configuration or upload path problem | Diagnose |
+| 4 | Signature appears on the invoice | **DONE** — it rendered, then got erased. See below | Diagnose |
 | 5 | "Notes / Terms" → "Notes / Terms & Conditions" in the footer | Label change, plus the payment-terms line | Small |
 | 6 | Invoice template: line header and section CSS, theme colour follows the selected theme | Templates exist; the accent is not wired to the tenant theme | Medium |
 | 7 | Document series per tenant | Prefixes and per-FY counters already exist for invoices, credit notes and quotations — there is no UI to set them, and not every document type is covered | Medium |
@@ -140,6 +140,36 @@ guard let deep links straight through on a cold load — `can()` is optimistic o
 empty list, which is right for a menu and wrong for a guard. Found by driving it:
 the nav hid correctly and `/profit-loss` opened anyway. Capabilities are persisted
 now, and the guard waits for the session when it has none.
+
+## 4. Signature on the invoice — DONE
+
+It was never a rendering problem. A freshly uploaded signature **does** reach the
+page — proved by counting the images pdfkit actually embedded, which is the only
+honest way to ask. What happened is that it got **erased by the next unrelated
+save**.
+
+`storeImage({ dataUri: '' })` returns `{ removed: true }` — a truthy result
+meaning "delete this image", because clearing one is a real thing to want. And
+the API *returned* `signatureUrl: ''` for a field it will not send bytes for. So
+an empty string meant two opposite things, and any client that read an
+organisation, changed the bank name and sent the object back erased the logo, the
+letterhead and the signature — and got a 200 for it.
+
+The app guarded against it with its own dirty flags, which is why it was not
+visible in normal use and why the symptom looked intermittent. That guard is the
+kind that survives until somebody adds a field, and the same trap sat waiting for
+every other caller.
+
+Two changes, both removing the ambiguity rather than documenting it:
+
+- **The write-only fields are omitted from responses, not blanked.** There is
+  nothing to echo. Deliberately sending `''` still removes an image.
+- **Derived fields are stripped server-side.** A client echoing back
+  `hasSignature` or `signatureAssetUrl` was storing them as if they were real, and
+  `hasSignature` would then disagree with whether an image was actually there.
+
+Two existing tests asserted `logoUrl === ''`. Their stated intent — "the base64
+is not echoed back" — is what omission delivers, so they now assert absence.
 
 ## Order, and why
 

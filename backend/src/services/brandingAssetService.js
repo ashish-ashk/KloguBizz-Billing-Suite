@@ -224,8 +224,24 @@ function serialiseOrganisation(org) {
   branding.headerImageAssetUrl = orgAssetUrl(plain._id, 'header', headerSource);
   branding.hasLogo = Boolean(logoSource.key || logoSource.dataUri);
   branding.hasHeaderImage = Boolean(headerSource.key || headerSource.dataUri);
-  branding.logoUrl = '';
-  branding.headerImageUrl = '';
+  /**
+   * The write-only fields are **omitted**, not blanked.
+   *
+   * They used to come back as `''`, and an empty string is not neutral here: it
+   * is the documented way to *remove* an image (`storeImage` returns
+   * `{ removed: true }` for it). So any client that read an organisation, changed
+   * one unrelated field and sent the object back erased the logo, the letterhead
+   * and the signature — and the response looked like a success.
+   *
+   * The app guards against it with its own dirty flags, which is why this was not
+   * visible in the product. That guard is the kind that survives until somebody
+   * adds a field, and the same trap sat waiting for every other caller of this
+   * API. Omitting the key removes the ambiguity instead of documenting it: there
+   * is nothing to echo back. Deliberately sending `''` still removes an image,
+   * because that is a real thing to want.
+   */
+  delete branding.logoUrl;
+  delete branding.headerImageUrl;
   // The keys go too. They are an internal storage detail, the client has the
   // asset URL it actually needs, and shipping a bucket path invites someone to
   // build a second way of fetching images that bypasses the cache policy.
@@ -237,7 +253,7 @@ function serialiseOrganisation(org) {
     const signatureSource = { key: defaults.signatureKey || '', dataUri: defaults.signatureUrl || '' };
     defaults.hasSignature = Boolean(signatureSource.key || signatureSource.dataUri);
     defaults.signatureAssetUrl = orgAssetUrl(plain._id, 'signature', signatureSource);
-    defaults.signatureUrl = '';
+    delete defaults.signatureUrl;
     delete defaults.signatureKey;
     branding.invoiceDefaults = defaults;
   }

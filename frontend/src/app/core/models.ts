@@ -66,12 +66,19 @@ export interface Organisation {
   status: string;
   brandingConfig?: {
     /**
-     * Always empty in an API response. The images are base64 data URIs of up to
-     * 500KB/700KB and used to be inlined in every `/auth/me` and
-     * `/organisations/current` payload; they are now served from the cacheable
-     * asset URLs below. Still the field to *write* when uploading or removing an
-     * image — send a data URI to set one, an empty string to clear it, and omit
-     * the key entirely to leave it untouched.
+     * **Never present in an API response** — write-only.
+     *
+     * These carry base64 image data of up to 500KB/700KB and used to be inlined
+     * in every `/auth/me` and `/organisations/current` payload; the bytes now
+     * come back as the cacheable asset URLs below.
+     *
+     * They used to come back as `''`, which was worse than absent: an empty
+     * string is how you *remove* an image, so a client that read an organisation,
+     * changed one field and sent it back erased the logo. Omitted, there is
+     * nothing to echo.
+     *
+     * Send a data URI to set an image, an empty string to clear one, and omit the
+     * key to leave it alone.
      */
     logoUrl?: string;
     headerImageUrl?: string;
@@ -116,10 +123,11 @@ export interface Organisation {
        *  shipping a code this product cannot verify scans. */
       upiId?: string;
       /**
-       * Write-only. The API never returns the signature's bytes — it returns
-       * `signatureAssetUrl` instead (#45), the same way the logo works — so this
-       * is only ever *sent*, carrying a data URI to set one or `''` to clear it.
-       * Never send a stale value back: that rewrites the image.
+       * Write-only, and **absent** from responses rather than empty.
+       *
+       * The bytes come back as `signatureAssetUrl`. It previously returned `''`,
+       * and an empty string means "remove this image" — so echoing a response
+       * back erased the signature. There is now nothing to echo.
        */
       signatureUrl?: string;
       /** Cacheable URL for the uploaded signature. Read-only. */

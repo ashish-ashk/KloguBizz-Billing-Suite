@@ -612,7 +612,7 @@ test('the tenant detail view never ships the base64 logo or the internal support
   await Organisation.updateOne({ _id: tenant.org._id }, { $set: { 'brandingConfig.logoUrl': logo } });
 
   const detail = await call('GET', `/superadmin/organisations/${tenant.org._id}`, { token: owner.token });
-  assert.equal(detail.body.organisation.brandingConfig.logoUrl, '', 'the console renders no logo, so it is not sent');
+  assert.equal(detail.body.organisation.brandingConfig.logoUrl, undefined, 'the console renders no logo, so it is not sent');
 
   // And the other direction: what an operator writes about a tenant must not reach
   // the tenant.

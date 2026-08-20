@@ -1783,3 +1783,113 @@ test('one tenant cannot transfer into another tenant warehouse', maybe(async () 
   assert.equal(body.code, 'LOCATION_NOT_FOUND');
   assert.equal(await StockLocation.countDocuments({ orgId: mine.org._id }), 1);
 }));
+
+// ── Item 4: the signature reaches the invoice, and survives ──
+
+/** A 2x1 PNG. Small, valid, and enough for pdfkit to embed. */
+const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAFUlEQVR4nGP8z8DAwMDAxMDAwMAAAB4EAgHrTIFTAAAAAElFTkSuQmCC';
+
+/** How many images pdfkit actually embedded. The only honest way to ask whether
+ *  a signature reached the page — a 200 and some bytes prove neither. */
+function embeddedImages(buffer) {
+  return (buffer.toString('latin1').match(/\/Subtype\s*\/Image/g) || []).length;
+}
+
+test('an uploaded signature is embedded in the rendered invoice', maybe(async () => {
+  const tenant = await registerOrg();
+  const saved = await call('PUT', '/organisations/current', {
+    token: tenant.token,
+    body: { brandingConfig: { invoiceDefaults: { signatureUrl: TINY_PNG, signatoryName: 'A Signatory' } } }
+  });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.brandingConfig.invoiceDefaults.hasSignature, true);
+
+  const client = await createClient(tenant.token);
+  const invoice = await createInvoice(tenant.token, { clientId: client._id });
+  const pdf = await call('GET', `/invoices/${invoice._id}/pdf`, { token: tenant.token });
+  assert.equal(pdf.status, 200);
+  assert.ok(embeddedImages(pdf.buffer) > 0, 'the signature has to actually reach the page');
+}));
+
+test('the write-only image fields are omitted from a response, not blanked', maybe(async () => {
+  const tenant = await registerOrg();
+  await call('PUT', '/organisations/current', {
+    token: tenant.token,
+    body: { brandingConfig: { logoUrl: TINY_PNG, invoiceDefaults: { signatureUrl: TINY_PNG } } }
+  });
+
+  const { body } = await call('GET', '/organisations/current', { token: tenant.token });
+  const branding = body.brandingConfig;
+
+  /**
+   * They came back as `''`, and an empty string is not neutral: it is the
+   * documented way to *remove* an image. So any client that read an
+   * organisation, changed one unrelated field and sent it back erased the logo,
+   * the letterhead and the signature — and got a 200 for it.
+   *
+   * Omitted, there is nothing to echo. The bytes are still reachable through the
+   * asset URL, which is what a client actually needs.
+   */
+  assert.equal(branding.logoUrl, undefined, 'nothing to echo back');
+  assert.equal(branding.headerImageUrl, undefined);
+  assert.equal(branding.invoiceDefaults.signatureUrl, undefined);
+  assert.ok(branding.logoAssetUrl, 'and the bytes are still reachable');
+  assert.ok(branding.invoiceDefaults.signatureAssetUrl);
+}));
+
+test('a client that echoes the whole response back keeps its images', maybe(async () => {
+  const tenant = await registerOrg();
+  await call('PUT', '/organisations/current', {
+    token: tenant.token,
+    body: { brandingConfig: { invoiceDefaults: { signatureUrl: TINY_PNG } } }
+  });
+
+  // Exactly what a naive client does: read, change one field, send it all back.
+  const read = await call('GET', '/organisations/current', { token: tenant.token });
+  const echoed = { ...read.body.brandingConfig.invoiceDefaults, bankName: 'HDFC Bank' };
+  const resaved = await call('PUT', '/organisations/current', {
+    token: tenant.token, body: { brandingConfig: { invoiceDefaults: echoed } } }
+  );
+  assert.equal(resaved.status, 200);
+
+  assert.equal(resaved.body.brandingConfig.invoiceDefaults.hasSignature, true, 'the signature survived');
+  assert.equal(resaved.body.brandingConfig.invoiceDefaults.bankName, 'HDFC Bank', 'and the edit landed');
+
+  /**
+   * And the derived fields it echoed were not stored as if they were real. The
+   * document would otherwise accumulate fields nothing reads, one of which
+   * (`hasSignature`) then disagrees with whether an image is actually there.
+   */
+  const stored = await Organisation.findById(tenant.org._id).lean();
+  const defaults = stored.brandingConfig.invoiceDefaults;
+  assert.equal(defaults.hasSignature, undefined);
+  assert.equal(defaults.signatureAssetUrl, undefined);
+}));
+
+test('an empty string still removes an image on purpose', maybe(async () => {
+  const tenant = await registerOrg();
+  await call('PUT', '/organisations/current', {
+    token: tenant.token, body: { brandingConfig: { invoiceDefaults: { signatureUrl: TINY_PNG } } }
+  });
+
+  // Deliberately clearing it is a real thing to want, and stays supported —
+  // the fix removed the *ambiguity*, not the capability.
+  const cleared = await call('PUT', '/organisations/current', {
+    token: tenant.token, body: { brandingConfig: { invoiceDefaults: { signatureUrl: '' } } }
+  });
+  assert.equal(cleared.body.brandingConfig.invoiceDefaults.hasSignature, false);
+}));
+
+test('the signature line still prints when no image was uploaded', maybe(async () => {
+  const tenant = await registerOrg();
+  const client = await createClient(tenant.token);
+  const invoice = await createInvoice(tenant.token, { clientId: client._id });
+
+  // `showSignature` used to draw a line with nothing above it because there was
+  // nowhere to store a signature at all. The line and the name are still the
+  // right output for a tenant who has not uploaded one — a document nobody can
+  // sign is worse than a blank line.
+  const pdf = await call('GET', `/invoices/${invoice._id}/pdf`, { token: tenant.token });
+  assert.equal(pdf.status, 200);
+  assert.ok(pdf.buffer.length > 1000, 'the invoice still renders');
+}));

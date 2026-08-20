@@ -83,6 +83,24 @@ function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/**
+ * Fields the API *derives* and a client must never write.
+ *
+ * They are computed on every response — the asset URLs and the `has*` booleans —
+ * so a client that reads an organisation and sends it back would otherwise store
+ * them as if they were real, and the next response would compute them again on
+ * top. Harmless-looking and permanent: the document accumulates fields nothing
+ * reads and one of them (`hasSignature`) then disagrees with whether an image is
+ * actually there.
+ *
+ * Stripped here rather than trusted to callers. The app already deletes them
+ * before saving, which works right up until somebody adds a field.
+ */
+const DERIVED_FIELDS = new Set([
+  'logoAssetUrl', 'headerImageAssetUrl', 'hasLogo', 'hasHeaderImage',
+  'signatureAssetUrl', 'hasSignature'
+]);
+
 function flattenForMerge(update) {
   const flat = {};
   for (const [key, value] of Object.entries(update)) {
@@ -94,10 +112,12 @@ function flattenForMerge(update) {
       const path = `${key}.${nestedKey}`;
       if (MERGEABLE_SUBOBJECTS.has(path) && isPlainObject(nestedValue)) {
         for (const [leafKey, leafValue] of Object.entries(nestedValue)) {
+          if (DERIVED_FIELDS.has(leafKey)) continue;
           flat[`${path}.${leafKey}`] = leafValue;
         }
         continue;
       }
+      if (DERIVED_FIELDS.has(nestedKey)) continue;
       flat[path] = nestedValue;
     }
   }

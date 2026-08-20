@@ -546,13 +546,18 @@ test('a logo is served as a cacheable asset and is absent from the hot payloads'
 
   // The response advertises the asset, not the bytes.
   const branding = saved.body.brandingConfig;
-  assert.equal(branding.logoUrl, '', 'the base64 is not echoed back');
+  /**
+   * Absent, not empty. It used to come back as `''`, and an empty string is how
+   * you *remove* an image — so a client echoing the response back erased the
+   * logo. Omitting the key means there is nothing to echo.
+   */
+  assert.equal(branding.logoUrl, undefined, 'the base64 is not echoed back at all');
   assert.equal(branding.hasLogo, true);
   assert.match(branding.logoAssetUrl, /^\/assets\/org\/[0-9a-f]{24}\/logo\?v=[0-9a-f]{16}$/);
 
   // /auth/me is called on every page load — this is the payload that mattered.
   const me = await call('GET', '/auth/me', { token: a.token });
-  assert.equal(me.body.organisation.brandingConfig.logoUrl, '');
+  assert.equal(me.body.organisation.brandingConfig.logoUrl, undefined);
   assert.ok(me.body.organisation.brandingConfig.logoAssetUrl);
 
   // The asset itself serves the real image, immutably cacheable because the URL
