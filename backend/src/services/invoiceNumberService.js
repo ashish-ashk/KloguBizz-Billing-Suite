@@ -148,6 +148,41 @@ function formatDocumentNumber(org, series, fy, sequence) {
   return `${prefix}-${fy}-${number}${suffix}`;
 }
 
+/**
+ * The series, described for a screen.
+ *
+ * Derived from `SERIES` rather than retyped, so a new document type cannot appear
+ * in the numbering settings without its counter, or vice versa. Labels are the
+ * words a tenant uses, not the internal keys.
+ */
+const SERIES_INFO = [
+  { key: 'invoice', label: 'invoice', prefixField: 'invoicePrefix' },
+  { key: 'creditNote', label: 'credit note', prefixField: 'creditNotePrefix' },
+  { key: 'quotation', label: 'quotation', prefixField: 'quotationPrefix' },
+  { key: 'proforma', label: 'proforma invoice', prefixField: 'proformaPrefix' },
+  { key: 'deliveryChallan', label: 'delivery challan', prefixField: 'deliveryChallanPrefix' }
+].map(entry => ({
+  ...entry,
+  sequenceField: SERIES[entry.key].sequenceField,
+  fyField: SERIES[entry.key].fyField,
+  defaultPrefix: SERIES[entry.key].defaultPrefix
+}));
+
+/**
+ * What the next number *would* be, without taking it.
+ *
+ * A preview must not consume a number: showing somebody what their next invoice
+ * will be numbered would otherwise burn that number and leave a gap, which is the
+ * one thing a consecutive series must not have.
+ */
+function previewDocumentNumber(org, seriesName) {
+  const series = SERIES[seriesName];
+  if (!series) throw new Error(`Unknown document series: ${seriesName}`);
+  const fy = currentFYLabel(new Date());
+  const issued = org[series.fyField] === fy ? (org[series.sequenceField] || 0) : 0;
+  return formatDocumentNumber(org, series, fy, issued + 1);
+}
+
 /** Kept as the invoice-specific entry point used throughout the codebase. */
 async function nextInvoiceNumber(orgId) {
   return nextDocumentNumber(orgId, 'invoice');
@@ -173,5 +208,7 @@ module.exports = {
   formatDocumentNumber,
   resolvePadding,
   SERIES,
-  SERIES_FOR_KIND
+  SERIES_FOR_KIND,
+  SERIES_INFO,
+  previewDocumentNumber
 };

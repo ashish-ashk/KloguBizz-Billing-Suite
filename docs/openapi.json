@@ -394,6 +394,87 @@
         ],
         "additionalProperties": false
       },
+      "PutOrganisationsCurrentDocumentSeriesRequest": {
+        "type": "object",
+        "properties": {
+          "invoice": {
+            "type": "object",
+            "properties": {
+              "prefix": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "nextNumber": {
+                "type": "integer",
+                "minimum": 1,
+                "nullable": true
+              }
+            },
+            "additionalProperties": false
+          },
+          "creditNote": {
+            "type": "object",
+            "properties": {
+              "prefix": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "nextNumber": {
+                "type": "integer",
+                "minimum": 1,
+                "nullable": true
+              }
+            },
+            "additionalProperties": false
+          },
+          "quotation": {
+            "type": "object",
+            "properties": {
+              "prefix": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "nextNumber": {
+                "type": "integer",
+                "minimum": 1,
+                "nullable": true
+              }
+            },
+            "additionalProperties": false
+          },
+          "proforma": {
+            "type": "object",
+            "properties": {
+              "prefix": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "nextNumber": {
+                "type": "integer",
+                "minimum": 1,
+                "nullable": true
+              }
+            },
+            "additionalProperties": false
+          },
+          "deliveryChallan": {
+            "type": "object",
+            "properties": {
+              "prefix": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "nextNumber": {
+                "type": "integer",
+                "minimum": 1,
+                "nullable": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
       "PostOrganisationsCurrentDeleteAccountRequest": {
         "type": "object",
         "properties": {
@@ -5384,6 +5465,89 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PostOrganisationsCurrentTransferOwnershipRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant",
+          "middleware"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/organisations/current/document-series": {
+      "get": {
+        "summary": "GET /api/v1/organisations/current/document-series",
+        "tags": [
+          "organisations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      },
+      "put": {
+        "summary": "PUT /api/v1/organisations/current/document-series",
+        "tags": [
+          "organisations"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutOrganisationsCurrentDocumentSeriesRequest"
               }
             }
           }

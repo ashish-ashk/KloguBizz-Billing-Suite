@@ -21,7 +21,8 @@ import {
   Expense, ProfitLossReport, MasterOption, PlanVersion,
   StockMovement, TenantActivityEntry,
   BillingCredit, CouponQuote, PlanChangePreview, AdminCoupon, AdminCredit,
-  StockLocation, StockLocationBalance
+  StockLocation, StockLocationBalance,
+  DocumentSeries, DocumentSeriesResponse
 } from './models';
 
 /**
@@ -870,6 +871,29 @@ export class ApiService {
   organisation() {
     return this.cache.through(NS.organisation, () => this.http.get<Organisation>(`${this.api}/organisations/current`));
   }
+  /** Document numbering, per tenant (item 7). */
+  documentSeries() {
+    return this.cache.through(
+      `${NS.organisation}:series`,
+      () => this.http.get<DocumentSeriesResponse>(`${this.api}/organisations/current/document-series`)
+    );
+  }
+  /**
+   * Saves prefixes and, optionally, a new starting number.
+   *
+   * The next number moves **forward only** — the server refuses a value that
+   * would re-issue one already used, because two documents carrying the same
+   * number cannot be undone.
+   */
+  saveDocumentSeries(payload: Record<string, { prefix?: string; nextNumber?: number | null }>) {
+    return this.afterWrite(
+      this.http.put<{ ok: boolean; changes: string[]; message: string; series: DocumentSeries[] }>(
+        `${this.api}/organisations/current/document-series`, payload
+      ),
+      NS.organisation
+    );
+  }
+
   publicBranding() { return this.http.get<PublicBranding>(`${this.api}/public/branding`); }
   /**
    * Partial update: `brandingConfig` and `themeConfig` are merged server-side, so

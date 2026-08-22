@@ -25,7 +25,7 @@ guesses.
 | 4 | Signature appears on the invoice | **DONE** — it rendered, then got erased. See below | Diagnose |
 | 5 | "Notes / Terms" → "Notes / Terms & Conditions" in the footer | **DONE** — and it was not just a label. See below | Small |
 | 6 | Invoice template: line header and section CSS, theme colour follows the selected theme | **DONE** — see below | Medium |
-| 7 | Document series per tenant | Prefixes and per-FY counters already exist for invoices, credit notes and quotations — there is no UI to set them, and not every document type is covered | Medium |
+| 7 | Document series per tenant | **DONE** — the fields existed; nothing could set them. See below | Medium |
 | 8 | Client bulk upload from CSV | Only *items* has bulk upload. Clients have none | Build |
 | 9 | Mobile / PWA: nothing hidden behind anything else | Unknown until measured on a real viewport | Audit + fix |
 | 10 | Dashboard and charts fit the mobile screen, compact scrolling | Same | Audit + fix |
@@ -236,6 +236,73 @@ also says plainly that this colour is the one on the document.
 
 Verified by rendering the same invoice with an indigo and then a teal accent: the
 header wash, every rule, the totals, the title and the signature line all follow.
+
+## 7. Document numbering, per tenant — DONE
+
+**Every business on the platform was issuing invoices numbered `KLG-2026-001`** —
+the platform's own initials, printed on their tax documents and sent to their
+customers. All five prefixes and their per-financial-year counters already existed
+on `Organisation`, with platform defaults, and **no screen anywhere let a tenant
+change any of them**. A field that is stored, defaulted and never settable is not a
+feature; it is the default in disguise.
+
+There is now a **Document Numbering** card on Invoice Templates covering all five
+series — invoice, credit note, quotation, proforma invoice, delivery challan — each
+with its prefix, its next number, and a live preview of the number that will be
+issued.
+
+### Numbering moves forward, never back
+
+The next-number field exists for one real case: a business moving from another
+system that was on `AST-2026-0246` last week. Restarting them at 1 would put the
+same number on two different documents across the two systems.
+
+Lowering it is refused with a 409 that says why. A tax invoice series must be
+consecutive within a financial year, and re-issuing a number already used cannot
+be undone — it has to be explained to an assessing officer. Raising it leaves a
+gap, and a gap is a question with an answer ("we migrated"); a duplicate is a
+question without one. The page says this *before* anyone tries it, so the refusal
+is not a surprise at the moment of saving.
+
+The counter is otherwise not tenant-writable — it is on the deliberate exclusion
+list from the privilege-escalation work — so this is the one narrow door, it opens
+one way, and every change is audited as `org.document_series_updated` with the
+before and after.
+
+### Three things found while building it
+
+**The preview document still said `KLG-`.** On the very screen where a tenant sets
+their prefix, the large sample invoice beside it carried the shared sample's
+hardcoded `KLG-2026-001`. It now follows the field as it is typed, like the small
+preview under it.
+
+**The labels named nothing.** Five of the ten new fields are called "Next number",
+so a screen reader read five identical fields with no way to tell which series was
+about to move. Every label now names its own field with `for`/`id`, and each pair
+points at its preview with `aria-describedby`. Found because a browser drive
+could not locate a field by its label — which is exactly the problem.
+
+**Reading the next number must not consume one.** A preview that took a number
+would leave a gap every time somebody opened the settings page — in the one series
+that must not have gaps. `previewDocumentNumber` computes it without touching the
+counter, and a test asserts two reads return the same number and that the number
+shown is the one the next invoice actually gets.
+
+### Verified
+
+Seven backend tests: the prefix reaches the issued document; forward moves work
+and carry on from there; a backward move is refused by code; a prefix that would
+not read as a document number is refused *by document type name*, because "invalid
+input" on a page with five prefix fields does not say which one; previews do not
+consume; each document type keeps its own counter rather than sharing one (a shared
+sequence would interleave quotations into the invoice series and leave gaps an
+auditor reads as missing documents); and the whole screen is admin-only, since
+numbering decides what is printed on everything the business issues.
+
+Then driven in a real browser: set `ASTRA`, watched both previews follow the
+typing, saved, reloaded to confirm it was stored rather than held in a signal,
+raised an actual invoice through the API — `ASTRA-2026-001` — and tried to move
+numbering back to 1, which was refused visibly on the page.
 
 ## Order, and why
 

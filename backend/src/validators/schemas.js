@@ -505,6 +505,27 @@ const stockTransferSchema = z.object({
   })).min(1, 'must contain at least one item').max(200, 'cannot exceed 200 lines')
 });
 
+/**
+ * Document numbering (item 7).
+ *
+ * The prefix pattern is enforced in the controller, where the failure can name
+ * which document type it is about — "PI!! is not a usable prefix for proforma
+ * invoice" is actionable and a generic VALIDATION_ERROR is not. This bounds the
+ * payload and keeps the shape honest.
+ */
+const documentSeriesEntrySchema = z.object({
+  prefix: shortText.optional(),
+  nextNumber: z.coerce.number().int().min(1).optional().nullable()
+}).optional();
+
+const documentSeriesSchema = z.object({
+  invoice: documentSeriesEntrySchema,
+  creditNote: documentSeriesEntrySchema,
+  quotation: documentSeriesEntrySchema,
+  proforma: documentSeriesEntrySchema,
+  deliveryChallan: documentSeriesEntrySchema
+});
+
 const couponCheckSchema = z.object({
   code: shortText.min(1, 'is required'),
   planCode: shortText.min(1, 'is required'),
@@ -850,5 +871,6 @@ module.exports = {
   organisationUpdateSchema, transferOwnershipSchema,
   subscriptionStartSchema, couponCheckSchema, couponUpsertSchema,
   creditSettleSchema, creditCreateSchema,
-  stockLocationCreateSchema, stockLocationUpdateSchema, stockTransferSchema
+  stockLocationCreateSchema, stockLocationUpdateSchema, stockTransferSchema,
+  documentSeriesSchema
 };

@@ -2020,3 +2020,168 @@ test('an invoice renders whatever accent the tenant chose', maybe(async () => {
   const stored = await Organisation.findById(tenant.org._id).lean();
   assert.equal(stored.brandingConfig.primaryColor, '#0f766e', 'the document colour is the tenant\'s');
 }));
+
+// ── Item 7: document numbering, per tenant ──
+
+test('a tenant can put their own prefix on every document type', maybe(async () => {
+  const tenant = await registerOrg();
+
+  const before = await call('GET', '/organisations/current/document-series', { token: tenant.token });
+  assert.equal(before.status, 200);
+  /**
+   * Every one of these existed on the model with a platform default and no screen
+   * anywhere to set it — so every business on the platform issued invoices
+   * numbered `KLG-…`, the platform's own initials, on their tax documents.
+   */
+  assert.equal(before.body.series.length, 5);
+  assert.equal(before.body.series.find(s => s.key === 'invoice').prefix, 'KLG');
+
+  const saved = await call('PUT', '/organisations/current/document-series', {
+    token: tenant.token,
+    body: { invoice: { prefix: 'AST' }, creditNote: { prefix: 'AST/CN' }, quotation: { prefix: 'AST-QT' } }
+  });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.series.find(s => s.key === 'invoice').prefix, 'AST');
+
+  // And it reaches the document, not just the settings page.
+  const client = await createClient(tenant.token);
+  const invoice = await createInvoice(tenant.token, { clientId: client._id });
+  assert.match(invoice.invoiceNumber, /^AST-\d{4}-\d{3}$/, `got ${invoice.invoiceNumber}`);
+}));
+
+test('numbering can be moved forward, for a business migrating mid-series', maybe(async () => {
+  const tenant = await registerOrg();
+  await call('PUT', '/organisations/current/document-series', {
+    token: tenant.token, body: { invoice: { prefix: 'AST', nextNumber: 247 } }
+  });
+
+  /**
+   * The real need behind this: a tenant who was on `AST-2026-0246` in their old
+   * system last week. Restarting at 1 would give them two documents with the same
+   * number across the two systems.
+   */
+  const client = await createClient(tenant.token);
+  const invoice = await createInvoice(tenant.token, { clientId: client._id });
+  assert.match(invoice.invoiceNumber, /^AST-\d{4}-247$/, `got ${invoice.invoiceNumber}`);
+
+  const next = await createInvoice(tenant.token, { clientId: client._id });
+  assert.match(next.invoiceNumber, /^AST-\d{4}-248$/, 'and it carries on from there');
+}));
+
+test('numbering cannot be moved back onto a number already issued', maybe(async () => {
+  const tenant = await registerOrg();
+  const client = await createClient(tenant.token);
+  await createInvoice(tenant.token, { clientId: client._id });
+  await createInvoice(tenant.token, { clientId: client._id });
+
+  const refused = await call('PUT', '/organisations/current/document-series', {
+    token: tenant.token, body: { invoice: { nextNumber: 1 } }
+  });
+
+  /**
+   * A tax invoice series must be consecutive within a financial year, and
+   * re-issuing a number means two different invoices carrying it — which has to
+   * be explained to an assessing officer and cannot be fixed afterwards. A gap is
+   * a question with an answer; a duplicate is a question without one.
+   */
+  assert.equal(refused.status, 409);
+  assert.equal(refused.body.code, 'SEQUENCE_WOULD_REUSE');
+  assert.match(refused.body.message, /already issued/i);
+
+  // Forward from where it is stays allowed.
+  const forward = await call('PUT', '/organisations/current/document-series', {
+    token: tenant.token, body: { invoice: { nextNumber: 500 } }
+  });
+  assert.equal(forward.status, 200);
+}));
+
+test('a prefix that would not read as a document number is refused by name', maybe(async () => {
+  const tenant = await registerOrg();
+  const refused = await call('PUT', '/organisations/current/document-series', {
+    token: tenant.token, body: { proforma: { prefix: 'PI!! <script>' } }
+  });
+  // Named, because "invalid input" on a page with five prefix fields does not say
+  // which one — and this string is printed on a tax document.
+  assert.equal(refused.status, 400);
+  assert.equal(refused.body.code, 'BAD_PREFIX');
+  assert.match(refused.body.message, /proforma invoice/);
+}));
+
+test('reading the next number does not consume it', maybe(async () => {
+  const tenant = await registerOrg();
+  const first = await call('GET', '/organisations/current/document-series', { token: tenant.token });
+  const second = await call('GET', '/organisations/current/document-series', { token: tenant.token });
+
+  /**
+   * A preview that took a number would leave a gap every time somebody opened
+   * the settings page — in the one series that must not have gaps.
+   */
+  const a = first.body.series.find(s => s.key === 'invoice').nextNumber;
+  const b = second.body.series.find(s => s.key === 'invoice').nextNumber;
+  assert.equal(a, b);
+
+  const client = await createClient(tenant.token);
+  const invoice = await createInvoice(tenant.token, { clientId: client._id });
+  assert.equal(invoice.invoiceNumber, a, 'and the preview was accurate');
+}));
+
+test('each document type keeps its own series', maybe(async () => {
+  const tenant = await registerOrg();
+  await call('PUT', '/organisations/current/document-series', {
+    token: tenant.token,
+    body: { invoice: { prefix: 'INV' }, quotation: { prefix: 'QUO' } }
+  });
+  const client = await createClient(tenant.token);
+
+  const invoice = await createInvoice(tenant.token, { clientId: client._id });
+  const quote = await call('POST', '/sales-documents', {
+    token: tenant.token,
+    body: {
+      kind: 'quotation', clientId: client._id, date: '2026-08-01', validUntil: '2026-08-30',
+      items: [{ desc: 'Consulting', qty: 1, rate: 1000, gstRate: 18 }]
+    }
+  });
+  assert.equal(quote.status, 201, JSON.stringify(quote.body));
+
+  /**
+   * Separate counters, not a shared one. A shared sequence would interleave
+   * quotations with tax invoices and leave visible gaps in the invoice series —
+   * which is exactly what an auditor reads as a missing document.
+   */
+  assert.match(invoice.invoiceNumber, /^INV-/);
+  assert.match(quote.body.documentNumber, /^QUO-/);
+  assert.match(invoice.invoiceNumber, /-001$/, 'each series starts at its own 1');
+  assert.match(quote.body.documentNumber, /-001$/);
+}));
+
+test('numbering is for the owner to set, not the accountant', maybe(async () => {
+  const tenant = await registerOrg();
+  const invite = await call('POST', '/users/invite', {
+    token: tenant.token,
+    body: { name: 'Books', email: `books${counter}@tenant.test`, role: 'accountant' }
+  });
+  assert.equal(invite.status, 201, JSON.stringify(invite.body));
+  const accepted = await call('POST', '/auth/accept-invite', {
+    body: {
+      token: new URL(invite.body.inviteUrl).searchParams.get('token'),
+      password: 'Password@123',
+      acceptTerms: true
+    }
+  });
+  assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
+
+  /**
+   * Numbering decides what is printed on every document the business issues, and
+   * the next-number field can move a series forward irreversibly. That is the
+   * owner's call, so both reading and writing are admin-only.
+   */
+  const read = await call('GET', '/organisations/current/document-series', { token: accepted.body.token });
+  assert.equal(read.status, 403);
+  const write = await call('PUT', '/organisations/current/document-series', {
+    token: accepted.body.token, body: { invoice: { nextNumber: 9000 } }
+  });
+  assert.equal(write.status, 403);
+
+  const admin = await call('GET', '/organisations/current/document-series', { token: tenant.token });
+  assert.equal(admin.status, 200, 'the admin can');
+}));

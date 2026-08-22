@@ -3,8 +3,9 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AppShellComponent } from '../../shared/app-shell.component';
 import { IconComponent } from '../../shared/icons';
-import { InvoiceDocumentComponent } from '../../shared/invoice-document.component';
+import { InvoiceDocumentComponent, InvoiceDocData } from '../../shared/invoice-document.component';
 import { AuthService } from '../../core/auth.service';
+import { DocumentSeries } from '../../core/models';
 import { themePrimary } from '../../core/theme';
 import { TenantRole } from '../../core/theme';
 import { ApiService } from '../../core/api.service';
@@ -243,6 +244,63 @@ const DEFAULT_CONTENT: ContentToggles = {
             </p>
           </section>
 
+          <!-- ── Document numbering (item 7) ── -->
+          <section class="card">
+            <div class="card-title" style="margin-bottom:4px;">Document Numbering</div>
+            <div class="card-sub" style="margin-bottom:12px;">
+              The prefix on every document you issue. These were fixed at the platform's own
+              initials until now, so your invoices read <span class="mono">KLG-…</span>
+              rather than yours.
+            </div>
+            @if (seriesNote()) {
+              <div class="info-box" style="margin-bottom:12px;line-height:1.6;font-size:12.5px">{{ seriesNote() }}</div>
+            }
+            @for (row of series(); track row.key) {
+              <div class="grid grid-2" style="gap:10px;align-items:end;margin-bottom:10px">
+                <!--
+                  Each label names its own field with for/id. There are ten inputs
+                  in this block and five of them are called "Next number", so
+                  without it a screen reader reads five identical fields and the
+                  user cannot tell which series they are about to move.
+                -->
+                <div class="field" style="margin:0">
+                  <label [for]="'prefix-' + row.key">{{ row.label }} prefix</label>
+                  <input class="mono" [id]="'prefix-' + row.key" [ngModel]="row.prefix"
+                    (ngModelChange)="setPrefix(row.key, $event)"
+                    maxlength="10" [placeholder]="row.prefix" [attr.aria-describedby]="'preview-' + row.key" />
+                </div>
+                <div class="field" style="margin:0">
+                  <label [for]="'next-' + row.key">Next {{ row.label }} number</label>
+                  <input type="number" min="1" [id]="'next-' + row.key" [ngModel]="nextNumberFor(row.key)"
+                    (ngModelChange)="setNextNumber(row.key, $event)"
+                    [attr.aria-describedby]="'preview-' + row.key" />
+                </div>
+                <div class="card-sub mono" [id]="'preview-' + row.key" style="grid-column:1/-1;margin-top:-4px">
+                  Next: {{ previewFor(row) }}
+                  @if (row.issuedThisYear) {
+                    <span class="muted"> · {{ row.issuedThisYear }} issued this year</span>
+                  }
+                </div>
+              </div>
+            }
+            <p class="muted" style="font-size:11.5px;line-height:1.6;margin:4px 0 12px">
+              <!--
+                Stated before somebody tries it, because the refusal is otherwise
+                a surprise at the moment of saving.
+              -->
+              Numbering can be moved <strong>forward</strong> — useful when moving from another
+              system and continuing an existing series — but never back. Re-using a number would
+              leave two documents carrying it, and that cannot be undone.
+            </p>
+            <div class="actions" style="justify-content:flex-end">
+              <button class="btn primary sm" type="button" [disabled]="savingSeries() || !seriesDirty()"
+                (click)="saveSeries()">
+                @if (savingSeries()) { <span class="spinner"></span> }
+                Save numbering
+              </button>
+            </div>
+          </section>
+
           <section class="card">
             <div class="card-title" style="margin-bottom:4px;">Invoice Title</div>
             <div class="card-sub" style="margin-bottom:12px;">Overrides every template's title word — leave blank to keep each design's own default ("Invoice", "Tax Invoice", etc.)</div>
@@ -378,7 +436,7 @@ const DEFAULT_CONTENT: ContentToggles = {
           </div>
           <div class="invoice-doc-wrap" style="border:1px solid var(--border);border-radius:14px;overflow-x:auto;overflow-y:hidden;box-shadow:var(--shadow-md);">
             <app-invoice-document
-              [invoice]="sampleInvoice"
+              [invoice]="sampleInvoice()"
               [client]="sampleClient"
               [orgName]="auth.organisation()?.name || 'Your Business'"
               [orgAddress]="auth.organisation()?.address || ''"
@@ -414,7 +472,19 @@ export class InvoiceTemplatesComponent implements OnInit {
   tableStyleOptions = TABLE_STYLE_OPTIONS;
   dividerStyleOptions = DIVIDER_STYLE_OPTIONS;
   paperToneOptions = PAPER_TONE_OPTIONS;
-  sampleInvoice = SAMPLE_INVOICE;
+  /**
+   * The sample document, numbered with *this* tenant's invoice series.
+   *
+   * The shared sample carries `KLG-2026-001`, which is the platform's own
+   * initials — so without this the preview on the very screen where a tenant sets
+   * their prefix went on showing somebody else's. It follows the field as they
+   * type, for the same reason the small preview under it does.
+   */
+  sampleInvoice = computed<InvoiceDocData>(() => {
+    const invoiceRow = this.series().find(row => row.key === 'invoice');
+    if (!invoiceRow) return SAMPLE_INVOICE;
+    return { ...SAMPLE_INVOICE, invoiceNumber: this.previewFor(invoiceRow) };
+  });
   sampleClient = SAMPLE_CLIENT;
 
   logoUrl = signal('');
@@ -519,7 +589,80 @@ export class InvoiceTemplatesComponent implements OnInit {
     this.accentColor.set(this.appThemeColour());
   }
 
+  // ── Document numbering (item 7) ──
+  series = signal<DocumentSeries[]>([]);
+  seriesNote = signal('');
+  savingSeries = signal(false);
+  /** Edits held separately from the loaded rows, so an untouched field is sent as
+   *  absent rather than as its current value — the server treats a repeated
+   *  next-number as a no-op, but sending only what changed keeps the audit
+   *  trail meaningful. */
+  private prefixEdits = signal<Record<string, string>>({});
+  private nextEdits = signal<Record<string, number | null>>({});
+
+  seriesDirty = computed(() =>
+    Object.keys(this.prefixEdits()).length > 0 || Object.keys(this.nextEdits()).length > 0);
+
+  nextNumberFor(key: string): number {
+    const edited = this.nextEdits()[key];
+    if (edited !== undefined && edited !== null) return edited;
+    const row = this.series().find(s => s.key === key);
+    return (row?.issuedThisYear || 0) + 1;
+  }
+
+  /** The number as it will actually print, updated as the prefix is typed. */
+  previewFor(row: DocumentSeries): string {
+    const prefix = this.prefixEdits()[row.key] ?? row.prefix;
+    const next = this.nextNumberFor(row.key);
+    const tail = row.nextNumber.split('-').slice(1);
+    const year = tail.length > 1 ? tail[0] : '';
+    const width = (tail[tail.length - 1] || '001').length;
+    return `${prefix}-${year}-${String(next).padStart(width, '0')}`;
+  }
+
+  setPrefix(key: string, value: string) {
+    this.prefixEdits.update(edits => ({ ...edits, [key]: String(value || '').toUpperCase() }));
+  }
+
+  setNextNumber(key: string, value: number | null) {
+    this.nextEdits.update(edits => ({ ...edits, [key]: value === null ? null : Number(value) }));
+  }
+
+  loadSeries() {
+    this.api.documentSeries().subscribe({
+      next: res => { this.series.set(res.series); this.seriesNote.set(res.note); },
+      error: () => {}
+    });
+  }
+
+  saveSeries() {
+    if (this.savingSeries()) return;
+    this.savingSeries.set(true);
+
+    const payload: Record<string, { prefix?: string; nextNumber?: number | null }> = {};
+    for (const [key, prefix] of Object.entries(this.prefixEdits())) {
+      payload[key] = { ...(payload[key] || {}), prefix };
+    }
+    for (const [key, nextNumber] of Object.entries(this.nextEdits())) {
+      payload[key] = { ...(payload[key] || {}), nextNumber };
+    }
+
+    this.api.saveDocumentSeries(payload).subscribe({
+      next: res => {
+        this.savingSeries.set(false);
+        this.prefixEdits.set({});
+        this.nextEdits.set({});
+        this.series.set(res.series);
+        this.toast.success(res.message);
+      },
+      // The server's own words: it names which document type and why, including
+      // the refusal to re-use a number already issued.
+      error: err => { this.savingSeries.set(false); this.toast.httpError(err); }
+    });
+  }
+
   ngOnInit() {
+    this.loadSeries();
     const branding = this.auth.organisation()?.brandingConfig || {};
     // The API no longer returns the base64 for these — it returns a cacheable
     // asset URL, which an <img src> renders identically. That is why `logoDirty`

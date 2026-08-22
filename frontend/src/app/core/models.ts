@@ -1256,6 +1256,29 @@ export interface CouponQuote {
   finalPrice: number;
 }
 
+/**
+ * One document-numbering series (item 7).
+ *
+ * Every tenant issued invoices numbered `KLG-...` — the platform's initials on
+ * their tax documents — because the prefixes existed on the model and no screen
+ * ever let anyone set them.
+ */
+export interface DocumentSeries {
+  key: 'invoice' | 'creditNote' | 'quotation' | 'proforma' | 'deliveryChallan';
+  label: string;
+  prefix: string;
+  /** How many of this type have been issued in the current financial year. */
+  issuedThisYear: number;
+  /** What the next one will be called. A preview — reading it consumes nothing. */
+  nextNumber: string;
+}
+
+export interface DocumentSeriesResponse {
+  financialYear: string;
+  note: string;
+  series: DocumentSeries[];
+}
+
 /** A warehouse, with what it currently holds (2.5 #42). */
 export interface StockLocation {
   _id: string;
