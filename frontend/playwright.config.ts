@@ -30,6 +30,17 @@ import { defineConfig } from '@playwright/test';
  * and a database, so making the ordinary lint-and-build gate depend on them
  * would mean the gate fails on a laptop with nothing started. Run it with
  * `npm run test:e2e` against a local stack, or in a deploy check.
+ *
+ * ── Running these locally ───────────────────────────────────────────────
+ *
+ * The API rate-limits an IP to 300 requests per 15 minutes, and the viewport
+ * sweep alone makes more than that. Start the backend with `NODE_ENV=test`,
+ * which is the switch `rateLimitOptions.js` already provides for exactly this —
+ * the integration suite has the same problem. Getting a 429 here is the limiter
+ * working, not a broken test.
+ *
+ * `E2E_EMAIL` / `E2E_PASSWORD` reuse an existing tenant instead of signing up a
+ * new one, for when the signup limiter is the one you have tripped.
  */
 export default defineConfig({
   testDir: './e2e',

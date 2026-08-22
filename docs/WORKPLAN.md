@@ -1,5 +1,21 @@
 # Work plan — the twelve items
 
+**All twelve are done.** Each section below says what was actually found, which
+was often not what the item described.
+
+Five of them turned out to be the same bug wearing different clothes: a field
+that is stored, printed on a tax document, and settable from nowhere. The invoice
+numbering series (item 7). The tenant's own GSTIN and address, which meant every
+business on the platform was issuing documents that were not valid tax invoices
+(found while writing item 12). `Plan.features`, which advertised six things that
+did not exist (item 2). `termsAndConditions`, which nothing rendered (item 5).
+The signature, which rendered and was then erased by the next save (item 4).
+
+Three more were things that were invisible but still working: a closed nav drawer
+holding twenty-one focusable links, a dialog whose Delete buttons behind it were
+one Tab away, and a revenue chart that widened the page by 300px once a tenant
+had a year of data (items 9 and 10).
+
 Ordered so that anything another item depends on comes first. Each is checked
 against the code before it is called done, and the notes below are findings, not
 guesses.
