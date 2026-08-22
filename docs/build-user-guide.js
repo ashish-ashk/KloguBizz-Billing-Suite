@@ -40,6 +40,14 @@ function dataUri(name) {
   return `data:image/png;base64,${fs.readFileSync(file).toString('base64')}`;
 }
 
+/**
+ * The product's own logo, the same file the login page shows. Read from
+ * `frontend/public` rather than copied here, so it cannot drift from the one
+ * the app actually uses.
+ */
+const LOGO = `data:image/png;base64,${
+  fs.readFileSync(path.join(ROOT, 'frontend', 'public', 'klogu-logo.png')).toString('base64')}`;
+
 const shot = (name, caption, phone = false) =>
   `<figure class="shot${phone ? ' phone' : ''}">`
   + `<img src="${dataUri(name)}" alt="${caption}" loading="lazy">`
@@ -343,9 +351,10 @@ const html = `<title>KloguBizz Step by Step</title>
   }
   .top-inner { max-width: 1180px; margin: 0 auto; }
   .brand { display: inline-flex; align-items: center; gap: 11px; margin-bottom: 26px; }
+  /* The real mark, at the login page's proportions (52px at 14px radius). */
   .brand-tile {
-    width: 34px; height: 34px; border-radius: 9px; background: var(--brand); color: #fff;
-    display: grid; place-items: center; font-weight: 700; font-family: Sora, sans-serif; font-size: 15px;
+    width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
+    background-size: cover; background-position: center;
   }
   .brand-name { font-weight: 700; font-size: 16.5px; }
   .brand-sub { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
@@ -572,7 +581,8 @@ const html = `<title>KloguBizz Step by Step</title>
 <header class="top">
   <div class="top-inner">
     <div class="brand">
-      <span class="brand-tile" aria-hidden="true">K</span>
+      <span class="brand-tile" role="img" aria-label="Klogu"
+        style="background-image:url('${LOGO}')"></span>
       <span>
         <span class="brand-name">Klogu Bizz</span><br>
         <span class="brand-sub">GST Billing Suite</span>
@@ -618,4 +628,6 @@ const html = `<title>KloguBizz Step by Step</title>
 `;
 
 fs.writeFileSync(OUT, html, 'utf8');
-console.log(`Wrote ${path.relative(ROOT, OUT)} — ${Math.round(html.length / 1024)}KB, ${(html.match(/data:image\/png/g) || []).length} screenshots embedded.`);
+const embedded = (html.match(/data:image\/png/g) || []).length;
+// Minus the logo, which is not one of the steps' screenshots.
+console.log(`Wrote ${path.relative(ROOT, OUT)} — ${Math.round(html.length / 1024)}KB, ${embedded - 1} screenshots + the logo embedded.`);
