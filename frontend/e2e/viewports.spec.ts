@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * The phone-viewport checks (items 9 and 10).
+ * The viewport checks (items 9 and 10).
  *
  * The second end-to-end spec in the project, and the reason it earns a place is
  * the same one written at the top of `playwright.config.ts`: every bug it caught
@@ -16,6 +16,10 @@ import { test, expect } from '@playwright/test';
  *    the page behind, including the per-row Delete buttons.
  *  - Twelve months of collections made the revenue chart 638px wide inside a
  *    390px screen, scrolling the whole page sideways by 300px.
+ *  - The invoice editor scrolled sideways by up to 200px at every width between
+ *    768px and 1100px — a laptop, or a half-screen window. Found only because
+ *    the sweep below walks the widths *between* a phone and a desktop, which is
+ *    where nobody looks.
  *
  * The last one is why this seeds a **year** of data before measuring. The same
  * audit against a one-month-old tenant reported everything as fine: an empty
@@ -353,4 +357,60 @@ test('the revenue chart scrolls inside its card instead of widening the page', a
   expect(chart.contentWidth, 'the chart has more content than fits').toBeGreaterThan(chart.width);
   expect(chart.cardWidth).toBeLessThanOrEqual(chart.viewport);
   expect(chart.pageWidth).toBeLessThanOrEqual(chart.viewport + 1);
+});
+
+/**
+ * Every width between a phone and a desktop, not just the two ends.
+ *
+ * This is the test that found the invoice editor: it was clean at 390px and
+ * clean at 1440px, and scrolled sideways by 200px at everything in between —
+ * a 1366px laptop, or any window shared with something else. Checking only the
+ * two extremes had said the app was fine.
+ *
+ * Overflow only, deliberately. The hit-test in the first test needs a settled
+ * page per scroll position and would make this sweep take ten minutes; a page
+ * that scrolls sideways is the failure that actually loses buttons off the edge.
+ */
+const SWEEP_WIDTHS = [1440, 1366, 1280, 1180, 1100, 1024, 980, 900, 880, 820, 768, 640, 540, 430];
+const SWEEP_ROUTES = ['invoices/new', 'dashboard', 'invoices', 'clients', 'items', 'bill-generator', 'gst-returns', 'reports', 'business'];
+
+const OVERFLOW_ONLY = () => {
+  const vw = document.documentElement.clientWidth;
+  const out: string[] = [];
+  for (const el of Array.from(document.querySelectorAll('body *'))) {
+    const b = el.getBoundingClientRect();
+    if (b.width === 0 || b.height === 0) continue;
+    if (b.width <= vw + 1 && b.right <= vw + 1) continue;
+    let scrollable = false;
+    for (let p: Element | null = el.parentElement; p; p = p.parentElement) {
+      const ox = getComputedStyle(p).overflowX;
+      if (ox === 'auto' || ox === 'scroll') { scrollable = true; break; }
+    }
+    if (scrollable) continue;
+    const cls = String(el.className || '').split(' ').slice(0, 2).join('.');
+    const tag = `${el.tagName.toLowerCase()}${cls ? '.' + cls : ''}`;
+    if (!out.includes(tag)) out.push(tag);
+  }
+  return { vw, scroll: document.documentElement.scrollWidth, out: out.slice(0, 4) };
+};
+
+test('no screen scrolls sideways at any width from 430px to 1440px', async ({ page, request }) => {
+  test.setTimeout(900_000);
+  await ensureTenant(request);
+  await signIn(page);
+
+  const broken: string[] = [];
+  for (const route of SWEEP_ROUTES) {
+    for (const width of SWEEP_WIDTHS) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(`${APP}/${route}`);
+      await page.waitForTimeout(1500);
+      const m = await page.evaluate(OVERFLOW_ONLY);
+      if (m.scroll > m.vw + 1 || m.out.length) {
+        broken.push(`/${route} at ${width}px — page is ${m.scroll} wide in ${m.vw}${m.out.length ? ` (${m.out.join(', ')})` : ''}`);
+      }
+    }
+  }
+
+  expect(broken, `\n  ${broken.join('\n  ')}\n`).toEqual([]);
 });

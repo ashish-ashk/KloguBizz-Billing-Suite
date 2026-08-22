@@ -4,18 +4,20 @@ import { defineConfig } from '@playwright/test';
  * The end-to-end smoke test (#59's frontend half).
  *
  * **Two specs, no more.** `smoke.spec.ts` covers the path the business runs on:
- * sign up, add a customer, raise an invoice, download the PDF. `mobile.spec.ts`
- * measures every screen at a phone viewport. Deliberately not a broad suite — a
+ * sign up, add a customer, raise an invoice, download the PDF. `viewports.spec.ts`
+ * measures every screen from 430px to 1440px. Deliberately not a broad suite — a
  * broad end-to-end suite is slow, flaky in ways that have nothing to do with the
  * code, and gets muted within a month, at which point it is worse than nothing
  * because its green tick is trusted and means nothing.
  *
- * The mobile spec earns its place on the same rule as the smoke test, stated
- * below: it found three bugs no unit test could reach — a closed nav drawer
+ * The viewports spec earns its place on the same rule as the smoke test, stated
+ * below: it found four bugs no unit test could reach — a closed nav drawer
  * holding twenty-one focusable links, a dialog whose Delete buttons behind it
- * were one Tab away, and a revenue chart that widened the page by 300px once a
- * tenant had a year of data. It asserts rather than reports, and it is
- * deterministic: it measures geometry, not timing.
+ * were one Tab away, a revenue chart that widened the page by 300px once a
+ * tenant had a year of data, and an invoice editor that scrolled sideways at
+ * every width between 768px and 1100px while being clean at both ends. It
+ * asserts rather than reports, and it is deterministic: it measures geometry,
+ * not timing.
  *
  * What earns its place is the class of bug unit tests structurally cannot see.
  * Every serious frontend failure in this project has been one: a login step that

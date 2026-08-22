@@ -41,3 +41,8 @@ Thumbs.db
 # checked-in screenshot of a passing build is noise nobody opens.
 /test-results
 /playwright-report
+
+# Screenshot inputs for the user guide. Re-created by
+# "npx playwright test e2e/guide-shots.spec.ts" — see docs/build-user-guide.js.
+# The built guide (docs/user-guide.html) embeds them, so both would be redundant.
+/guide-shots

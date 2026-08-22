@@ -571,6 +571,22 @@ app-quick-search { display: contents; }
 
 /* ── Cards ───────────────────────────────────── */
 .card {
+  /*
+    A card never forces the page wider than the screen.
+
+    Measured on the invoice editor between 768px and 1100px: the page scrolled
+    sideways by up to 200px. A `<div style="display:grid">` wrapper (no `.grid`
+    class, so the `.grid > *` rule below does not reach it) left `section.card`
+    at the default `min-width: auto` — "at least as wide as my content" — and the
+    card's content was a `.grid-3` whose `minmax(min(230px, 100%), 1fr)` demands
+    230px per column when the container's own width is still indefinite. The
+    track resolved to 844px inside a 456px column.
+
+    Set here rather than on that one wrapper, because a card is a container: the
+    things inside it that genuinely need width — the line-items table above all —
+    already sit in their own `overflow-x: auto` wrapper and scroll.
+  */
+  min-width: 0;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);

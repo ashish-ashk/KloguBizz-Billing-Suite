@@ -30,7 +30,7 @@ guesses.
 | 9 | Mobile / PWA: nothing hidden behind anything else | **DONE** — measured, three real defects, all fixed | Audit + fix |
 | 10 | Dashboard and charts fit the mobile screen, compact scrolling | **DONE** — see below | Audit + fix |
 | 11 | Sales deck for promotion and branding | **DONE** — `docs/sales-deck.html` | Build |
-| 12 | User guide: plain language, screenshots, numbered steps | Existing docs are engineering prose, wrong audience | Build |
+| 12 | User guide: plain language, screenshots, numbered steps | **DONE** — `docs/user-guide.html` | Build |
 
 ## 1. Payment starts the plan, and the tenant gets an invoice — DONE
 
@@ -638,6 +638,43 @@ Verified in a browser end to end: the warning appears with the details missing, 
 bad GSTIN is refused inline, a GSTIN disagreeing with the state is called out,
 the save survives a reload, and the GSTIN and address print on an invoice raised
 afterwards.
+
+## 12. User guide — DONE
+
+`docs/user-guide.html`. Fifteen numbered steps in the order somebody actually
+needs them: set up once (1–4), add customers and products (5–7), the daily loop
+(8–12), GST time (13–14), and the phone (15).
+
+**Sixteen screenshots of the real screens**, captured from a seeded demo tenant
+by a Playwright script, not drawn. The instructions to regenerate them are at the
+top of `docs/build-user-guide.js`, because a guide whose pictures no longer match
+the product is worse than one with no pictures — the reader trusts them and then
+cannot find the button.
+
+Written the way it was asked for: short sentences, imperative, almost no theory.
+Each step is a numbered list of things to press, then the picture. Where a
+sentence of *why* genuinely prevents a costly mistake it gets a marked note
+rather than a paragraph — three kinds, and only where they earn it: **Careful**
+(skip your GSTIN and the bill is not a valid tax invoice), **Why it matters** (the
+state decides CGST + SGST versus IGST), **Tip** (State accepts a name or a
+number).
+
+Self-contained: every image is a data URI, so the file works from disk, from an
+attachment and from a link, with nothing to lose alongside it. The screenshots
+are captured at the size the page displays them, which keeps the build to Node
+with no image library — this repo has one toolchain and a document is not worth a
+second one. The inputs are gitignored, since the built page already contains
+them.
+
+Checked in light and dark, at 1300px and at 390px: no sideways scroll, no broken
+image, all fifteen contents links resolving.
+
+### One bug in the guide itself
+
+The numbered action lists rendered `<strong>` on its own line — "Pick your", then
+"state" underneath. `display: grid` on the `<li>` makes **every element child** a
+grid item, and inline emphasis is a child. The number is now positioned rather
+than a grid column.
 
 ## Order, and why
 

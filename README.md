@@ -54,7 +54,22 @@ Express backend, and local MongoDB database setup.
 frontend/   Angular app for customers and Super Admin users
 backend/    Node.js + Express API
 database/   Local MongoDB Docker setup, indexes, seeds, and docs
+docs/       API spec, deploy notes, and the two pages below
 ```
+
+## For customers
+
+Two self-contained HTML pages — open either in a browser, or print it to PDF.
+No build step, no assets folder.
+
+- **[docs/user-guide.html](docs/user-guide.html)** — fifteen numbered steps with a
+  screenshot of the real screen at each one, from signing up to filing GSTR-1.
+  Regenerate it after a UI change: see the instructions at the top of
+  [docs/build-user-guide.js](docs/build-user-guide.js).
+- **[docs/sales-deck.html](docs/sales-deck.html)** — the pitch. Every capability,
+  price and limit on it is read from the running product, and the two features
+  that are not live yet are named as such. Two contact details are marked
+  placeholders; replace them before sending it to anyone.
 
 ## Local URLs
 
