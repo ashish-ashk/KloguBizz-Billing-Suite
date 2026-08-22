@@ -324,6 +324,19 @@ export class AppShellComponent {
     return items;
   });
 
+  /**
+   * Escape closes the drawer.
+   *
+   * It covers the whole screen below 881px, which includes a narrowed desktop
+   * window where there is a keyboard and no backdrop worth hunting for. Every
+   * dialog in the app closes this way; the drawer behaving differently is just a
+   * thing to learn.
+   */
+  @HostListener('document:keydown.escape')
+  onEscape() {
+    if (this.menuOpen()) this.menuOpen.set(false);
+  }
+
   constructor(
     public auth: AuthService,
     public theme: ThemeService,

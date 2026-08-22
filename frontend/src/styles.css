@@ -43,6 +43,17 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
 html { scroll-behavior: smooth; }
+/*
+  Anything scrolled to lands *below* the sticky topbar rather than under it.
+
+  Measured: tapping "Upgrade Plan" on the subscription page scrolled the plans
+  section to the top of the viewport, putting its first 56px — the whole section
+  heading — underneath the bar. Set on the scroll root rather than on that one
+  section, so every anchor and every future scrollIntoView gets it for free
+  instead of each one having to remember.
+*/
+html { scroll-padding-top: calc(var(--topbar-h) + 12px); }
+body.has-impersonation-bar { scroll-padding-top: calc(var(--topbar-h) + var(--imp-bar-h) + 12px); }
 :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 4px; }
 .btn:focus-visible { outline-offset: 3px; }
 body {
@@ -209,6 +220,23 @@ textarea { resize: vertical; font-family: inherit; }
 .page-actions { display: flex; gap: 9px; flex-wrap: wrap; }
 
 .grid { display: grid; gap: 13px; }
+/*
+  Grid children may shrink below their content.
+
+  A grid item's `min-width` defaults to `auto`, which means "at least as wide as
+  what is inside me" — so `1fr` quietly resolves to `minmax(auto, 1fr)` and a
+  track grows to fit its widest child rather than dividing the container.
+
+  Measured on the dashboard at 390px, once the tenant had twelve months of
+  collections rather than one: the revenue chart wanted 638px, the card became
+  676px, the "1fr" column computed to 676px, and the whole page scrolled 300px
+  sideways. The chart's own `overflow-x: auto` never engaged, because nothing
+  had ever told it that it could not have the width it asked for.
+
+  With `min-width: 0` the track wins, the card is 362px, and the chart scrolls
+  inside it as it was always meant to.
+*/
+.grid > * { min-width: 0; }
 .grid-2 { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
 .grid-3 { grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); }
 .grid-4 { grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); }
@@ -1201,10 +1229,24 @@ body.has-impersonation-bar .drawer-backdrop { top: var(--imp-bar-h); }
      close both animate with the same easing the rest of the app uses. */
   .sidebar {
     will-change: transform;
-    transition: transform 0.3s var(--ease);
+    /*
+      `visibility` is in the transition on purpose, and it is not cosmetic.
+
+      Measured on a phone: with the drawer closed, seven of the first eight Tab
+      presses landed on nav links sitting at x=-208 — twenty-one focusable
+      elements in a menu nobody can see, all of them still announced by a screen
+      reader and still in the tab order. `transform` alone moves a thing out of
+      sight; it does not take it out of the page.
+
+      `visibility: hidden` removes it from both. It is safe to animate because
+      visibility interpolates as a step at the *end* of a transition, so the
+      drawer stays visible for the whole slide in either direction.
+    */
+    transition: transform 0.3s var(--ease), visibility 0.3s var(--ease);
     transform: translateX(-100%);
+    visibility: hidden;
   }
-  .sidebar.open { transform: translateX(0); box-shadow: 0 0 60px rgba(15, 13, 42, 0.5); }
+  .sidebar.open { transform: translateX(0); visibility: visible; box-shadow: 0 0 60px rgba(15, 13, 42, 0.5); }
   .sidebar-toggle-btn { display: none; }
   .menu-toggle { display: flex; transition: opacity 0.2s var(--ease), transform 0.2s var(--ease); }
   /* The floating hamburger sits at the same top-left corner the drawer's own
@@ -1288,6 +1330,30 @@ body.has-impersonation-bar .drawer-backdrop { top: var(--imp-bar-h); }
   .topbar { padding-top: env(safe-area-inset-top); height: calc(var(--topbar-h) + env(safe-area-inset-top)); }
   .sidebar { padding-left: env(safe-area-inset-left); }
 
+  /*
+    The *bottom* inset, which was missing.
+
+    `viewport-fit=cover` means the page is drawn under the home indicator too,
+    not only under the notch — so on an installed iPhone PWA the bottom ~34px of
+    every screen sat beneath it. That band is not empty: it holds the drawer's
+    Sign Out button, the last row of any long list, and the Save/Cancel footer
+    of every dialog, which is sticky to the bottom of the modal by design.
+
+    `max()` against the existing value everywhere, so on a device with no
+    indicator env() is 0 and the spacing is exactly what it was before.
+  */
+  .page { padding-bottom: max(22px, calc(22px + env(safe-area-inset-bottom))); }
+  .sidebar-foot { padding-bottom: max(15px, calc(15px + env(safe-area-inset-bottom))); }
+  .modal-foot { padding-bottom: max(var(--modal-pad-y), calc(var(--modal-pad-y) + env(safe-area-inset-bottom))); }
+  .toast-region { padding-bottom: env(safe-area-inset-bottom); }
+  /*
+    The right inset is deliberately left alone. It only appears in landscape,
+    the manifest asks for portrait, and covering it would mean overriding the
+    horizontal padding of .page and .topbar from here — a rule that silently
+    wins over the ones that own that spacing and breaks the next time either
+    changes. Not worth it for a case the app does not ask for.
+  */
+
   /* Dimmed scrim behind the full-width drawer — tap-outside-to-close and a
      visual cue that content behind it is inert (body scroll is also locked
      from app-shell.component.ts while this is open). */
@@ -1309,6 +1375,22 @@ body.has-impersonation-bar .drawer-backdrop { top: var(--imp-bar-h); }
   .page-actions, .toolbar, .tabs { flex-wrap: wrap; }
   .toolbar .search-box, .toolbar .search-box input { width: 100%; }
   .grid-2, .grid-3, .grid-4, .grid-5 { grid-template-columns: 1fr; }
+  /*
+    …except a row of KPI tiles, which goes two-up.
+
+    Measured on the dashboard at 390px: four full-width metric cards at 113px
+    each filled 452px — more than half the screen — before a single figure that
+    is not a headline number. They are short and numeric and read perfectly well
+    at half width, and two-up halves that to 226px.
+
+    Written with `:has()` so it applies wherever metric tiles are used rather
+    than page by page, and so a browser without `:has()` simply keeps the
+    single-column rule above instead of getting something broken.
+  */
+  .grid:has(> .metric) { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grid:has(> .metric) .metric { padding: 13px 14px; }
+  .grid:has(> .metric) .metric .value { font-size: 19px; }
+  .grid:has(> .metric) .metric .label { font-size: 9.5px; }
   /* Bottom-sheet on phones instead of a shrunk centered dialog — anchor to
      the bottom edge with only the top corners rounded and a slide-up
      entrance, the native-app pattern rather than a shrunk web dialog. */
@@ -1368,6 +1450,19 @@ body.has-impersonation-bar .drawer-backdrop { top: var(--imp-bar-h); }
   table.table.stack-mobile td:not(:first-child):not([data-priority="high"]):not([data-label=""]) {
     font-size: 11.5px; color: var(--muted);
   }
+
+  /*
+    A field a page has marked as not worth a phone row.
+
+    The dashboard's Recent Invoices card was 1528px tall — 1.8 phone screens for
+    six invoices — because every column got its own labelled line, including the
+    two dates. On a summary card headed "latest billing activity", with "View
+    all" one tap away, the invoice number, who it is for, how much and its status
+    are the glance; the dates are the detail behind it.
+
+    Opt-in per column, so the full list pages still show everything.
+  */
+  table.table.stack-mobile td[data-priority="low"] { display: none; }
 
   table.table.stack-mobile td[data-label=""] {
     justify-content: flex-end; border-top: 1px solid var(--border); margin-top: 4px; padding-top: 10px;

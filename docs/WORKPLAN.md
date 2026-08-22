@@ -27,8 +27,8 @@ guesses.
 | 6 | Invoice template: line header and section CSS, theme colour follows the selected theme | **DONE** — see below | Medium |
 | 7 | Document series per tenant | **DONE** — the fields existed; nothing could set them. See below | Medium |
 | 8 | Client bulk upload from CSV | **DONE** — see below | Build |
-| 9 | Mobile / PWA: nothing hidden behind anything else | Unknown until measured on a real viewport | Audit + fix |
-| 10 | Dashboard and charts fit the mobile screen, compact scrolling | Same | Audit + fix |
+| 9 | Mobile / PWA: nothing hidden behind anything else | **DONE** — measured, three real defects, all fixed | Audit + fix |
+| 10 | Dashboard and charts fit the mobile screen, compact scrolling | **DONE** — see below | Audit + fix |
 | 11 | Sales deck for promotion and branding | Does not exist | Build |
 | 12 | User guide: plain language, screenshots, numbered steps | Existing docs are engineering prose, wrong audience | Build |
 
@@ -405,6 +405,138 @@ bad row uploaded, two customers added and the third listed with its row number
 and reason, the list refreshing itself behind the modal. Then again at 390px,
 checking the error table does not push the page sideways and leave the Close
 button off-screen.
+
+## 9. Mobile / PWA: nothing hidden behind anything else — DONE
+
+Measured rather than eyeballed. A script walks all twenty-one tenant screens at
+390 x 844 with real data on them, at every scroll position down each page, and
+reports two things reading CSS cannot tell you: anything wider than the viewport
+that is not inside something scrollable, and — for every visible button, link and
+input — whether `elementFromPoint` at its centre returns the control or something
+sitting on top of it.
+
+The first run flagged all twenty-one screens for the same thing, and getting the
+audit to say something useful took two exclusions: a control scrolled under a
+`sticky` or `fixed` bar is not hidden, it is scrolled, and a control outside its
+own scrollable container needs scrolling to. Without those the audit called
+everything broken and told you nothing.
+
+### Three real defects
+
+**The closed nav drawer was still fully operable.** It is moved off-canvas with
+`transform: translateX(-100%)` — which moves a thing out of sight without taking
+it out of the page. Measured: **seven of the first eight Tab presses** landed on
+nav links at x=-208, twenty-one focusable elements in a menu nobody can see, all
+of them still announced by a screen reader. Now `visibility: hidden` when closed,
+which removes it from both the tab order and the accessibility tree. It is safe
+to animate because visibility interpolates as a step at the *end* of a
+transition, so the drawer stays visible for the whole slide either way. Now 0 of
+8.
+
+**With a dialog open, thirteen of the next fourteen Tab presses left it** for the
+page behind — including the per-row Delete buttons on the customer list. The page
+was covered, dimmed and scroll-locked, and entirely operable by keyboard: a
+switch-access user could delete a customer they could not see. Focus also never
+moved into the dialog, so a screen reader user got no signal anything had opened.
+The shared `ModalComponent` now carries `role="dialog"`, `aria-modal`, and
+`aria-labelledby` pointing at its own heading; moves focus to the first useful
+control (not the close button — otherwise every dialog opens with "dismiss this"
+selected and Enter throws away what the user came to do); cycles Tab within the
+panel; returns focus where it came from on close; and closes on Escape. Only the
+innermost dialog responds, so a confirm stacked over a form closes the confirm
+and leaves the form standing. Now 0 of 16.
+
+Deliberately **not** `inert` on the rest of the document: that means reaching
+outside the component, and a modal that failed to clean up — an error mid-close,
+a route change — would leave the whole app inert and unusable. Cycling within the
+panel cannot break the app.
+
+**Anything scrolled to landed under the topbar.** Tapping "Upgrade Plan" put the
+plans section at the top of the viewport, with its first 56px — the heading —
+beneath the sticky bar. Fixed with `scroll-padding-top` on the scroll root rather
+than on that one section, so every anchor and every future `scrollIntoView` gets
+it without having to remember. 56px hidden → 12px clear.
+
+### The PWA half
+
+`index.html` sets `viewport-fit=cover`, and the stylesheet handled the top and
+left insets — but not the **bottom**. On an installed iPhone the page is drawn
+under the home indicator too, and that band is not empty: it holds the drawer's
+Sign Out button, the last row of any list, and the sticky Save/Cancel footer of
+every dialog. Added for `.page`, `.sidebar-foot`, `.modal-foot` and the toast
+region, each as `max()` against the existing value so a device with no indicator
+gets exactly the spacing it had before.
+
+Chromium does not emulate `env(safe-area-inset-*)`, so this is verified from both
+ends rather than directly: at inset 0 the computed padding is unchanged (22px and
+15px, as before), and with the inset applied the Sign Out button moves from 15px
+above the screen edge to 49px, clearing the 34px band. The plumbing on a real
+iPhone is reasoned, not measured, and that is worth knowing.
+
+The right inset is deliberately left alone — it only appears in landscape, the
+manifest asks for portrait, and covering it would mean a rule here overriding the
+horizontal padding that `.page` and `.topbar` own.
+
+### Not verified
+
+The **super-admin console** was not measured. Its account has 2FA enabled and
+resetting it would invalidate the authenticator in use; creating a throwaway
+superadmin was blocked. The reasoning that carries over is that the one global
+change (`min-width: 0` on grid children, below) can only ever *permit* shrinking,
+so it cannot introduce horizontal overflow — but it is not measured, and the
+tenant app is.
+
+## 10. The dashboard and charts on a phone — DONE
+
+Started at **2767px — 3.3 phone screens** of scrolling, and one bug that only
+appears on a tenant who has been using the product.
+
+**Four full-width KPI tiles filled 452px** before a single figure that is not a
+headline number. They are short and numeric and read perfectly well at half
+width. Now two-up, 226px. Written as `.grid:has(> .metric)` so it applies
+wherever metric tiles are used rather than page by page, and so a browser without
+`:has()` keeps the existing single-column rule rather than getting something
+broken.
+
+**Recent Invoices was 1528px** — 1.8 phone screens for six invoices — because the
+shared stacked-table pattern gives every column its own labelled line, including
+both dates. Added a `data-priority="low"` opt-in that hides a column on phones
+only, and marked the two dates with it on the dashboard. That card is a glance at
+the latest activity with "View all" at the top of it; the full invoice list still
+shows every column at every width.
+
+What was **not** changed: each stacked row still spends 55px of its 180px on the
+action row. That size is a deliberate touch-target decision, with a comment in
+the stylesheet saying so. Reclaiming it would trade away exactly what item 9 was
+about.
+
+### The bug that needed a year of data
+
+With twelve months of collections instead of one, the revenue chart wanted 638px
+on a 390px screen and **the whole page scrolled sideways by 300px**.
+
+The cause is a default worth knowing: a grid item's `min-width` is `auto`, which
+means "at least as wide as my content", so `1fr` quietly resolves to
+`minmax(auto, 1fr)` and the track grows to fit its widest child. The card became
+676px, the "1fr" column computed to 676px, and the chart's own `overflow-x: auto`
+never engaged — because nothing had ever told it that it could not have the width
+it asked for. `.grid > * { min-width: 0 }` makes the track win: the card is 362px
+and the chart scrolls inside it, 324px of window onto 638px of bars.
+
+This is why the spec seeds a **year** before measuring. The same audit against a
+one-month-old tenant reported all twenty-one screens as fine. An empty page does
+not overflow, and a clean result on one is worth nothing.
+
+2767px → 2232px, and no sideways scroll anywhere.
+
+### Verified
+
+`e2e/mobile.spec.ts` — the second end-to-end spec in the project, and the config
+comment now says why it earns a place: it asserts rather than reports, it is
+deterministic because it measures geometry rather than timing, and every bug it
+caught was one where each component was fine and the *page* was not. Twenty-one
+screens clean, drawer clean, and the desktop layout separately confirmed
+unchanged — four metric columns, the 1.5fr/1fr split intact, both dates visible.
 
 ## Order, and why
 

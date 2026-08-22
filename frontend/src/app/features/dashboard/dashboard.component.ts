@@ -105,8 +105,14 @@ import { forkJoin } from 'rxjs';
                           <span style="font-weight:600;">{{ clientName(inv) }}</span>
                         </div>
                       </td>
-                      <td class="muted" data-label="Date">{{ fmtDate(inv.date) }}</td>
-                      <td class="muted" data-label="Due Date">{{ fmtDate(inv.dueDate) }}</td>
+                      <!--
+                        Both dates are marked low priority, which hides them on a
+                        phone only. This card is a glance at the latest activity
+                        and "View all" sits at the top of it; the full invoice
+                        list shows every column at every width.
+                      -->
+                      <td class="muted" data-label="Date" data-priority="low">{{ fmtDate(inv.date) }}</td>
+                      <td class="muted" data-label="Due Date" data-priority="low">{{ fmtDate(inv.dueDate) }}</td>
                       <td class="strong" data-label="Amount" data-priority="high">{{ fmtINR(inv.totals.total) }}</td>
                       <td data-label="Status" data-priority="high"><app-pill [status]="inv.status" /></td>
                       <td class="actions" data-label=""><a class="btn ghost sm" [routerLink]="['/invoices', inv._id, 'edit']">Edit</a></td>

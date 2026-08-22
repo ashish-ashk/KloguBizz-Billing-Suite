@@ -1,4 +1,4 @@
-import { Component, ElementRef, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges, computed, input } from '@angular/core';
+import { Component, ElementRef, EventEmitter, HostListener, Input, OnChanges, OnDestroy, Output, SimpleChanges, ViewChild, computed, input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ToastService } from '../core/toast.service';
@@ -38,7 +38,34 @@ export function popScrollLock() {
   if (scrollLockCount === 0) document.body.style.overflow = '';
 }
 
-/** Modal dialog. Renders nothing while closed. */
+let modalSeq = 0;
+
+/**
+ * The modals currently open, innermost last.
+ *
+ * Escape is on `document`, so without this every open dialog hears it — and a
+ * confirm stacked over a form (which several pages do) would close both at once,
+ * throwing away the form the user was only trying to get back to.
+ */
+const openModals: object[] = [];
+
+/**
+ * Modal dialog. Renders nothing while closed.
+ *
+ * ── Why the focus handling below exists ────────────────────────────
+ *
+ * Measured at a phone viewport with a modal open: **thirteen of the next
+ * fourteen Tab presses left the modal** and landed on the page behind it —
+ * including the per-row Delete buttons on the customer list. The page was
+ * covered, dimmed and unscrollable, and still fully operable by keyboard. A
+ * switch-access or keyboard user could delete a customer they could not see.
+ *
+ * Focus also did not move into the dialog when it opened, so a screen reader
+ * user got no indication anything had happened.
+ *
+ * Fixed here rather than in each caller, because every modal in the app is this
+ * one component and the bug was in all of them equally.
+ */
 @Component({
   selector: 'app-modal',
   standalone: true,
@@ -46,10 +73,11 @@ export function popScrollLock() {
   template: `
     @if (open) {
       <div class="modal-overlay no-print" (click)="close.emit()">
-        <div class="modal-panel" [style.--modal-w]="width + 'px'" (click)="$event.stopPropagation()">
+        <div #panel class="modal-panel" role="dialog" aria-modal="true" [attr.aria-labelledby]="titleId"
+          [style.--modal-w]="width + 'px'" (click)="$event.stopPropagation()">
           <div class="modal-scroll">
             <div class="modal-head">
-              <div class="modal-title">{{ title }}</div>
+              <div class="modal-title" [id]="titleId">{{ title }}</div>
               <button class="modal-close" type="button" (click)="close.emit()" aria-label="Close">✕</button>
             </div>
             <ng-content />
@@ -65,6 +93,19 @@ export class ModalComponent implements OnChanges, OnDestroy {
   @Input() width = 480;
   @Output() close = new EventEmitter<void>();
 
+  @ViewChild('panel') panel?: ElementRef<HTMLElement>;
+
+  /** Ties the dialog to its own heading, so it is announced by name. */
+  titleId = `modal-title-${(modalSeq += 1)}`;
+
+  /** Whatever had focus before we took it, so it can be given back on close. */
+  private returnFocusTo: HTMLElement | null = null;
+
+  private static readonly FOCUSABLE = [
+    'a[href]', 'button:not([disabled])', 'input:not([disabled])',
+    'select:not([disabled])', 'textarea:not([disabled])', '[tabindex]:not([tabindex="-1"])'
+  ].join(',');
+
   // Locks page scroll behind the overlay while any modal is open. Shared
   // counter (rather than a plain boolean) so two modals opening in quick
   // succession — e.g. a confirm dialog over a form — don't have the first
@@ -74,11 +115,100 @@ export class ModalComponent implements OnChanges, OnDestroy {
     const wasOpen = !!changes['open'].previousValue;
     const isOpen = !!changes['open'].currentValue;
     if (isOpen === wasOpen) return;
-    if (isOpen) pushScrollLock(); else popScrollLock();
+    if (isOpen) {
+      pushScrollLock();
+      openModals.push(this);
+      this.returnFocusTo = document.activeElement as HTMLElement | null;
+      // After the view has rendered the panel — there is nothing to focus before that.
+      setTimeout(() => this.focusFirst(), 0);
+    } else {
+      popScrollLock();
+      this.leaveStack();
+      /**
+       * Focus goes back where it came from. Otherwise closing a dialog drops
+       * focus to the top of the document, and a keyboard user has to tab all
+       * the way back to the row they were working on.
+       */
+      const target = this.returnFocusTo;
+      this.returnFocusTo = null;
+      if (target?.isConnected) setTimeout(() => target.focus(), 0);
+    }
   }
 
   ngOnDestroy() {
     if (this.open) popScrollLock();
+    this.leaveStack();
+  }
+
+  private leaveStack() {
+    const at = openModals.indexOf(this);
+    if (at >= 0) openModals.splice(at, 1);
+  }
+
+  /**
+   * Escape closes it — expected of any dialog, and the only way out without a
+   * mouse. Only the innermost one, so a confirm over a form closes the confirm
+   * and leaves the form standing.
+   */
+  @HostListener('document:keydown.escape')
+  onEscape() {
+    if (!this.open) return;
+    if (openModals[openModals.length - 1] !== this) return;
+    this.close.emit();
+  }
+
+  /** Tab is likewise only trapped by the innermost dialog. */
+  private isTopmost() {
+    return openModals[openModals.length - 1] === this;
+  }
+
+  /**
+   * Keeps Tab inside the dialog by wrapping at each end.
+   *
+   * Deliberately not `inert` on everything else: that would mean reaching outside
+   * this component to mark the rest of the document, and a modal that failed to
+   * clean up (an error mid-close, a route change) would leave the whole app
+   * inert and unusable. Cycling within the panel cannot leave the app broken.
+   */
+  @HostListener('document:keydown.tab', ['$event'])
+  onTab(event: KeyboardEvent) {
+    if (!this.open || !this.isTopmost()) return;
+    const items = this.focusable();
+    if (!items.length) return;
+
+    const active = document.activeElement as HTMLElement | null;
+    const inside = !!active && !!this.panel?.nativeElement.contains(active);
+    const first = items[0];
+    const last = items[items.length - 1];
+
+    // Focus escaped (or never arrived) — pull it back to the appropriate end.
+    if (!inside) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+      return;
+    }
+    if (!event.shiftKey && active === last) { event.preventDefault(); first.focus(); }
+    else if (event.shiftKey && active === first) { event.preventDefault(); last.focus(); }
+  }
+
+  private focusable(): HTMLElement[] {
+    const root = this.panel?.nativeElement;
+    if (!root) return [];
+    return Array.from(root.querySelectorAll<HTMLElement>(ModalComponent.FOCUSABLE))
+      // A hidden file input is focusable by selector but not by keyboard, and
+      // landing on one is a dead stop for the user.
+      .filter(el => el.offsetWidth > 0 || el.offsetHeight > 0);
+  }
+
+  private focusFirst() {
+    const items = this.focusable();
+    /**
+     * The first *useful* control, not the close button — otherwise every dialog
+     * opens with "dismiss this" selected, and Enter throws away what the user
+     * came to do.
+     */
+    const preferred = items.find(el => !el.classList.contains('modal-close'));
+    (preferred || items[0] || this.panel?.nativeElement)?.focus();
   }
 }
 
