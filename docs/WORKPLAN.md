@@ -29,7 +29,7 @@ guesses.
 | 8 | Client bulk upload from CSV | **DONE** — see below | Build |
 | 9 | Mobile / PWA: nothing hidden behind anything else | **DONE** — measured, three real defects, all fixed | Audit + fix |
 | 10 | Dashboard and charts fit the mobile screen, compact scrolling | **DONE** — see below | Audit + fix |
-| 11 | Sales deck for promotion and branding | Does not exist | Build |
+| 11 | Sales deck for promotion and branding | **DONE** — `docs/sales-deck.html` | Build |
 | 12 | User guide: plain language, screenshots, numbered steps | Existing docs are engineering prose, wrong audience | Build |
 
 ## 1. Payment starts the plan, and the tenant gets an invoice — DONE
@@ -537,6 +537,47 @@ deterministic because it measures geometry rather than timing, and every bug it
 caught was one where each component was fine and the *page* was not. Twenty-one
 screens clean, drawer clean, and the desktop layout separately confirmed
 unchanged — four metric columns, the 1.5fr/1fr split intact, both dates visible.
+
+## 11. Sales deck — DONE
+
+`docs/sales-deck.html`. A single self-contained page, no build step, no external
+assets beyond Google Fonts — open it in a browser, present it by scrolling, or
+print it to PDF.
+
+**Every number on it was read out of the running product**: the twenty-one
+capabilities come from `planCapabilities.js`, the four prices, user limits and
+invoice limits from the `plans` collection, the fourteen-day trial from
+`authController`, and the trial's Business-tier capability from
+`entitlementService`. The sample invoice's arithmetic is correct and **both
+GSTINs pass the checksum the product itself enforces** — the first draft's buyer
+GSTIN did not, which would have been a poor advertisement for a deck whose
+argument is that the software catches exactly that.
+
+There is a spread headed **"What it does not do yet"**, naming e-invoicing and
+e-way bills as not live. That is the same rule as item 2: the pricing page used
+to advertise six things that did not exist. A deck is a pricing page with better
+typography, and the place to say this is before somebody pays, not during their
+first month-end.
+
+### The design
+
+Grounded in the subject rather than a template. The hero is a **typeset tax
+invoice** — not a screenshot — because that is the most characteristic object in
+this world and it is what the product produces; three pins on it name the state
+code, the numbering series and the HSN code, which are the three things that are
+easy to get wrong and expensive when you do. Indigo is the app's own brand
+colour rather than an invented one, with a teal counterweight that reads as
+"reconciled". Instrument Serif for the pitch, Public Sans for reading, and IBM
+Plex Mono for GSTINs, HSN codes and invoice numbers — the mono is meaningful
+here, because those are fixed-width identifiers.
+
+Rendered and checked in light and dark, at 1440px and at 390px: no sideways
+scroll at either width, and the display face loads rather than falling back.
+
+**Two contact details are deliberately placeholders**, marked with an amber
+dashed underline and called out in the colophon, so they cannot be shipped
+unnoticed. They were not filled in because a sales contact is a decision about
+what address the business wants public.
 
 ## Order, and why
 

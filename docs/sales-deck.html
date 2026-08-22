@@ -1,0 +1,822 @@
+<title>KloguBizz Pitch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  /* ── Tokens ────────────────────────────────────────────────────────────
+     The complete light palette lives on bare :root. The dark blocks below
+     redefine only these, so no component rule is trapped behind a media query.
+     Neutrals carry a blue bias toward the indigo, so they read as chosen
+     rather than as the browser's grey.                                      */
+  :root {
+    --ink:        #161B2E;
+    --ink-soft:   #2A3149;
+    --paper:      #F6F7FB;
+    --paper-2:    #FFFFFF;
+    --rule:       #D8DCE8;
+    --rule-soft:  #E7EAF2;
+    --muted:      #5A6178;
+    --faint:      #868DA3;
+
+    /* Indigo is the product's own brand colour, inherited rather than invented. */
+    --indigo:     #4F46E5;
+    --indigo-ink: #3730A3;
+    --indigo-wash:#EEEDFC;
+
+    /* The counterweight. Reads as "reconciled" next to the indigo. */
+    --teal:       #0E7490;
+    --teal-wash:  #E2F1F5;
+
+    --settled:    #15803D;
+    --attention:  #B45309;
+
+    --shadow:     0 1px 2px rgba(22, 27, 46, .06), 0 12px 32px rgba(22, 27, 46, .07);
+    --shadow-lg:  0 2px 4px rgba(22, 27, 46, .07), 0 28px 64px rgba(22, 27, 46, .13);
+
+    --measure: 62ch;
+    --gutter: clamp(20px, 5vw, 72px);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink:        #EEF0F7;
+      --ink-soft:   #C4C9DA;
+      --paper:      #0F131F;
+      --paper-2:    #171C2C;
+      --rule:       #2C3348;
+      --rule-soft:  #232939;
+      --muted:      #9AA1B8;
+      --faint:      #737B93;
+
+      --indigo:     #8B84F7;
+      --indigo-ink: #B4AEFB;
+      --indigo-wash:#221F45;
+
+      --teal:       #4FB6CE;
+      --teal-wash:  #12303A;
+
+      --settled:    #4ADE80;
+      --attention:  #FBBF24;
+
+      --shadow:     0 1px 2px rgba(0, 0, 0, .4), 0 12px 32px rgba(0, 0, 0, .38);
+      --shadow-lg:  0 2px 4px rgba(0, 0, 0, .45), 0 28px 64px rgba(0, 0, 0, .5);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ink:        #EEF0F7;
+    --ink-soft:   #C4C9DA;
+    --paper:      #0F131F;
+    --paper-2:    #171C2C;
+    --rule:       #2C3348;
+    --rule-soft:  #232939;
+    --muted:      #9AA1B8;
+    --faint:      #737B93;
+
+    --indigo:     #8B84F7;
+    --indigo-ink: #B4AEFB;
+    --indigo-wash:#221F45;
+
+    --teal:       #4FB6CE;
+    --teal-wash:  #12303A;
+
+    --settled:    #4ADE80;
+    --attention:  #FBBF24;
+
+    --shadow:     0 1px 2px rgba(0, 0, 0, .4), 0 12px 32px rgba(0, 0, 0, .38);
+    --shadow-lg:  0 2px 4px rgba(0, 0, 0, .45), 0 28px 64px rgba(0, 0, 0, .5);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    /* Explicit, from a token: the viewer paints its own ground behind the page. */
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Public Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 17px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3 { text-wrap: balance; margin: 0; }
+
+  .display {
+    font-family: "Instrument Serif", ui-serif, Georgia, "Times New Roman", serif;
+    font-weight: 400;
+    letter-spacing: -0.015em;
+    line-height: 1.04;
+  }
+
+  .mono {
+    font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  a { color: var(--indigo); }
+  :focus-visible { outline: 2px solid var(--indigo); outline-offset: 3px; border-radius: 3px; }
+
+  /* ── Spreads ─────────────────────────────────────────────────────────── */
+  .spread {
+    padding: clamp(56px, 9vw, 116px) var(--gutter);
+    border-bottom: 1px solid var(--rule);
+  }
+  .spread.dark {
+    background: var(--ink);
+    color: var(--paper);
+    border-bottom-color: var(--ink);
+  }
+  .spread.dark .eyebrow-num { color: rgba(246, 247, 251, .42); }
+  .spread.dark .eyebrow-txt { color: rgba(246, 247, 251, .72); }
+  .spread.dark .lede { color: rgba(246, 247, 251, .78); }
+  .inner { max-width: 1120px; margin: 0 auto; }
+
+  /* The eyebrow numbers a sequence, because a pitch genuinely is one and a
+     presenter needs to say "spread four". */
+  .eyebrow {
+    display: flex; align-items: baseline; gap: 12px;
+    margin-bottom: clamp(20px, 3vw, 34px);
+  }
+  .eyebrow-num {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px; font-weight: 600; letter-spacing: .1em;
+    color: var(--faint);
+  }
+  .eyebrow-txt {
+    font-size: 11.5px; font-weight: 700; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .eyebrow-rule { flex: 1; height: 1px; background: var(--rule); }
+  .spread.dark .eyebrow-rule { background: rgba(246, 247, 251, .18); }
+
+  .lede {
+    max-width: var(--measure);
+    font-size: clamp(17px, 1.5vw, 19.5px);
+    color: var(--muted);
+    margin: 18px 0 0;
+  }
+
+  /* ── Hero ────────────────────────────────────────────────────────────── */
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: clamp(32px, 5vw, 72px);
+    align-items: center;
+  }
+  .wordmark {
+    display: inline-flex; align-items: center; gap: 11px;
+    margin-bottom: clamp(28px, 4vw, 44px);
+  }
+  .wordmark-tile {
+    width: 34px; height: 34px; border-radius: 9px;
+    background: var(--indigo); color: #fff;
+    display: grid; place-items: center;
+    font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: 15px;
+  }
+  .wordmark-name { font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+  .wordmark-sub { font-size: 11.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
+
+  .hero h1 { font-size: clamp(42px, 6.4vw, 78px); }
+  .hero h1 em { font-style: italic; color: var(--indigo); }
+  .hero-note {
+    margin-top: clamp(26px, 3.4vw, 38px);
+    padding-top: 20px;
+    border-top: 1px solid var(--rule);
+    display: flex; flex-wrap: wrap; gap: 10px 26px;
+    font-size: 13.5px; color: var(--muted);
+  }
+  .hero-note b { color: var(--ink); font-weight: 600; }
+
+  /* ── The invoice: the most characteristic object in this subject's world ── */
+  .doc {
+    background: var(--paper-2);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    font-size: 12.5px;
+    container-type: inline-size;
+  }
+  .doc-accent { height: 4px; background: var(--indigo); }
+  .doc-pad { padding: clamp(16px, 2.4vw, 26px); }
+  .doc-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+  .doc-org { font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
+  .doc-kind { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--indigo); text-align: right; }
+  .doc-num { font-size: 12px; color: var(--muted); text-align: right; margin-top: 3px; }
+
+  .doc-parties {
+    display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    gap: 14px;
+    margin-top: 18px; padding: 14px;
+    background: var(--paper); border-radius: 8px;
+  }
+  .doc-label {
+    font-size: 9.5px; font-weight: 700; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--faint); margin-bottom: 5px;
+  }
+  .doc-party-name { font-weight: 700; font-size: 13px; }
+  .doc-party-line { color: var(--muted); font-size: 11.5px; }
+  .doc-supply { text-align: right; }
+  .doc-supply .doc-label { text-align: right; }
+
+  .doc-table-wrap { overflow-x: auto; margin-top: 16px; }
+  /* A floor, so the wrapper scrolls instead of the columns collapsing. An amount
+     clipped to "1,35,0" is worse than a scrollbar. */
+  table.doc-table { width: 100%; min-width: 380px; border-collapse: collapse; }
+  table.doc-table td.mono, table.doc-table th { white-space: nowrap; }
+  table.doc-table th {
+    background: var(--indigo-wash);
+    font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--indigo-ink);
+    text-align: right; padding: 8px 7px; white-space: nowrap;
+  }
+  table.doc-table th:first-child, table.doc-table td:first-child { text-align: left; }
+  table.doc-table td {
+    padding: 10px 7px; text-align: right;
+    border-bottom: 1px solid var(--rule-soft);
+    font-variant-numeric: tabular-nums;
+  }
+  table.doc-table tbody tr:last-child td { border-bottom: 0; }
+  .doc-desc { font-weight: 600; }
+
+  .doc-totals { margin-top: 14px; display: flex; justify-content: flex-end; }
+  .doc-totals-inner { min-width: 240px; }
+  .doc-total-row {
+    display: flex; justify-content: space-between; gap: 24px;
+    padding: 5px 0; font-variant-numeric: tabular-nums;
+  }
+  .doc-total-row span:first-child { color: var(--muted); }
+  .doc-total-row.grand {
+    margin-top: 7px; padding-top: 10px;
+    border-top: 1.5px solid var(--indigo);
+    font-size: 16px; font-weight: 700;
+  }
+  .doc-total-row.grand span:first-child { color: var(--ink); }
+  .doc-total-row.grand span:last-child { color: var(--indigo); }
+
+  .doc-foot {
+    margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--rule-soft);
+    display: flex; justify-content: space-between; gap: 16px; align-items: flex-end;
+    font-size: 11px; color: var(--faint);
+  }
+  .doc-sign { text-align: right; }
+  .doc-sign-rule { width: 130px; border-top: 1px solid var(--rule); padding-top: 5px; margin-left: auto; }
+
+  /* Callout pins on the invoice, naming the three things that are easy to get
+     wrong and expensive when you do. */
+  .pins { display: grid; gap: 12px; margin-top: 22px; }
+  .pin { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: start; }
+  .pin-key {
+    font-family: "IBM Plex Mono", monospace; font-size: 10.5px; font-weight: 600;
+    letter-spacing: .06em; padding: 3px 8px; border-radius: 5px; white-space: nowrap;
+    background: var(--teal-wash); color: var(--teal);
+  }
+  .pin-txt { font-size: 13.5px; color: var(--muted); }
+  .pin-txt b { color: var(--ink); font-weight: 600; }
+  .spread.dark .pin-txt { color: rgba(246, 247, 251, .74); }
+  .spread.dark .pin-txt b { color: var(--paper); }
+
+  /* ── Problem spread ──────────────────────────────────────────────────── */
+  .problems { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(430px, 100%), 1fr)); gap: clamp(22px, 3vw, 44px); margin-top: clamp(30px, 4vw, 46px); }
+  .problem > .problem-h { font-size: 19px; font-weight: 700; letter-spacing: -.01em; margin-bottom: 8px; }
+  .problem p { margin: 0; font-size: 14.5px; color: rgba(246, 247, 251, .72); }
+  .problem-mark {
+    display: inline-block; width: 26px; height: 2px; background: var(--attention);
+    margin-bottom: 16px;
+  }
+
+  /* ── Capability grid ─────────────────────────────────────────────────── */
+  .groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 18px; margin-top: clamp(30px, 4vw, 44px); }
+  .group {
+    background: var(--paper-2); border: 1px solid var(--rule); border-radius: 12px;
+    padding: 22px 22px 24px; box-shadow: var(--shadow);
+  }
+  .group-h {
+    display: flex; align-items: baseline; gap: 9px;
+    font-size: 15.5px; font-weight: 700; letter-spacing: -.01em;
+    padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--rule-soft);
+  }
+  .group-h .n { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); font-weight: 600; }
+  .group ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+  .group li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; font-size: 14px; color: var(--muted); }
+  .group li::before {
+    content: ""; width: 5px; height: 5px; border-radius: 50%;
+    background: var(--teal); margin-top: 8px;
+  }
+
+  /* ── Pricing ─────────────────────────────────────────────────────────── */
+  .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); gap: 16px; margin-top: clamp(30px, 4vw, 44px); }
+  .plan {
+    background: var(--paper-2); border: 1px solid var(--rule); border-radius: 12px;
+    padding: 22px; display: flex; flex-direction: column; gap: 4px;
+  }
+  .plan.featured { border-color: var(--indigo); box-shadow: var(--shadow); }
+  .plan-name { font-size: 12px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: var(--muted); }
+  .plan.featured .plan-name { color: var(--indigo); }
+  .plan-price { font-family: "Instrument Serif", serif; font-size: 40px; line-height: 1.05; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  .plan-per { font-size: 12.5px; color: var(--faint); }
+  .plan-year { font-size: 12.5px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .plan-limits {
+    margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--rule-soft);
+    display: grid; gap: 6px; font-size: 13.5px; color: var(--muted);
+  }
+  .plan-limits b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .plan-adds { margin-top: 14px; font-size: 13px; color: var(--muted); }
+  .plan-adds b { color: var(--ink); font-weight: 600; }
+
+  /* ── Honesty spread: the thing most decks leave out ──────────────────── */
+  .absent {
+    margin-top: clamp(26px, 3.4vw, 40px);
+    border: 1px dashed var(--rule);
+    border-radius: 12px; padding: 24px;
+    background: var(--paper-2);
+  }
+  .absent h3 { font-size: 16px; font-weight: 700; margin-bottom: 10px; }
+  .absent p { margin: 0 0 10px; font-size: 14.5px; color: var(--muted); max-width: var(--measure); }
+  .absent p:last-child { margin-bottom: 0; }
+
+  /* ── Trust strip ─────────────────────────────────────────────────────── */
+  .trust { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 22px; margin-top: clamp(30px, 4vw, 44px); }
+  .trust-item .trust-h { font-size: 14.5px; font-weight: 700; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .trust-item p { margin: 0; font-size: 13.5px; color: rgba(246, 247, 251, .7); }
+  .trust-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--settled); flex: none; }
+
+  /* ── Close ───────────────────────────────────────────────────────────── */
+  .close-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: clamp(28px, 4vw, 60px); align-items: end; }
+  .close h2 { font-size: clamp(34px, 4.6vw, 56px); }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+  .cta {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 13px 22px; border-radius: 9px; text-decoration: none;
+    font-size: 14.5px; font-weight: 600;
+    transition: transform .16s ease, box-shadow .16s ease;
+  }
+  .cta.primary { background: var(--indigo); color: #fff; box-shadow: var(--shadow); }
+  .cta.ghost { border: 1px solid var(--rule); color: var(--ink); }
+  .cta:hover { transform: translateY(-1px); box-shadow: var(--shadow-lg); }
+  .contact { display: grid; gap: 7px; font-size: 14px; color: var(--muted); }
+  /* Marked, not hidden: an unreplaced contact detail should be impossible to
+     miss rather than quietly wrong on a deck that has already been sent. */
+  .placeholder {
+    border-bottom: 1.5px dashed var(--attention);
+    padding-bottom: 2px; width: fit-content; max-width: 100%;
+  }
+  .placeholder span { color: var(--attention); font-size: 11.5px; font-weight: 600; }
+  .contact .doc-label { margin-bottom: 2px; }
+
+  .colophon {
+    padding: 26px var(--gutter) 40px;
+    font-size: 12px; color: var(--faint);
+    max-width: 1120px; margin: 0 auto;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  @media (max-width: 900px) {
+    .hero, .close-grid { grid-template-columns: minmax(0, 1fr); }
+    .doc-parties { grid-template-columns: minmax(0, 1fr); }
+    .doc-supply, .doc-supply .doc-label { text-align: left; }
+  }
+</style>
+
+<!-- ── 01 · The thesis ─────────────────────────────────────────────────── -->
+<section class="spread">
+  <div class="inner">
+    <div class="wordmark">
+      <span class="wordmark-tile" aria-hidden="true">K</span>
+      <span>
+        <span class="wordmark-name">Klogu Bizz</span><br>
+        <span class="wordmark-sub">GST Billing Suite</span>
+      </span>
+    </div>
+
+    <div class="hero">
+      <div>
+        <h1 class="display">Every invoice you send is a <em>tax declaration</em>.</h1>
+        <p class="lede">
+          KloguBizz is GST billing for Indian businesses that treats it that way. The
+          tax split, the place of supply, the HSN code and the invoice series are
+          decided by the software, computed once, and carried identically to the
+          screen, the PDF and the return.
+        </p>
+        <div class="hero-note">
+          <span><b>14 days</b> free, no card</span>
+          <span><b>From ₹999</b> a month</span>
+          <span>Built for <b>GSTR-1, 3B, CMP-08</b></span>
+        </div>
+      </div>
+
+      <!-- A real invoice, typeset rather than screenshotted: it is the object
+           the whole product exists to produce. -->
+      <div>
+        <article class="doc" aria-label="Example tax invoice">
+          <div class="doc-accent"></div>
+          <div class="doc-pad">
+            <header class="doc-head">
+              <div>
+                <div class="doc-org">Aurora Industries Pvt Ltd</div>
+                <div class="doc-party-line mono">27AAPFU0939F1ZV</div>
+              </div>
+              <div>
+                <div class="doc-kind">Tax Invoice</div>
+                <div class="doc-num mono">AST-2026-247</div>
+              </div>
+            </header>
+
+            <div class="doc-parties">
+              <div>
+                <div class="doc-label">Bill to</div>
+                <div class="doc-party-name">Bharat Logistics LLP</div>
+                <div class="doc-party-line">Plot 14, MIDC, Pune 411019</div>
+                <div class="doc-party-line mono">27AAACT2727Q1ZW</div>
+              </div>
+              <div class="doc-supply">
+                <div class="doc-label">Place of supply</div>
+                <div class="doc-party-name">Maharashtra (27)</div>
+                <div class="doc-party-line">Intra-state — CGST + SGST</div>
+              </div>
+            </div>
+
+            <div class="doc-table-wrap">
+              <table class="doc-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Description</th>
+                    <th scope="col">HSN</th>
+                    <th scope="col">Qty</th>
+                    <th scope="col">Rate</th>
+                    <th scope="col">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="doc-desc">Steel fabrication</td>
+                    <td class="mono">998314</td>
+                    <td class="mono">3</td>
+                    <td class="mono">45,000.00</td>
+                    <td class="mono">1,35,000.00</td>
+                  </tr>
+                  <tr>
+                    <td class="doc-desc">Maintenance contract</td>
+                    <td class="mono">998729</td>
+                    <td class="mono">1</td>
+                    <td class="mono">1,20,000.00</td>
+                    <td class="mono">1,20,000.00</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="doc-totals">
+              <div class="doc-totals-inner">
+                <div class="doc-total-row"><span>Taxable value</span><span class="mono">₹2,55,000.00</span></div>
+                <div class="doc-total-row"><span>CGST @ 9%</span><span class="mono">₹22,950.00</span></div>
+                <div class="doc-total-row"><span>SGST @ 9%</span><span class="mono">₹22,950.00</span></div>
+                <div class="doc-total-row grand"><span>Total</span><span class="mono">₹3,00,900.00</span></div>
+              </div>
+            </div>
+
+            <div class="doc-foot">
+              <span>Payment terms: Net 15 &nbsp;·&nbsp; All items @ 18% GST</span>
+              <span class="doc-sign"><span class="doc-sign-rule">Authorised Signatory</span></span>
+            </div>
+          </div>
+        </article>
+
+        <div class="pins">
+          <div class="pin">
+            <span class="pin-key">27 → 27</span>
+            <span class="pin-txt">The buyer's state matches yours, so this is <b>CGST + SGST</b>, not IGST. The software reads it from the GSTIN; nobody chooses it from a dropdown.</span>
+          </div>
+          <div class="pin">
+            <span class="pin-key">AST-2026-247</span>
+            <span class="pin-txt">Your prefix, your series, <b>consecutive within the financial year</b> — and it can be moved forward when you migrate, never back onto a number already issued.</span>
+          </div>
+          <div class="pin">
+            <span class="pin-key">998314</span>
+            <span class="pin-txt">HSN and SAC codes are carried through to the <b>HSN summary in GSTR-1</b>, so the return is assembled from the invoices rather than retyped.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── 02 · The problem ────────────────────────────────────────────────── -->
+<section class="spread dark">
+  <div class="inner">
+    <div class="eyebrow">
+      <span class="eyebrow-num">02</span>
+      <span class="eyebrow-txt">What it costs to get wrong</span>
+      <span class="eyebrow-rule"></span>
+    </div>
+    <h2 class="display" style="font-size: clamp(30px, 4.2vw, 50px); max-width: 20ch;">
+      The mistakes are small. The consequences arrive months later.
+    </h2>
+
+    <div class="problems">
+      <div class="problem">
+        <span class="problem-mark" aria-hidden="true"></span>
+        <div class="problem-h">A wrong tax split</div>
+        <p>
+          Charging IGST where CGST + SGST was due — or the reverse — is one wrong
+          state code. It surfaces when GSTR-1 and GSTR-3B stop reconciling, by which
+          point every invoice to that customer carries the same error.
+        </p>
+      </div>
+      <div class="problem">
+        <span class="problem-mark" aria-hidden="true"></span>
+        <div class="problem-h">A duplicated invoice number</div>
+        <p>
+          A tax invoice series has to be consecutive within the financial year. A gap
+          is a question with an answer. Two invoices carrying the same number is a
+          question without one, and it cannot be undone.
+        </p>
+      </div>
+      <div class="problem">
+        <span class="problem-mark" aria-hidden="true"></span>
+        <div class="problem-h">A GSTIN that belongs to nobody</div>
+        <p>
+          A transposed pair of characters passes a format check. The cost lands on
+          your customer, whose input tax credit is refused — and then on you, when
+          they ask why.
+        </p>
+      </div>
+      <div class="problem">
+        <span class="problem-mark" aria-hidden="true"></span>
+        <div class="problem-h">Credit you never claimed</div>
+        <p>
+          Purchase bills that were never matched against GSTR-2B are input tax credit
+          sitting unclaimed, and a supplier who did not file is credit at risk that
+          nobody told you about.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── 03 · What it does ───────────────────────────────────────────────── -->
+<section class="spread">
+  <div class="inner">
+    <div class="eyebrow">
+      <span class="eyebrow-num">03</span>
+      <span class="eyebrow-txt">What is in the product</span>
+      <span class="eyebrow-rule"></span>
+    </div>
+    <h2 class="display" style="font-size: clamp(30px, 4.2vw, 50px); max-width: 22ch;">
+      Twenty-one things it does, and each one is enforced.
+    </h2>
+    <p class="lede">
+      Every capability below maps to a key the server checks, not a line of copy on a
+      pricing page. If your plan includes it, it is unlocked; if it does not, the
+      screen is hidden and the API refuses it.
+    </p>
+
+    <div class="groups">
+      <div class="group">
+        <div class="group-h"><span class="n">01</span> Billing, on every plan</div>
+        <ul>
+          <li><span>GST invoices, quotations, proforma invoices and delivery challans</span></li>
+          <li><span>Customer and product catalogue, with HSN and SAC codes</span></li>
+          <li><span>Payment recording, receipts and part-payments</span></li>
+          <li><span>Automatic payment reminders</span></li>
+          <li><span>Bill Generator for over-the-counter billing</span></li>
+          <li><span>GSTR-1 and GSTR-3B, with an HSN summary</span></li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <div class="group-h"><span class="n">02</span> Buying and stock</div>
+        <ul>
+          <li><span>Purchase bills, vendors and input tax credit</span></li>
+          <li><span>Stock ledger, low-stock alerts, batch and expiry tracking</span></li>
+          <li><span>Stock valuation on FIFO or weighted average, with cost of goods sold</span></li>
+          <li><span>Multiple warehouses, and transfers between them</span></li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <div class="group-h"><span class="n">03</span> Getting paid</div>
+        <ul>
+          <li><span>Online payment links your customers can pay from</span></li>
+          <li><span>Recurring invoices, generated automatically</span></li>
+          <li><span>GST credit notes raised against an invoice</span></li>
+          <li><span>Receivables ageing, collection reports and customer statements</span></li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <div class="group-h"><span class="n">04</span> Returns and the books</div>
+        <ul>
+          <li><span>GSTR-2B reconciliation, showing input credit at risk</span></li>
+          <li><span>Composition scheme (CMP-08) and quarterly QRMP filing</span></li>
+          <li><span>Operating expenses, by category</span></li>
+          <li><span>Profit and loss, with real cost of goods sold</span></li>
+          <li><span>Excel and CSV exports of invoices, ageing and returns</span></li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <div class="group-h"><span class="n">05</span> Making it yours</div>
+        <ul>
+          <li><span>Your logo, letterhead, signature and invoice templates</span></li>
+          <li><span>Your own numbering series for every document type</span></li>
+          <li><span>Bulk upload of products and customers from a spreadsheet</span></li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <div class="group-h"><span class="n">06</span> On a phone</div>
+        <ul>
+          <li><span>Installs as an app — every screen measured at 390px</span></li>
+          <li><span>Raise an invoice, take a payment, check what is overdue</span></li>
+          <li><span>Works the same as the desktop, because it is the same product</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── 04 · Pricing ────────────────────────────────────────────────────── -->
+<section class="spread">
+  <div class="inner">
+    <div class="eyebrow">
+      <span class="eyebrow-num">04</span>
+      <span class="eyebrow-txt">What it costs</span>
+      <span class="eyebrow-rule"></span>
+    </div>
+    <h2 class="display" style="font-size: clamp(30px, 4.2vw, 50px); max-width: 20ch;">
+      Four plans. The bill is the price.
+    </h2>
+    <p class="lede">
+      Every plan starts with a 14-day trial, at Business-tier capability, without a
+      card. Yearly billing is ten months for twelve.
+    </p>
+
+    <div class="plans">
+      <div class="plan">
+        <div class="plan-name">Starter</div>
+        <div class="plan-price mono">₹999</div>
+        <div class="plan-per">per month</div>
+        <div class="plan-year">₹9,990 billed yearly</div>
+        <div class="plan-limits">
+          <span><b>100</b> invoices a month</span>
+          <span><b>3</b> users</span>
+        </div>
+        <div class="plan-adds">Billing, payments, reminders and <b>GST returns</b>.</div>
+      </div>
+
+      <div class="plan featured">
+        <div class="plan-name">Growth</div>
+        <div class="plan-price mono">₹2,499</div>
+        <div class="plan-per">per month</div>
+        <div class="plan-year">₹24,990 billed yearly</div>
+        <div class="plan-limits">
+          <span><b>500</b> invoices a month</span>
+          <span><b>10</b> users</span>
+        </div>
+        <div class="plan-adds">Adds purchases, <b>inventory</b>, stock valuation, credit notes, recurring invoices, payment links and your own branding.</div>
+      </div>
+
+      <div class="plan">
+        <div class="plan-name">Business</div>
+        <div class="plan-price mono">₹5,999</div>
+        <div class="plan-per">per month</div>
+        <div class="plan-year">₹59,990 billed yearly</div>
+        <div class="plan-limits">
+          <span><b>2,000</b> invoices a month</span>
+          <span><b>25</b> users</span>
+        </div>
+        <div class="plan-adds">Adds expenses, <b>profit and loss</b>, warehouses, GSTR-2B, composition and QRMP, receivables, bulk upload and exports.</div>
+      </div>
+
+      <div class="plan">
+        <div class="plan-name">Enterprise</div>
+        <div class="plan-price mono">₹9,999</div>
+        <div class="plan-per">per month</div>
+        <div class="plan-year">₹99,990 billed yearly</div>
+        <div class="plan-limits">
+          <span><b>999,999</b> invoices a month</span>
+          <span><b>999</b> users</span>
+        </div>
+        <div class="plan-adds">Everything in Business. What changes at this tier is <b>the ceiling</b>, not the feature list.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── 05 · What it does not do ────────────────────────────────────────── -->
+<section class="spread">
+  <div class="inner">
+    <div class="eyebrow">
+      <span class="eyebrow-num">05</span>
+      <span class="eyebrow-txt">What it does not do yet</span>
+      <span class="eyebrow-rule"></span>
+    </div>
+    <h2 class="display" style="font-size: clamp(30px, 4.2vw, 50px); max-width: 24ch;">
+      The list above is short by choice.
+    </h2>
+
+    <div class="absent">
+      <h3>E-invoicing (IRN) and e-way bills are not live.</h3>
+      <p>
+        Everything around them is built and tested — eligibility, validation, the
+        payload, the validity window — but the connection to the government portal is
+        not written, so nothing can actually be filed. They go on the list the day
+        that adapter ships and not a day before.
+      </p>
+      <p>
+        We are telling you this on the pricing page rather than after you have paid,
+        because the alternative is you finding out during your first month-end. If
+        e-invoicing is mandatory for your turnover today, this is not yet the product
+        for you.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ── 06 · Trust ──────────────────────────────────────────────────────── -->
+<section class="spread dark">
+  <div class="inner">
+    <div class="eyebrow">
+      <span class="eyebrow-num">06</span>
+      <span class="eyebrow-txt">Your books, your data</span>
+      <span class="eyebrow-rule"></span>
+    </div>
+    <h2 class="display" style="font-size: clamp(30px, 4.2vw, 50px); max-width: 22ch;">
+      An accounting system is only as good as its trail.
+    </h2>
+
+    <div class="trust">
+      <div class="trust-item">
+        <div class="trust-h"><span class="trust-dot" aria-hidden="true"></span> Two-factor authentication</div>
+        <p>Time-based codes with recovery codes, for anyone on your team. Your books are otherwise one password away from your bank details.</p>
+      </div>
+      <div class="trust-item">
+        <div class="trust-h"><span class="trust-dot" aria-hidden="true"></span> An activity log you can read</div>
+        <p>Who changed what, and when — including numbering changes, which are otherwise invisible after the fact.</p>
+      </div>
+      <div class="trust-item">
+        <div class="trust-h"><span class="trust-dot" aria-hidden="true"></span> Nothing is really deleted</div>
+        <p>A customer with invoices cannot be removed, and a deleted record is recoverable. An invoice must never render a blank buyer.</p>
+      </div>
+      <div class="trust-item">
+        <div class="trust-h"><span class="trust-dot" aria-hidden="true"></span> Your data leaves with you</div>
+        <p>A full export of everything on your account, in Excel and CSV, on request from inside the app.</p>
+      </div>
+      <div class="trust-item">
+        <div class="trust-h"><span class="trust-dot" aria-hidden="true"></span> Roles that mean something</div>
+        <p>Owner, accountant and viewer are enforced by the server, not hidden in the interface.</p>
+      </div>
+      <div class="trust-item">
+        <div class="trust-h"><span class="trust-dot" aria-hidden="true"></span> One tenant cannot see another</div>
+        <p>Every query is scoped to your organisation at the server, and the boundary is covered by its own tests.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── 07 · Close ──────────────────────────────────────────────────────── -->
+<section class="spread close" style="border-bottom: 0;">
+  <div class="inner">
+    <div class="eyebrow">
+      <span class="eyebrow-num">07</span>
+      <span class="eyebrow-txt">Start</span>
+      <span class="eyebrow-rule"></span>
+    </div>
+
+    <div class="close-grid">
+      <div>
+        <h2 class="display">Raise your first invoice in about four minutes.</h2>
+        <p class="lede">
+          Sign up, add one customer, add one item, and send it. Nothing to install,
+          no card, and the trial runs at Business-tier capability so you are
+          evaluating the whole product rather than a sample of it.
+        </p>
+        <div class="cta-row">
+          <a class="cta primary" href="https://klogu-bizz-billing-suite.vercel.app">Start the 14-day trial</a>
+          <a class="cta ghost" href="mailto:sales@yourcompany.in">Book a walkthrough</a>
+        </div>
+      </div>
+
+      <div class="contact">
+        <div class="doc-label">Talk to us</div>
+        <div class="placeholder">sales@yourcompany.in <span>— replace before sending</span></div>
+        <div class="placeholder">+91 00000 00000 <span>— replace before sending</span></div>
+        <div><a href="https://klogu-bizz-billing-suite.vercel.app">klogu-bizz-billing-suite.vercel.app</a></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="colophon">
+  Every capability, price, user limit and invoice limit on this page is read from
+  the running product, and both GSTINs in the sample invoice pass the checksum the
+  product enforces. E-invoicing and e-way bills are named as absent for the same
+  reason. The two contact details marked in amber are placeholders — replace them
+  before this goes to anyone.
+</div>
