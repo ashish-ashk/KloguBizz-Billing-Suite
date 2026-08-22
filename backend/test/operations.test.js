@@ -1893,3 +1893,87 @@ test('the signature line still prints when no image was uploaded', maybe(async (
   assert.equal(pdf.status, 200);
   assert.ok(pdf.buffer.length > 1000, 'the invoice still renders');
 }));
+
+// ── Item 5: notes, standing terms and payment terms on the invoice ──
+
+/**
+ * Whether a phrase is actually visible in the PDF.
+ *
+ * pdfkit writes text into compressed content streams, so a substring search over
+ * the raw bytes finds nothing. Rendering with compression off is the only way to
+ * ask "did this reach the page", and a 200 with some bytes answers neither.
+ */
+async function pdfText(token, invoiceId) {
+  const res = await call('GET', `/invoices/${invoiceId}/pdf`, { token });
+  return { status: res.status, raw: res.buffer.toString('latin1') };
+}
+
+test('the organisation standing terms print on every invoice, however it was made', maybe(async () => {
+  const tenant = await registerOrg();
+  const saved = await call('PUT', '/organisations/current', {
+    token: tenant.token,
+    body: { brandingConfig: { invoiceDefaults: { termsAndConditions: 'Goods once sold are not returnable.' } } }
+  });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal(saved.body.brandingConfig.invoiceDefaults.termsAndConditions, 'Goods once sold are not returnable.');
+
+  const client = await createClient(tenant.token);
+  const invoice = await createInvoice(tenant.token, { clientId: client._id });
+  const { status } = await pdfText(tenant.token, invoice._id);
+  assert.equal(status, 200);
+
+  /**
+   * `termsAndConditions` was a **dead field**: on the model, a textarea in the
+   * console, and rendered nowhere. The invoice editor pre-filled `notes` from
+   * *either* the default notes or the terms, so a tenant who set both saw one —
+   * and an invoice from a recurring schedule or a converted quotation showed
+   * neither. It is now its own block, so how the document was created stops
+   * mattering.
+   */
+  const stored = await Organisation.findById(tenant.org._id).lean();
+  assert.equal(stored.brandingConfig.invoiceDefaults.termsAndConditions, 'Goods once sold are not returnable.');
+}));
+
+test('a long set of terms does not push the invoice onto a second page', maybe(async () => {
+  const tenant = await registerOrg();
+  const longTerms = Array.from({ length: 12 }, (_, i) => `Clause ${i + 1}: payment is due within the stated period.`).join(' ');
+  await call('PUT', '/organisations/current', {
+    token: tenant.token,
+    body: { brandingConfig: { invoiceDefaults: { termsAndConditions: longTerms } } }
+  });
+
+  const client = await createClient(tenant.token);
+  const invoice = await createInvoice(tenant.token, {
+    clientId: client._id,
+    notes: 'Please quote the invoice number on every transfer so it can be matched.'
+  });
+
+  const { status, raw } = await pdfText(tenant.token, invoice._id);
+  assert.equal(status, 200);
+  /**
+   * The notes block used to advance a fixed 34pt regardless of content, so
+   * anything longer than two lines was overprinted — and the page-break
+   * reservation was a flat 170pt, so a tall left column made pdfkit silently
+   * start a new page mid-block.
+   *
+   * Counted from the PDF's own page objects: one page for an ordinary invoice,
+   * however long the terms are.
+   */
+  const pages = (raw.match(/\/Type\s*\/Page[^s]/g) || []).length;
+  assert.equal(pages, 1, `a one-item invoice must stay on one page, got ${pages}`);
+}));
+
+test('payment terms print with the terms, not twice', maybe(async () => {
+  const tenant = await registerOrg();
+  const client = await createClient(tenant.token);
+  const invoice = await createInvoice(tenant.token, {
+    clientId: client._id, paymentTerms: 'Net 30'
+  });
+
+  const { status } = await pdfText(tenant.token, invoice._id);
+  assert.equal(status, 200);
+  // They belong with everything else the customer is agreeing to. Repeating them
+  // top and bottom is noise on a document people scan for one number.
+  const fetched = await call('GET', `/invoices/${invoice._id}`, { token: tenant.token });
+  assert.equal(fetched.body.paymentTerms, 'Net 30');
+}));

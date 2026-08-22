@@ -23,7 +23,7 @@ guesses.
 | 2 | Plan benefits listed honestly, dummy copy removed | **DONE** — see below | Rewrite |
 | 3 | Plan entitlements: in-plan unlocked, out-of-plan hidden **and** refused | **DONE** — see below | Build |
 | 4 | Signature appears on the invoice | **DONE** — it rendered, then got erased. See below | Diagnose |
-| 5 | "Notes / Terms" → "Notes / Terms & Conditions" in the footer | Label change, plus the payment-terms line | Small |
+| 5 | "Notes / Terms" → "Notes / Terms & Conditions" in the footer | **DONE** — and it was not just a label. See below | Small |
 | 6 | Invoice template: line header and section CSS, theme colour follows the selected theme | Templates exist; the accent is not wired to the tenant theme | Medium |
 | 7 | Document series per tenant | Prefixes and per-FY counters already exist for invoices, credit notes and quotations — there is no UI to set them, and not every document type is covered | Medium |
 | 8 | Client bulk upload from CSV | Only *items* has bulk upload. Clients have none | Build |
@@ -170,6 +170,39 @@ Two changes, both removing the ambiguity rather than documenting it:
 
 Two existing tests asserted `logoUrl === ''`. Their stated intent — "the base64
 is not echoed back" — is what omission delivers, so they now assert absence.
+
+## 5. Notes / Terms & Conditions, and payment terms in the footer — DONE
+
+The rename was the small part. Behind it were two real problems.
+
+**`termsAndConditions` was a dead field.** It existed on the organisation model,
+the console had a textarea for it, and **nothing ever rendered it**. The invoice
+editor pre-filled `notes` from *either* the default notes or the terms —
+whichever happened to be set — so a tenant who filled in both only ever saw one,
+and an invoice generated from a recurring schedule or a converted quotation showed
+neither. Standing terms now print as their own block on every invoice, however the
+document was created, which is what standing terms are for.
+
+**Payment terms sat alone at the top**, in the supply-details panel, away from
+everything else the customer is being asked to agree to. They now print with the
+terms. Not in both places: repeating them is noise on a document people scan for
+one number.
+
+**And the notes block could not hold real terms.** It advanced a fixed 34pt
+regardless of content, so anything longer than two lines was overprinted by
+whatever came next — and the page-break reservation was a flat 170pt sized for the
+totals panel, so a tall left column made pdfkit silently start a second page
+mid-block. Both are measured now, and a test renders twelve clauses and asserts
+the PDF still has exactly one page.
+
+The heading reads `NOTES / TERMS & CONDITIONS` in the PDF and on screen, and the
+editor label matches — the field carries both, and calling it "Notes" understated
+what was in it.
+
+**One self-inflicted detour worth recording:** the on-screen document broke to
+build because an HTML comment I added contained backticks, inside a template
+literal. TypeScript reported it as `styles: Expected 1 arguments, but got 3`
+thirty lines further down.
 
 ## Order, and why
 

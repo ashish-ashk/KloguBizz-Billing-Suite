@@ -649,7 +649,9 @@ async function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
       .text(invoice.totals.isIGST ? 'IGST (Inter-state)' : 'CGST + SGST (Intra-state)', supplyX, y + 25, { width: width / 2 - 24, align: 'right' });
     doc.fillColor(MUTED).font(font).fontSize(9);
     doc.text(`Place of supply: ${stateName(client?.stateCode)}`, supplyX, y + 40, { width: width / 2 - 24, align: 'right' });
-    doc.text(`Terms: ${invoice.paymentTerms || 'Net 15'}`, supplyX, y + 54, { width: width / 2 - 24, align: 'right' });
+    // Payment terms print in the TERMS block near the footer, with the standing
+    // terms — they belong with what the customer is agreeing to, and having them
+    // in two places is noise on a document people scan for one number.
     y += 94;
 
     if (template.narrow && template.compact) {
@@ -754,16 +756,91 @@ async function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
     // Keep the totals panel, amount-in-words strip and signature together: they
     // read as one block, and splitting them across a page break looks like an
     // error on a document someone is being asked to pay.
-    if (y + SUMMARY_BLOCK_HEIGHT > contentBottom) { doc.addPage(); y = pageTop; }
+    /**
+     * The reservation has to cover whichever column is taller.
+     *
+     * `SUMMARY_BLOCK_HEIGHT` sizes the totals panel and signature on the right.
+     * The left column now holds measured notes plus a terms block, and a tenant
+     * with long standing terms can easily exceed 170pt — at which point pdfkit
+     * silently starts a new page mid-block, which is the failure this whole
+     * section is written to avoid.
+     */
+    const notesColumnWidth = width / 2 - 20;
+    const leftColumnHeight = (() => {
+      let total = 0;
+      if (invoice.notes) {
+        total += 12 + Math.max(24, doc.heightOfString(invoice.notes, { width: notesColumnWidth })) + 10;
+      }
+      const terms = String(org?.brandingConfig?.invoiceDefaults?.termsAndConditions || '').trim();
+      const pay = String(invoice.paymentTerms || '').trim();
+      if (terms || pay) {
+        total += 12;
+        if (pay) total += doc.heightOfString(`Payment terms: ${pay}`, { width: notesColumnWidth }) + 2;
+        total += terms ? doc.heightOfString(terms, { width: notesColumnWidth }) + 8 : 8;
+      }
+      // The bank panel sits under both when it is shown.
+      return total + 90;
+    })();
+
+    if (y + Math.max(SUMMARY_BLOCK_HEIGHT, leftColumnHeight) > contentBottom) {
+      doc.addPage();
+      y = pageTop;
+    }
 
     // Notes / bank details (left) + totals summary (right)
     const summaryTop = y;
     let leftY = summaryTop;
+    const notesWidth = width / 2 - 20;
     if (invoice.notes) {
-      doc.fillColor(FAINT).font(fontBold).fontSize(8).text('NOTES', left, leftY);
+      /**
+       * "NOTES / TERMS & CONDITIONS", because that is what the field holds.
+       *
+       * The editor labels it "Notes / Terms" and pre-fills it from the
+       * organisation's default notes, so in practice it carries both. A heading
+       * of "NOTES" on a block containing payment terms understates what the
+       * customer is being asked to agree to.
+       */
+      doc.fillColor(FAINT).font(fontBold).fontSize(8).text('NOTES / TERMS & CONDITIONS', left, leftY);
       leftY += 12;
-      doc.fillColor(MUTED).font(font).fontSize(9).text(invoice.notes, left, leftY, { width: width / 2 - 20 });
-      leftY += 34;
+      doc.fillColor(MUTED).font(font).fontSize(9).text(invoice.notes, left, leftY, { width: notesWidth });
+      // Measured rather than assumed. A fixed 34pt clipped anything longer than
+      // two lines, which is most real terms text.
+      leftY += Math.max(24, doc.heightOfString(invoice.notes, { width: notesWidth })) + 10;
+    }
+
+    /**
+     * The organisation's standing terms, and the payment terms, printed together.
+     *
+     * `invoiceDefaults.termsAndConditions` was a **dead field**: it existed on the
+     * model, the console had a textarea for it, and nothing ever rendered it. The
+     * invoice editor pre-filled `notes` from *either* the default notes or the
+     * terms — whichever was set first — so a tenant who filled in both only ever
+     * saw one, and a tenant whose invoices came from a recurring schedule or a
+     * converted quotation saw neither.
+     *
+     * Printed as its own block so it appears on **every** invoice regardless of
+     * how the document was created, which is what standing terms are for.
+     *
+     * Payment terms move here from the supply-details panel at the top. They
+     * belong with the rest of what the customer is agreeing to, and repeating
+     * them in two places is noise on a document people scan for one number.
+     */
+    const standingTerms = String(org?.brandingConfig?.invoiceDefaults?.termsAndConditions || '').trim();
+    const paymentTerms = String(invoice.paymentTerms || '').trim();
+    if (standingTerms || paymentTerms) {
+      doc.fillColor(FAINT).font(fontBold).fontSize(8).text('TERMS', left, leftY);
+      leftY += 12;
+      doc.fillColor(MUTED).font(font).fontSize(9);
+      if (paymentTerms) {
+        doc.text(`Payment terms: ${paymentTerms}`, left, leftY, { width: notesWidth });
+        leftY += doc.heightOfString(`Payment terms: ${paymentTerms}`, { width: notesWidth }) + 2;
+      }
+      if (standingTerms) {
+        doc.text(standingTerms, left, leftY, { width: notesWidth });
+        leftY += doc.heightOfString(standingTerms, { width: notesWidth }) + 8;
+      } else {
+        leftY += 8;
+      }
     }
     /**
      * Bank details, falling back to the organisation's (2.3 #24).

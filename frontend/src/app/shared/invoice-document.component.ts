@@ -497,7 +497,7 @@ export interface InvoiceDocClient {
           <div style="font-size:12px;color:var(--muted);line-height:1.9;margin-top:6px;">
             <div>Tax type: <strong [style.color]="dark">{{ invoice().totals.isIGST ? 'IGST (Inter-state)' : 'CGST + ' + stateTaxLabel() + ' (Intra-state)' }}</strong></div>
             <div>Place of supply: {{ stateName(client()?.stateCode || '') }}</div>
-            <div>Terms: {{ invoice().paymentTerms || 'Net 15' }}</div>
+
           </div>
         </div>
       </div>
@@ -558,8 +558,29 @@ export interface InvoiceDocClient {
         <div style="display:grid;gap:14px;align-content:start;">
           @if (invoice().notes) {
             <div>
-              <div style="font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:5px;">Notes</div>
-              <div style="font-size:12px;color:var(--muted);line-height:1.6;">{{ invoice().notes }}</div>
+              <!-- "Notes / Terms & Conditions", because that is what the field
+                   holds: the editor labels it so and pre-fills it from the
+                   organisation's default notes. Mirrors pdfService exactly. -->
+              <div style="font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:5px;">Notes / Terms &amp; Conditions</div>
+              <div style="font-size:12px;color:var(--muted);line-height:1.6;white-space:pre-line;">{{ invoice().notes }}</div>
+            </div>
+          }
+          @if (standingTerms() || invoice().paymentTerms) {
+            <!--
+              The organisation's standing terms and the payment terms, together.
+              termsAndConditions was a dead field — on the model, in the console,
+              rendered nowhere — and payment terms used to sit alone at the top,
+              away from everything else the customer is agreeing to.
+              (No backticks in here: this comment lives inside a template literal.)
+            -->
+            <div>
+              <div style="font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:5px;">Terms</div>
+              @if (invoice().paymentTerms) {
+                <div style="font-size:12px;color:var(--muted);line-height:1.6;">Payment terms: {{ invoice().paymentTerms }}</div>
+              }
+              @if (standingTerms()) {
+                <div style="font-size:12px;color:var(--muted);line-height:1.6;white-space:pre-line;">{{ standingTerms() }}</div>
+              }
             </div>
           }
           @if (showBankDetails() && (bank().bank || bank().account)) {
@@ -711,6 +732,16 @@ export class InvoiceDocumentComponent {
    * to be ambiguous about whether it carries image *data* or a *link* — which is
    * the distinction the save path depends on getting right.
    */
+  /**
+   * The organisation's standing terms, printed on every invoice.
+   *
+   * Read from `invoiceDefaults` rather than the stored organisation for the same
+   * reason the rest of this input exists: the Invoice Templates page previews
+   * *unsaved* edits, and reading storage there would show the previous text while
+   * somebody is typing the new one.
+   */
+  standingTerms = computed(() => String(this.invoiceDefaults()?.termsAndConditions || '').trim());
+
   signatureSrc = input('');
   showAmountInWords = input(true);
   /** Overrides every template's default title word ("Invoice"/"Tax Invoice") — e.g. "Proforma Invoice", "Bill", "Receipt". Empty keeps each template's own default. */

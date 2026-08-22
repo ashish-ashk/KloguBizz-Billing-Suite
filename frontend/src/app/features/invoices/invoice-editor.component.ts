@@ -240,7 +240,7 @@ import { fmtINR, fmtDate, today, addDays, numberToWords, stateName, STATES } fro
                 </div>
               </div>
               <div class="field" style="margin-top:12px;">
-                <label>Notes / Terms</label>
+                <label>Notes / Terms &amp; Conditions</label>
                 <textarea rows="3" [(ngModel)]="notes" placeholder="Thank you for your business!"></textarea>
               </div>
             </section>
@@ -404,8 +404,17 @@ export class InvoiceEditorComponent implements OnInit {
      * history.
      */
     const defaults = this.auth.organisation()?.brandingConfig?.invoiceDefaults;
+    /**
+     * Only the default *notes* pre-fill this field now.
+     *
+     * It used to fall back to `termsAndConditions` when no default note was set,
+     * which quietly conflated two different things: a tenant who filled in both
+     * saw only one of them, and a tenant whose invoices came from a recurring
+     * schedule or a converted quotation saw neither. The standing terms print as
+     * their own block on every invoice instead — see `invoice-document` and
+     * `pdfService`.
+     */
     if (defaults?.defaultNotes) this.notes = defaults.defaultNotes;
-    else if (defaults?.termsAndConditions) this.notes = defaults.termsAndConditions;
 
     const id = this.route.snapshot.paramMap.get('id');
     this.invoiceId.set(id);
