@@ -477,6 +477,96 @@ const html = `<title>KloguBizz Step by Step</title>
     .step { grid-template-columns: minmax(0, 1fr); gap: 12px; }
     .step-n { width: 34px; height: 34px; font-size: 15px; }
   }
+
+  /* ── Print / PDF ─────────────────────────────────────────────────────
+     Portrait, because the content is a tall screenshot under a short list of
+     instructions — the opposite shape to the sales deck.
+
+     The one rule that matters is \`break-inside: avoid\` on \`.step\`: a step
+     whose picture lands on the next page from its instructions is worse than
+     no picture, because the reader has to hold four numbered actions in their
+     head while turning over. Steps are short enough to always fit one page,
+     so this costs some whitespace and buys the pairing.
+
+     Light only. A dark background is right on a screen and wrong on paper,
+     and a PDF is read as paper even when nobody prints it. */
+  @media print {
+    @page {
+      size: A4 portrait;
+      margin: 14mm 13mm 16mm;
+    }
+
+    /* Forced, not inherited: the viewer's OS theme must not decide what a
+       distributed document looks like. */
+    :root {
+      --ink: #1A1F2E; --ink-2: #3D4459; --muted: #626A80; --faint: #8C93A8;
+      --paper: #FFFFFF; --paper-2: #F5F6FA; --rule: #E1E4ED; --rule-2: #CDD2E0;
+      --brand: #4F46E5; --brand-ink: #372FBE; --brand-wash: #EEEDFC;
+      --warn: #B45309; --warn-wash: #FEF4E4; --why: #0E7490; --why-wash: #E4F2F6;
+      --shadow: none;
+    }
+
+    body {
+      background: #fff;
+      font-size: 10.5pt;
+      line-height: 1.5;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* The masthead is the cover. */
+    .top { border-bottom: 0; padding: 0 0 10mm; break-after: page; }
+    .top-inner { max-width: none; }
+    .top h1 { font-size: 30pt; margin-top: 40mm; }
+    .top p { font-size: 12pt; margin-top: 6mm; }
+    .top-facts { margin-top: 10mm; padding-top: 5mm; font-size: 10pt; }
+
+    .wrap {
+      display: block;
+      max-width: none;
+      padding: 0;
+    }
+    /* Contents becomes a real contents page instead of a rail. */
+    .toc {
+      position: static;
+      border: 0; padding: 0;
+      break-after: page;
+      columns: 2; column-gap: 12mm;
+    }
+    .toc-part { break-inside: avoid; margin-bottom: 6mm; }
+    .toc-list a { color: var(--ink-2); padding: 2px 0; }
+
+    .part { margin-bottom: 8mm; }
+    .part-h { break-after: avoid; break-inside: avoid; margin-bottom: 5mm; }
+
+    .step {
+      break-inside: avoid;
+      box-shadow: none;
+      border: 1px solid var(--rule);
+      padding: 6mm;
+      margin-bottom: 5mm;
+      gap: 5mm;
+      grid-template-columns: 11mm minmax(0, 1fr);
+    }
+    .step-n { width: 9mm; height: 9mm; font-size: 12pt; }
+    .step h3 { font-size: 14pt; break-after: avoid; }
+    .step p, ol.do li, ul.plain li { font-size: 10.5pt; }
+
+    .note { break-inside: avoid; padding: 3mm 4mm; margin-bottom: 4mm; }
+    .note p { font-size: 9.5pt; }
+
+    .shot { break-inside: avoid; }
+    .shot img { border-color: var(--rule-2); }
+    /* A screenshot must never be so tall that its own step cannot fit a page. */
+    .shot img { max-height: 128mm; width: auto; max-width: 100%; }
+    .shot figcaption { font-size: 9pt; }
+    .shot.phone { width: 62mm; }
+    .shot.phone img { max-height: 118mm; }
+
+    .end { break-inside: avoid; box-shadow: none; padding: 6mm; }
+
+    a { color: var(--brand-ink); }
+  }
 </style>
 
 <header class="top">

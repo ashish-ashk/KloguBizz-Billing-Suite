@@ -71,6 +71,17 @@ No build step, no assets folder.
   that are not live yet are named as such. Two contact details are marked
   placeholders; replace them before sending it to anyone.
 
+Both are also committed as PDFs, for emailing and printing:
+**[KloguBizz-Sales-Deck.pdf](docs/KloguBizz-Sales-Deck.pdf)** (7 landscape pages)
+and **[KloguBizz-User-Guide.pdf](docs/KloguBizz-User-Guide.pdf)** (18 portrait
+pages, numbered). They are built from the same HTML, never edited separately —
+after changing either page run:
+
+```bash
+node docs/build-user-guide.js   # only if the guide's screenshots changed
+node docs/build-pdfs.js
+```
+
 ## Local URLs
 
 - Frontend: http://localhost:4200

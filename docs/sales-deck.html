@@ -381,6 +381,126 @@
     .doc-parties { grid-template-columns: minmax(0, 1fr); }
     .doc-supply, .doc-supply .doc-label { text-align: left; }
   }
+
+  /* ── Print / PDF ─────────────────────────────────────────────────────
+     One spread per page, landscape, full bleed.
+
+     Landscape because that is what the spreads already are: the hero, the
+     close and the problem grid are all two-column bands, and forcing them
+     into portrait would stack every pair and double the page count.
+
+     `@page { margin: 0 }` with the padding kept on `.spread` is what lets the
+     dark spreads run to the paper edge instead of sitting in a white frame —
+     a deck with a white border around each dark slide reads as a mistake.
+     Requires `printBackground` at render time; see docs/build-pdfs.js.
+
+     Everything below is a size reduction, not a redesign: a browser spread is
+     as tall as it needs to be, and a page is 190mm whatever is on it. */
+  @media print {
+    @page { size: A4 landscape; margin: 0; }
+
+    html { scroll-padding-top: 0; }
+    body {
+      background: var(--paper);
+      font-size: 12.5px;
+      line-height: 1.5;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .spread {
+      break-before: page;
+      break-inside: avoid;
+      border-bottom: 0;
+      padding: 12mm 14mm;
+      /*
+        Exactly the page. This works only because `build-pdfs.js` passes zero
+        margins: with Chromium's default 1cm the content box is 190mm tall, a
+        210mm spread overflows, and every page after it drifts by the excess.
+        Do not add a margin without changing this.
+      */
+      min-height: 210mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .spread:first-of-type { break-before: avoid; }
+    /*
+      The 2mm of slack above has to not show. On a dark spread a white strip
+      along the bottom edge reads as a printing fault, so the background is
+      bled past the box with a solid spread-shadow — it paints without taking
+      part in layout, and the page box clips whatever crosses the edge.
+    */
+    /*
+      The closing spread is shorter, so the colophon sits under it instead of
+      taking a whole sheet of its own for two lines.
+    */
+    .spread:last-of-type { min-height: 178mm; }
+    .inner { width: 100%; max-width: none; }
+
+    /* The hero. Its own page, and the invoice stays beside the words. */
+    .hero { gap: 14mm; align-items: center; }
+    .hero h1 { font-size: 40px; }
+    .lede { font-size: 13px; margin-top: 12px; }
+    .wordmark { margin-bottom: 14px; }
+    .hero-note { margin-top: 14px; padding-top: 10px; font-size: 11px; gap: 6px 18px; }
+
+    .doc { box-shadow: none; border-color: var(--rule); font-size: 10.5px; }
+    .doc-pad { padding: 12px; }
+    .doc-parties { margin-top: 10px; padding: 9px; }
+    .doc-table-wrap { margin-top: 10px; overflow: visible; }
+    table.doc-table { min-width: 0; }
+    table.doc-table th { padding: 5px; font-size: 8px; }
+    table.doc-table td { padding: 6px 5px; }
+    .doc-totals { margin-top: 9px; }
+    .doc-total-row { padding: 3px 0; }
+    .doc-total-row.grand { font-size: 13px; }
+    .doc-foot { margin-top: 10px; padding-top: 8px; font-size: 9px; }
+    .pins { margin-top: 12px; gap: 7px; }
+    .pin-txt { font-size: 10.5px; }
+    .pin-key { font-size: 9px; }
+
+    .eyebrow { margin-bottom: 12px; }
+    .spread h2.display { font-size: 30px !important; }
+
+    .problems { margin-top: 14px; gap: 10mm; }
+    .problem .problem-h { font-size: 15px; }
+    .problem p { font-size: 11.5px; }
+    .problem-mark { margin-bottom: 9px; }
+
+    .groups { margin-top: 14px; gap: 8px; }
+    .group { padding: 12px 13px 14px; box-shadow: none; break-inside: avoid; }
+    .group-h { font-size: 12.5px; padding-bottom: 8px; margin-bottom: 9px; }
+    .group li { font-size: 10.5px; }
+    .group ul { gap: 6px; }
+
+    .plans { margin-top: 14px; gap: 8px; }
+    .plan { padding: 13px; break-inside: avoid; }
+    .plan-price { font-size: 28px; }
+    .plan-limits { margin-top: 10px; padding-top: 9px; font-size: 11px; }
+    .plan-adds { margin-top: 9px; font-size: 10.5px; }
+
+    .absent { margin-top: 16px; padding: 16px; }
+    .absent p { font-size: 12px; }
+
+    .trust { margin-top: 14px; gap: 9mm 8mm; }
+    .trust-item .trust-h { font-size: 12.5px; }
+    .trust-item p { font-size: 10.5px; }
+
+    .close-grid { gap: 12mm; }
+    .close h2 { font-size: 32px; }
+    /* A live link is still useful in a PDF; a button that cannot be pressed is
+       not, so they read as what they are. */
+    .cta { padding: 9px 15px; font-size: 12px; box-shadow: none; }
+    .cta:hover { transform: none; }
+
+    .colophon {
+      break-before: avoid;
+      padding: 0 14mm 8mm;
+      font-size: 9.5px;
+      max-width: none;
+    }
+  }
 </style>
 
 <!-- ── 01 · The thesis ─────────────────────────────────────────────────── -->
