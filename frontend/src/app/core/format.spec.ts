@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fmtINR, fmtINRCompact, numberToWords, stateName, monthLabel } from './format';
+import { fmtINR, fmtINRCompact, isValidGSTIN, numberToWords, stateName, monthLabel } from './format';
 
 /**
  * Formatting is not cosmetic here — `numberToWords` prints on a tax invoice.
@@ -93,5 +93,38 @@ describe('stateName', () => {
 describe('monthLabel', () => {
   it('renders a YYYY-MM bucket', () => {
     expect(monthLabel('2026-04')).toMatch(/Apr/);
+  });
+});
+
+/**
+ * The browser's GSTIN check has to agree with the server's.
+ *
+ * It used to test the pattern only, so a transposed pair passed here and was
+ * refused by the API — the field said nothing was wrong, and the rejection
+ * arrived as a failed save instead of as a message beside the input.
+ */
+describe('isValidGSTIN', () => {
+  it('accepts real GSTINs', () => {
+    expect(isValidGSTIN('27AAPFU0939F1ZV')).toBe(true);
+    expect(isValidGSTIN('33AAACT2727Q1Z3')).toBe(true);
+    expect(isValidGSTIN('29AAACT2727Q1ZS')).toBe(true);
+    // Case is not the user's problem.
+    expect(isValidGSTIN('27aapfu0939f1zv')).toBe(true);
+  });
+
+  it('rejects a wrong checksum that has the right shape', () => {
+    // The last character is the checksum, and this is the failure the pattern
+    // check could never see.
+    expect(isValidGSTIN('27AAPFU0939F1ZZ')).toBe(false);
+    expect(isValidGSTIN('27AAPFU0939F1ZA')).toBe(false);
+  });
+
+  it('rejects the plainly malformed', () => {
+    expect(isValidGSTIN('')).toBe(false);
+    expect(isValidGSTIN('27AAPFU0939F1Z')).toBe(false);
+    expect(isValidGSTIN('27AAPFU0939F1ZVX')).toBe(false);
+    expect(isValidGSTIN('AAPFU0939F1ZV27')).toBe(false);
+    // The fourteenth character is always Z.
+    expect(isValidGSTIN('27AAPFU0939F1YV')).toBe(false);
   });
 });

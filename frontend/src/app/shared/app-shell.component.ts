@@ -83,6 +83,9 @@ const COLLAPSE_KEY = 'klogubizz_sidebar_collapsed';
             }
             <a routerLink="/reports" routerLinkActive="active" title="Reports"><span class="nav-icon"><app-icon name="chart" /></span><span class="nav-label">Reports</span></a>
             <a routerLink="/gst-returns" routerLinkActive="active" title="GST Returns"><span class="nav-icon"><app-icon name="percent" /></span><span class="nav-label">GST Returns</span></a>
+            @if (auth.user()?.role === 'admin') {
+              <a routerLink="/business" routerLinkActive="active" title="Business Profile"><span class="nav-icon"><app-icon name="shield" /></span><span class="nav-label">Business Profile</span></a>
+            }
             <a routerLink="/users" routerLinkActive="active" title="Users &amp; Roles"><span class="nav-icon"><app-icon name="shieldUser" /></span><span class="nav-label">Users &amp; Roles</span></a>
             <a routerLink="/subscription" routerLinkActive="active" title="Subscription"><span class="nav-icon"><app-icon name="package" /></span><span class="nav-label">Subscription</span></a>
             <a routerLink="/security" routerLinkActive="active" title="Security &amp; Privacy"><span class="nav-icon"><app-icon name="lock" /></span><span class="nav-label">Security &amp; Privacy</span></a>

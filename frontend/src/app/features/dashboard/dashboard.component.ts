@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { AppShellComponent } from '../../shared/app-shell.component';
@@ -6,6 +6,7 @@ import { IconComponent } from '../../shared/icons';
 import { AvatarComponent, EmptyStateComponent, PillComponent, SkeletonRowsComponent } from '../../shared/ui';
 import { BarChartComponent, BarChartPoint } from '../../shared/bar-chart.component';
 import { ApiService } from '../../core/api.service';
+import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
 import { Invoice, InvoiceStats } from '../../core/models';
 import { fmtINR, fmtINRCompact, fmtDate, monthLabel } from '../../core/format';
@@ -18,6 +19,22 @@ import { forkJoin } from 'rxjs';
   template: `
     <app-shell title="Dashboard" subtitle="Here's your billing overview for today">
       <a actions class="btn primary" routerLink="/invoices/new">+ New Invoice</a>
+
+      @if (missingBusinessDetails().length) {
+        <!--
+          On the dashboard, not only on the page that fixes it — a tenant who
+          never opens Business Profile never learns that their invoices are not
+          valid tax invoices. Admin only, because only an admin can act on it,
+          and a warning shown to somebody who cannot fix it is just noise.
+        -->
+        <div class="info-box danger" style="margin-bottom:18px;line-height:1.6">
+          <strong>Your invoices are going out without {{ missingBusinessDetails().join(' and ') }}.</strong>
+          A tax invoice has to carry your business's name, address and GSTIN, or your customer
+          cannot claim input tax credit against it.
+          <a routerLink="/business" style="color:inherit;font-weight:700;text-decoration:underline;">Add them now</a> —
+          it takes a minute.
+        </div>
+      }
 
       @if (loading()) {
         <div class="card flush"><app-skeleton-rows [count]="6" /></div>
@@ -130,6 +147,21 @@ import { forkJoin } from 'rxjs';
   `
 })
 export class DashboardComponent implements OnInit {
+  /**
+   * The seller details a tax invoice legally has to carry, and does not until
+   * somebody fills them in. Empty for everyone who already has them, so it costs
+   * nothing to the tenants it does not apply to.
+   */
+  missingBusinessDetails = computed(() => {
+    if (this.auth.user()?.role !== 'admin') return [];
+    const org = this.auth.organisation();
+    if (!org) return [];
+    const missing: string[] = [];
+    if (!org.gstin) missing.push('a GSTIN');
+    if (!(org.address || '').trim()) missing.push('an address');
+    return missing;
+  });
+
   loading = signal(true);
   stats = signal<InvoiceStats | null>(null);
   recent = signal<Invoice[]>([]);
@@ -138,7 +170,7 @@ export class DashboardComponent implements OnInit {
   fmtDate = fmtDate;
   monthLabel = monthLabel;
 
-  constructor(private api: ApiService, private toast: ToastService) {}
+  constructor(private api: ApiService, private auth: AuthService, private toast: ToastService) {}
 
   ngOnInit() {
     // Six rows are asked for, and six rows arrive. This used to fetch the org's

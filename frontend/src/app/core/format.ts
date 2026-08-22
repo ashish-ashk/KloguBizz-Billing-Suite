@@ -112,9 +112,37 @@ export function stateName(code: string): string {
 export const UNITS = ['Nos', 'Kg', 'Gm', 'Ltr', 'Ml', 'Box', 'Pcs', 'Dozen', 'Set', 'Mtr', 'Sqft', 'Hrs', 'Bag', 'Pair'];
 
 const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+const GSTIN_CHARSET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
+/**
+ * A GSTIN, checked the same way the server checks it.
+ *
+ * This used to test the *pattern only*, while the API verified the fifteenth
+ * character — a weighted mod-36 checksum over the first fourteen. So a
+ * transposed pair like `…F1ZZ` for `…F1ZV` looked fine in the browser, showed no
+ * error beside the field, and came back as a failed save from the server.
+ *
+ * The two disagreeing is the worse half of it. The whole point of validating in
+ * the browser is to say so while the field is still in front of the person, and
+ * a check that passes what the server will refuse does not do that — it just
+ * delays the same rejection until they press Save.
+ *
+ * The algorithm is duplicated from `backend/src/validators/common.js` rather than
+ * shared, because there is no shared package between the two and one is not worth
+ * introducing for eleven lines. The server remains the authority; this is the
+ * courtesy copy.
+ */
 export function isValidGSTIN(gstin: string): boolean {
-  return GSTIN_RE.test((gstin || '').toUpperCase());
+  const value = (gstin || '').toUpperCase();
+  if (!GSTIN_RE.test(value)) return false;
+
+  let sum = 0;
+  for (let i = 0; i < 14; i += 1) {
+    const digit = GSTIN_CHARSET.indexOf(value[i]);
+    const product = digit * (i % 2 === 0 ? 1 : 2);
+    sum += Math.floor(product / 36) + (product % 36);
+  }
+  return GSTIN_CHARSET[(36 - (sum % 36)) % 36] === value[14];
 }
 
 export function isValidEmail(email: string): boolean {

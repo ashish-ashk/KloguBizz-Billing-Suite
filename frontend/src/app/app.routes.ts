@@ -54,6 +54,13 @@ export const routes: Routes = [
       { path: 'receivables', canActivate: [requireCapability('receivables', 'Receivables')], loadComponent: () => import('./features/reports/receivables.component').then(m => m.ReceivablesComponent) },
       { path: 'activity', loadComponent: () => import('./features/account/activity.component').then(m => m.ActivityComponent) },
       { path: 'security', loadComponent: () => import('./features/account/security.component').then(m => m.AccountSecurityComponent) },
+      /**
+       * The seller side of every invoice — GSTIN, address, state.
+       *
+       * Admin only: it is the business's legal identity on a tax document, and
+       * the state code decides the tax split on everything issued from now on.
+       */
+      { path: 'business', canActivate: [tenantAdminGuard], loadComponent: () => import('./features/business/business-profile.component').then(m => m.BusinessProfileComponent) },
       { path: 'users', loadComponent: () => import('./features/users/users.component').then(m => m.UsersComponent) },
       { path: 'subscription', loadComponent: () => import('./features/subscription/subscription.component').then(m => m.SubscriptionComponent) },
       { path: 'appearance', canActivate: [tenantAdminGuard], loadComponent: () => import('./features/appearance/appearance.component').then(m => m.AppearanceComponent) },

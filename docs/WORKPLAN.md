@@ -579,6 +579,66 @@ dashed underline and called out in the colophon, so they cannot be shipped
 unnoticed. They were not filled in because a sales contact is a decision about
 what address the business wants public.
 
+## Found while writing the guide: a business could not enter its own GSTIN
+
+Writing item 12 meant walking a new tenant through setup, screen by screen. Step
+two is "enter your GSTIN and address" — and **there was no screen to do it on**.
+
+Registration collects a name, an email and a state code. `PUT
+/organisations/current` has accepted `gstin`, `pan`, `address`, `phone` and
+`state` from the beginning, the PDF prints all of them, and nothing in the app
+ever set them. So every business on the platform issued invoices carrying their
+company name and nothing else.
+
+That is not cosmetic. Under GST a tax invoice must state the supplier's name,
+address and GSTIN. Without them the document is not a valid tax invoice, the
+buyer cannot claim input tax credit against it, and they find out months later —
+then ask the tenant why. The `organisationController` comment even says the GSTIN
+and address are something "every tenant must be able to edit whatever they pay".
+The API was right. The screen was missing.
+
+Same shape as item 7: a field stored, printed, and unsettable.
+
+### What was added
+
+A **Business Profile** page — name, GSTIN, PAN, address, state, phone — admin
+only, since it is the business's legal identity on a tax document.
+
+**The GSTIN is checked against the state.** The first two characters of a GSTIN
+*are* the state code, so if they disagree with the state chosen, one of them is
+wrong — and that decides whether every invoice charges CGST + SGST or IGST. Said
+next to the field rather than discovered in a return.
+
+**A warning on the dashboard, not only on the page that fixes it.** A tenant who
+never opens Business Profile never learns that their invoices are not valid tax
+invoices. Admin only: a warning shown to somebody who cannot act on it is noise.
+It disappears the moment the details are filled in.
+
+**No billing-email field**, though the first draft had one. The organisation has
+no such field and the API does not accept it, so the input would have looked like
+it worked and changed nothing — the exact silent failure this codebase keeps
+removing.
+
+### And the browser's GSTIN check did not match the server's
+
+`format.ts` tested the **pattern only**; the API verifies the fifteenth
+character, a weighted mod-36 checksum over the first fourteen. So `…F1ZZ` for
+`…F1ZV` looked fine in the browser, showed nothing beside the field, and came
+back as a failed save.
+
+That is the worse half of the bug: the entire point of validating in the browser
+is to say so while the field is still in front of the person, and a check that
+passes what the server will refuse only delays the same rejection. The checksum
+is now duplicated into `format.ts` — eleven lines, not worth a shared package —
+with the server remaining the authority. It fixes the customer form and the CSV
+import screen at the same time, since they use the same function. Six new unit
+tests cover it, including a right-shaped wrong checksum.
+
+Verified in a browser end to end: the warning appears with the details missing, a
+bad GSTIN is refused inline, a GSTIN disagreeing with the state is called out,
+the save survives a reload, and the GSTIN and address print on an invoice raised
+afterwards.
+
 ## Order, and why
 
 **1 → 2 → 3** first, because they are one thread: nothing can be honestly gated
