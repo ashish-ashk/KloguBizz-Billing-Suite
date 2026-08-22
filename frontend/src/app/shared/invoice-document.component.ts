@@ -520,13 +520,20 @@ export interface InvoiceDocClient {
       } @else {
         <table class="inv-items-table">
           <thead>
-            <tr [style.background]="tpl().tableStyle === 'minimal' ? 'transparent' : (tpl().tableStyle === 'boxed' ? accentColor() : dark)"
-              [style.borderBottom]="tpl().tableStyle === 'minimal' ? '1.5px solid var(--faint)' : 'none'">
+            <!--
+              The minimal style had a transparent header, which on a real invoice
+              reads as another body row rather than a heading — and "GST %" broke
+              onto two lines because nothing stopped it wrapping. A faint wash of
+              the document's own accent separates the header without adding a
+              heavy band, and nowrap keeps every column label on one line.
+            -->
+            <tr [style.background]="tpl().tableStyle === 'minimal' ? accentWash() : (tpl().tableStyle === 'boxed' ? accentColor() : dark)"
+              [style.borderBottom]="'1.5px solid ' + accentRule()">
               @for (h of ['#','Description','HSN/SAC','Qty','Rate','GST %','Tax Amt','Total']; track h) {
                 <th [style.color]="tpl().tableStyle === 'minimal' ? 'var(--muted)' : (tpl().accentTint ? accentColor() : '#fff')"
                   [style.textAlign]="h === '#' || h === 'Description' || h === 'HSN/SAC' ? 'left' : 'right'"
                   [style.borderRight]="tpl().tableStyle === 'ledger' ? '1px solid rgba(255,255,255,.25)' : 'none'"
-                  style="padding:11px 12px;font-size:11px;">{{ h }}</th>
+                  style="padding:11px 12px;font-size:10.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;white-space:nowrap;">{{ h }}</th>
               }
             </tr>
           </thead>
@@ -534,7 +541,7 @@ export interface InvoiceDocClient {
             @for (item of invoice().items; track $index; let i = $index) {
               <tr [style.background]="rowBg(i)"
                 [style.border]="tpl().tableStyle === 'bordered' || tpl().tableStyle === 'boxed' || tpl().tableStyle === 'ledger' ? '1px solid #e5e7eb' : 'none'"
-                style="border-bottom:1px solid #e0e7ff;">
+                [style.borderBottom]="'1px solid ' + accentRule()">
                 <td data-label="#" [style.borderRight]="ledgerRule()" style="padding:11px 12px;color:var(--faint);">{{ i + 1 }}</td>
                 <td data-label="Description" [style.borderRight]="ledgerRule()" style="padding:11px 12px;font-weight:600;" [style.color]="dark">{{ item.desc }}</td>
                 <td data-label="HSN/SAC" class="mono" [style.borderRight]="ledgerRule()" style="padding:11px 12px;color:var(--muted);">{{ item.hsn || '—' }}</td>
@@ -661,6 +668,9 @@ export interface InvoiceDocClient {
   `,
   styles: [`
     .inv-2col { display:grid; grid-template-columns:1fr 1fr; }
+    /* Tabular figures, so the rupee columns line up digit for digit instead of
+       drifting by the width of a 1 against a 7. */
+    .inv-items-table td, .inv-items-table th { font-variant-numeric: tabular-nums; }
     .inv-2col-right { text-align:right; }
 
     .inv-diag-bold { position:relative; display:flex; justify-content:space-between; align-items:flex-start; padding:8px 4px 14px; overflow:hidden; gap:16px; }
@@ -740,6 +750,20 @@ export class InvoiceDocumentComponent {
    * *unsaved* edits, and reading storage there would show the previous text while
    * somebody is typing the new one.
    */
+  /**
+   * The accent at low strength, for the table header and the row rules.
+   *
+   * Derived from the document's own accent rather than hardcoded. The row rule
+   * was `#e0e7ff` — an indigo tint that looked deliberate only while the accent
+   * happened to be indigo, and clashed with every other colour a tenant picked.
+   *
+   * `color-mix` rather than mixing in TypeScript: it keeps the derivation in one
+   * place, and the fallback is the accent itself, which is legible if a browser
+   * does not support it.
+   */
+  accentWash = computed(() => `color-mix(in srgb, ${this.accentColor()} 8%, white)`);
+  accentRule = computed(() => `color-mix(in srgb, ${this.accentColor()} 22%, white)`);
+
   standingTerms = computed(() => String(this.invoiceDefaults()?.termsAndConditions || '').trim());
 
   signatureSrc = input('');

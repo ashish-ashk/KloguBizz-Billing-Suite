@@ -5,6 +5,8 @@ import { AppShellComponent } from '../../shared/app-shell.component';
 import { IconComponent } from '../../shared/icons';
 import { InvoiceDocumentComponent } from '../../shared/invoice-document.component';
 import { AuthService } from '../../core/auth.service';
+import { themePrimary } from '../../core/theme';
+import { TenantRole } from '../../core/theme';
 import { ApiService } from '../../core/api.service';
 import { ToastService } from '../../core/toast.service';
 import { Organisation } from '../../core/models';
@@ -205,8 +207,11 @@ const DEFAULT_CONTENT: ContentToggles = {
           </section>
 
           <section class="card">
-            <div class="card-title" style="margin-bottom:4px;">Accent Color</div>
-            <div class="card-sub" style="margin-bottom:12px;">Pick a curated color, or enter your own hex code</div>
+            <div class="card-title" style="margin-bottom:4px;">Accent Colour</div>
+            <div class="card-sub" style="margin-bottom:12px;">
+              The colour used on the document your customers receive — headings, the table
+              header, rules and totals.
+            </div>
             <div class="accent-row">
               <input type="color" [ngModel]="accentColor()" (ngModelChange)="accentColor.set($event)"
                 style="width:42px;height:42px;border:1px solid var(--border);border-radius:8px;padding:2px;background:var(--card);cursor:pointer;flex-shrink:0;" />
@@ -218,6 +223,24 @@ const DEFAULT_CONTENT: ContentToggles = {
                   [style.background]="c.value" [title]="c.name" (click)="accentColor.set(c.value)"></button>
               }
             </div>
+            <!--
+              Offered as an action rather than wired automatically, and the reason
+              is on the button: the app theme is set per role, so an accountant
+              switching to a dark theme would otherwise change what customers
+              receive. One click when you want them to match; never a surprise.
+            -->
+            <div class="actions" style="justify-content:flex-start;margin-top:12px">
+              <button class="btn secondary sm" type="button" (click)="matchAppTheme()"
+                [disabled]="accentColor().toLowerCase() === appThemeColour().toLowerCase()">
+                <span style="display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:6px"
+                  [style.background]="appThemeColour()"></span>
+                Match my app theme
+              </button>
+            </div>
+            <p class="muted" style="font-size:11.5px;line-height:1.6;margin:8px 0 0">
+              Your app theme is a personal, per-role preference. This colour is on the document
+              you send, so it is kept separate — changing your own theme never changes an invoice.
+            </p>
           </section>
 
           <section class="card">
@@ -479,6 +502,22 @@ export class InvoiceTemplatesComponent implements OnInit {
   );
 
   constructor(public auth: AuthService, private api: ApiService, private toast: ToastService) {}
+
+  /**
+   * The brand colour of the signed-in user's own app theme.
+   *
+   * Read live rather than stored, so the button offers whatever the theme is set
+   * to now.
+   */
+  appThemeColour = computed(() => {
+    const role = (this.auth.user()?.role || 'admin') as TenantRole;
+    return themePrimary(this.auth.organisation()?.themeConfig?.[role]);
+  });
+
+  /** Sets the document accent to the app theme's brand colour. */
+  matchAppTheme() {
+    this.accentColor.set(this.appThemeColour());
+  }
 
   ngOnInit() {
     const branding = this.auth.organisation()?.brandingConfig || {};

@@ -1977,3 +1977,46 @@ test('payment terms print with the terms, not twice', maybe(async () => {
   const fetched = await call('GET', `/invoices/${invoice._id}`, { token: tenant.token });
   assert.equal(fetched.body.paymentTerms, 'Net 30');
 }));
+
+// ── Item 6: the document follows its accent colour ──
+
+const { towardWhite } = require('../src/services/pdfService');
+
+test('the accent shades used for the table header and rules are derived, not fixed', maybe(async () => {
+  /**
+   * The row rule was `#e0e7ff` and the minimal table header was transparent.
+   * Both looked deliberate exactly while the accent happened to be the default
+   * indigo, and clashed with every other colour a tenant chose — on the document
+   * their customers receive.
+   */
+  assert.equal(towardWhite('#0f766e', 0), '#ffffff', 'no strength is white');
+  assert.equal(towardWhite('#0f766e', 1), '#0f766e', 'full strength is the colour itself');
+
+  // A wash has to stay light enough not to compete with the totals panel, and a
+  // rule dark enough to be visible on paper.
+  const wash = towardWhite('#0f766e', 0.08);
+  const rule = towardWhite('#0f766e', 0.22);
+  assert.notEqual(wash, rule);
+  assert.match(wash, /^#[0-9a-f]{6}$/);
+  assert.match(rule, /^#[0-9a-f]{6}$/);
+
+  // And it tracks the accent rather than drifting toward a fixed hue: a teal
+  // accent must never produce an indigo rule.
+  assert.notEqual(towardWhite('#0f766e', 0.22), towardWhite('#4f46e5', 0.22));
+}));
+
+test('an invoice renders whatever accent the tenant chose', maybe(async () => {
+  const tenant = await registerOrg();
+  await call('PUT', '/organisations/current', {
+    token: tenant.token, body: { brandingConfig: { primaryColor: '#0f766e' } }
+  });
+  const client = await createClient(tenant.token);
+  const invoice = await createInvoice(tenant.token, { clientId: client._id });
+
+  const pdf = await call('GET', `/invoices/${invoice._id}/pdf`, { token: tenant.token });
+  assert.equal(pdf.status, 200);
+  assert.ok(pdf.buffer.length > 1000);
+
+  const stored = await Organisation.findById(tenant.org._id).lean();
+  assert.equal(stored.brandingConfig.primaryColor, '#0f766e', 'the document colour is the tenant\'s');
+}));

@@ -171,6 +171,18 @@ export function getPreset(id: string): ThemeSeed {
 }
 
 /** The seed a role's theme resolves to, before any dark-mode override. */
+/**
+ * The brand colour of a role's theme.
+ *
+ * Exported so the Invoice Templates page can offer "match my app theme" — the
+ * invoice accent is a *document* colour and stays a separate, explicit setting,
+ * because the app theme is a per-role working preference. An accountant
+ * switching to a dark theme must not change what a customer receives.
+ */
+export function themePrimary(config: RoleThemeConfig | null | undefined): string {
+  return seedFor(config).primary;
+}
+
 function seedFor(config: RoleThemeConfig | null | undefined): ThemeSeed {
   if (config?.custom) {
     const c = config.custom;

@@ -78,6 +78,21 @@ async function resolveBrandingImages(org) {
 }
 
 /** Hex (#rgb or #rrggbb) -> "r, g, b" for building rgba() fill strings pdfkit doesn't accept directly (it wants fillOpacity instead). */
+/**
+ * The accent at low strength, for a table header band and the row rules.
+ *
+ * Mirrors `accentWash`/`accentRule` in the on-screen document, so the PDF a
+ * customer receives and the preview the tenant approved are the same document.
+ * Mixed toward white in RGB, which is what `color-mix(in srgb, …, white)` does
+ * on the screen side.
+ */
+function towardWhite(hex, strength) {
+  const [r, g, b] = hexToRgbTriplet(hex);
+  const mix = channel => Math.round(255 - (255 - channel) * strength);
+  const hexPart = n => n.toString(16).padStart(2, '0');
+  return `#${hexPart(mix(r))}${hexPart(mix(g))}${hexPart(mix(b))}`;
+}
+
 function hexToRgbTriplet(hex) {
   const h = (hex || '#4f46e5').replace('#', '');
   const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
@@ -692,9 +707,19 @@ async function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
 
       const drawTableHeader = () => {
         if (template.tableStyle === 'minimal') {
+          /**
+           * A faint wash of the accent behind the header row.
+           *
+           * It used to be bare text on white, which on a printed invoice reads as
+           * another body row rather than a heading — the eye has nothing to
+           * anchor the columns to. Light enough not to compete with the totals
+           * panel, and derived from the accent so it matches whatever colour the
+           * tenant chose rather than a fixed indigo.
+           */
+          doc.rect(left, y - 4, width, 20).fill(towardWhite(brand, 0.08));
           doc.font(fontBold).fontSize(8).fillColor(MUTED);
           cols.forEach((c, i) => doc.text(c.label, c.x + 4, y, { width: c.w - 8, align: i >= 3 ? 'right' : 'left' }));
-          doc.moveTo(left, y + 14).lineTo(right, y + 14).strokeColor(FAINT).lineWidth(1).stroke();
+          doc.moveTo(left, y + 14).lineTo(right, y + 14).strokeColor(towardWhite(brand, 0.35)).lineWidth(1).stroke();
           y += 20;
         } else {
           doc.rect(left, y, width, 20).fill(template.tableStyle === 'boxed' ? brand : DARK);
@@ -750,7 +775,11 @@ async function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
         });
         y += rowH;
       });
-      if (template.tableStyle !== 'minimal') doc.moveTo(left, y).lineTo(right, y).strokeColor('#e0e7ff').lineWidth(1).stroke();
+      // Derived from the accent. `#e0e7ff` looked deliberate only while the
+      // accent happened to be indigo, and clashed with every other colour.
+      if (template.tableStyle !== 'minimal') {
+        doc.moveTo(left, y).lineTo(right, y).strokeColor(towardWhite(brand, 0.22)).lineWidth(1).stroke();
+      }
       y += 16;
     }
     // Keep the totals panel, amount-in-words strip and signature together: they
@@ -1042,4 +1071,8 @@ async function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
   });
 }
 
-module.exports = { renderInvoicePdf };
+module.exports = { renderInvoicePdf,
+  // Exported for its edges: a strength of 0 must be white and 1 the colour
+  // itself, and a wrong shade here washes out every rule on the document.
+  towardWhite
+};

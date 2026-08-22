@@ -24,7 +24,7 @@ guesses.
 | 3 | Plan entitlements: in-plan unlocked, out-of-plan hidden **and** refused | **DONE** — see below | Build |
 | 4 | Signature appears on the invoice | **DONE** — it rendered, then got erased. See below | Diagnose |
 | 5 | "Notes / Terms" → "Notes / Terms & Conditions" in the footer | **DONE** — and it was not just a label. See below | Small |
-| 6 | Invoice template: line header and section CSS, theme colour follows the selected theme | Templates exist; the accent is not wired to the tenant theme | Medium |
+| 6 | Invoice template: line header and section CSS, theme colour follows the selected theme | **DONE** — see below | Medium |
 | 7 | Document series per tenant | Prefixes and per-FY counters already exist for invoices, credit notes and quotations — there is no UI to set them, and not every document type is covered | Medium |
 | 8 | Client bulk upload from CSV | Only *items* has bulk upload. Clients have none | Build |
 | 9 | Mobile / PWA: nothing hidden behind anything else | Unknown until measured on a real viewport | Audit + fix |
@@ -203,6 +203,39 @@ what was in it.
 build because an HTML comment I added contained backticks, inside a template
 literal. TypeScript reported it as `styles: Expected 1 arguments, but got 3`
 thirty lines further down.
+
+## 6. Line header, section styling and the accent colour — DONE
+
+Looked at a rendered invoice before changing anything, which is how three of these
+were found.
+
+**The line-item header was invisible as a header.** On the default template it was
+bare text on white, so on a printed page it read as another body row — the eye had
+nothing to anchor the columns to. It now sits on a faint wash of the document's own
+accent, uppercase and letter-spaced.
+
+**"GST %" wrapped onto two lines**, because nothing stopped it. `nowrap` on the
+header cells fixes every column label at once.
+
+**The row rule was `#e0e7ff`** — a hardcoded indigo tint. It looked deliberate
+exactly while the accent happened to be the default indigo and clashed with every
+other colour a tenant picked, on the document their customers receive. Both the
+wash and the rule are now derived from the accent, in the PDF and on screen, by
+the same arithmetic.
+
+**Figures now use tabular numerals**, so the rupee columns line up digit for digit
+instead of drifting by the width of a 1 against a 7.
+
+### The accent and the app theme
+
+Wired as an explicit **"Match my app theme"** button rather than automatically, and
+the reason is on the button itself: the app theme is set **per role**, so linking
+them would mean an accountant switching to a dark theme changes what customers
+receive. One click when you want them to match; never a surprise. The card now
+also says plainly that this colour is the one on the document.
+
+Verified by rendering the same invoice with an indigo and then a teal accent: the
+header wash, every rule, the totals, the title and the signature line all follow.
 
 ## Order, and why
 
