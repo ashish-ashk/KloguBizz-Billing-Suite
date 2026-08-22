@@ -8,6 +8,7 @@ const { notDeleted, scopeFilter, deletionPatch, RESTORE_PATCH } = require('../ut
 const { recordEvent, EVENT } = require('../services/usageEventService');
 const { pickFields } = require('../utils/pickFields');
 const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
+const { buildClientTemplateCsv, parseClientFile, MAX_ROWS } = require('../services/clientImportService');
 
 // `orgId` is never taken from the body — it comes from the authenticated
 // token. Accepting it would let an update move the record into another
@@ -98,4 +99,90 @@ const restoreClient = asyncHandler(async (req, res) => {
   res.json(client);
 });
 
-module.exports = { listClients, createClient, updateClient, deleteClient, restoreClient };
+// ── Bulk import ──────────────────────────────────────────────────────────
+
+const downloadClientTemplate = asyncHandler(async (req, res) => {
+  const csv = buildClientTemplateCsv();
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="klogubizz-customers-template.csv"');
+  res.send(csv);
+});
+
+/**
+ * Imports a customer list.
+ *
+ * Row by row, not all-or-nothing: a file of five hundred customers with four bad
+ * rows imports four hundred and ninety-six and hands the four back with their row
+ * numbers and reasons. Refusing the whole file over one malformed phone number is
+ * how an import feature ends up never used — the tenant goes back to typing them
+ * in by hand, which is what this was for.
+ *
+ * There is no per-plan ceiling on customers, so nothing here is a way around a
+ * quota; `MAX_ROWS` is an operational cap on one request, and the message says so.
+ */
+const bulkUploadClients = asyncHandler(async (req, res) => {
+  if (!req.file) throw httpError(400, 'Please choose a CSV file to upload.', 'NO_FILE');
+
+  /**
+   * Existing customers are read once, and *including* the soft-deleted ones.
+   *
+   * A deleted customer still holds its GSTIN: importing a second record for the
+   * same registration would give the tenant two customers with one GSTIN, where
+   * restoring the first then makes their invoice history ambiguous. So the
+   * collision is reported, and the fix — restore them — is named in the message.
+   */
+  const existing = await Client.find(tenantFilter(req), 'companyName gstin deletedAt').lean();
+  const existingGstins = new Map();
+  const existingNames = new Map();
+  for (const client of existing) {
+    if (client.gstin) existingGstins.set(String(client.gstin).toUpperCase(), client.companyName);
+    if (client.companyName) existingNames.set(client.companyName.trim().toLowerCase(), client._id);
+  }
+
+  const { totalRows, valid, failed } = await parseClientFile(req.file.buffer, {
+    filename: req.file.originalname || '',
+    existingGstins,
+    existingNames
+  });
+
+  const docs = valid.map(v => ({ ...v.doc, orgId: req.orgId }));
+  const failedResults = [...failed];
+  let created = 0;
+
+  if (docs.length) {
+    try {
+      // `ordered: false` so one rejected document does not abandon every row after it.
+      const inserted = await Client.insertMany(docs, { ordered: false });
+      created = inserted.length;
+    } catch (err) {
+      const writeErrors = err.writeErrors || [];
+      if (!writeErrors.length) throw err;
+      created = docs.length - writeErrors.length;
+      writeErrors.forEach(writeError => {
+        const source = valid[writeError.index];
+        failedResults.push({
+          row: source?.row,
+          companyName: source?.doc.companyName,
+          gstin: source?.doc.gstin,
+          errors: [writeError.errmsg || writeError.err?.errmsg || 'Could not save this customer.']
+        });
+      });
+    }
+  }
+
+  failedResults.sort((a, b) => (a.row || 0) - (b.row || 0));
+  logAudit({
+    req,
+    action: 'client.bulk_import',
+    entity: 'client',
+    meta: { totalRows, created, failed: failedResults.length }
+  });
+  recordEvent({ req, type: EVENT.clientBulkUpload, meta: { totalRows, created } });
+
+  res.json({ totalRows, created, failed: failedResults, maxRows: MAX_ROWS });
+});
+
+module.exports = {
+  listClients, createClient, updateClient, deleteClient, restoreClient,
+  downloadClientTemplate, bulkUploadClients
+};

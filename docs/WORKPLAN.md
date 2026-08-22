@@ -26,7 +26,7 @@ guesses.
 | 5 | "Notes / Terms" → "Notes / Terms & Conditions" in the footer | **DONE** — and it was not just a label. See below | Small |
 | 6 | Invoice template: line header and section CSS, theme colour follows the selected theme | **DONE** — see below | Medium |
 | 7 | Document series per tenant | **DONE** — the fields existed; nothing could set them. See below | Medium |
-| 8 | Client bulk upload from CSV | Only *items* has bulk upload. Clients have none | Build |
+| 8 | Client bulk upload from CSV | **DONE** — see below | Build |
 | 9 | Mobile / PWA: nothing hidden behind anything else | Unknown until measured on a real viewport | Audit + fix |
 | 10 | Dashboard and charts fit the mobile screen, compact scrolling | Same | Audit + fix |
 | 11 | Sales deck for promotion and branding | Does not exist | Build |
@@ -303,6 +303,108 @@ Then driven in a real browser: set `ASTRA`, watched both previews follow the
 typing, saved, reloaded to confirm it was stored rather than held in a signal,
 raised an actual invoice through the API — `ASTRA-2026-001` — and tried to move
 numbering back to 1, which was refused visibly on the page.
+
+## 8. Importing a customer list from CSV — DONE
+
+Items had a bulk upload; customers did not. So a business moving in typed their
+customer list in by hand, one at a time — which for a few hundred customers is
+the reason they never finish moving in.
+
+CSV rather than the .xlsx the item importer uses, and that follows from where a
+customer list actually comes from: an export out of Tally or Zoho, a contacts
+export, or the spreadsheet the business has kept for years. All of those are CSV.
+.xlsx is accepted as well, because somebody who opens the CSV template in Excel
+and presses Save produces one, and refusing that file teaches them nothing except
+that the feature is broken.
+
+### Most of the work is that "CSV" is not one format
+
+Every one of these has an obvious wrong answer that either loses a tenant's data
+or refuses a correct file:
+
+- **Excel writes a byte-order mark**, which makes the first header read as
+  `﻿Customer Name` and match nothing. The single commonest cause of "your
+  import doesn't work". The template is written *with* one, too — without it
+  Excel opens a UTF-8 CSV in the local code page and mangles non-ASCII names.
+- **Addresses contain commas.** Always. So quoted fields are not an edge case
+  here, they are the normal case, and `split(',')` silently shifts every column
+  after the address by one — which is worse than failing, because it succeeds.
+- **A quoted field can hold a newline** (a two-line address), so the file cannot
+  be cut into rows before it is parsed into fields.
+- **Excel writes semicolons in some locales**, and anything pasted from a table is
+  tab-separated. The delimiter is detected from the header line only — counting
+  across the whole file would let commas inside addresses outvote the real one.
+- **Line endings** may be CRLF, LF, or CR from an old Mac export.
+
+Columns are matched by header *text*, not position, and a short list of synonyms
+is accepted ("Party Name", "GSTIN/UIN", "Mobile", "Place of Supply"), so a real
+export usually imports without being edited first. Extra columns of the file's
+own are ignored rather than fatal.
+
+### The state is the part that matters
+
+The first two digits of a GSTIN **are** the state code — that is how the number is
+built. So a row that gives a GSTIN has already given the state, and the State
+column can be left blank. It is also accepted as a name (`Maharashtra`) or a
+number (`27`), because nobody importing a customer list knows Maharashtra is 27,
+and refusing the file over that would send them to look up thirty-eight codes by
+hand.
+
+When both are given **and they disagree**, the row is refused rather than
+resolved. This is the most consequential error in the file: the state decides
+whether every future invoice to that customer carries IGST or CGST + SGST.
+Choosing one of two contradicting answers means either a wrong GSTIN on the
+invoice or the wrong tax split on all of them, and both surface first as a GST
+return that no longer reconciles.
+
+GSTINs are checked by their **checksum**, not just their shape. A transposed pair
+of characters passes a format test while belonging to nobody — and the
+consequence lands on the customer, whose input tax credit is refused months
+later.
+
+### Duplicates, and what counts as one
+
+Same name, different GSTINs → two records, because that is what a company with
+branches in two states looks like and each needs its own place of supply.
+
+Same name, no GSTIN on either → refused. That is one customer entered twice, and
+creating both splits their invoices across two records, so the receivables report
+shows neither balance correctly and a statement sent to them is wrong.
+
+Existing customers are checked **including soft-deleted ones**, since a deleted
+customer still holds its GSTIN and restoring it afterwards would leave the
+history ambiguous.
+
+### Row by row, never all-or-nothing
+
+A file of five hundred customers with four bad rows imports four hundred and
+ninety-six and hands back four rows to fix, each with the row number as it appears
+in the spreadsheet and a sentence naming what is wrong with it. Refusing the whole
+file over one malformed phone number is how an import feature ends up unused — the
+tenant goes back to typing, which is what this was for.
+
+Two smaller decisions written down in the code because they are not obvious:
+a row claims its GSTIN even when it failed for some other reason (otherwise
+whether the *second* row imports depends on whether the first had an unrelated
+typo), and a missing state is not reported on a row whose GSTIN was already
+rejected (fixing the GSTIN fixes both).
+
+### Also done here
+
+`STATE_NAMES` lived inside `pdfService` and was about to be copied. It is now
+`utils/states.js`, used by both — two copies of that table is a divergence
+waiting to happen, and it is printed on tax invoices as the place of supply.
+
+### Verified
+
+Thirteen backend tests, including a single file that arrives with a BOM,
+semicolons, CRLF, a quoted embedded newline, reordered columns and an extra
+column of its own — because in real files those arrive together, not one at a
+time. Then driven in a browser: template downloaded, a three-row file with one
+bad row uploaded, two customers added and the third listed with its row number
+and reason, the list refreshing itself behind the modal. Then again at 390px,
+checking the error table does not push the page sideways and leave the Close
+button off-screen.
 
 ## Order, and why
 

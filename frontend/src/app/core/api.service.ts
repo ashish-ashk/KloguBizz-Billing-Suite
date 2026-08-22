@@ -5,7 +5,7 @@ import { tap } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 import { CacheService } from './cache.service';
 import {
-  AttentionLists, AuditEntry, AuditFilters, Client, CreditNote, CreditNoteReason, CreditSummary,
+  AttentionLists, AuditEntry, AuditFilters, Client, ClientBulkUploadResult, CreditNote, CreditNoteReason, CreditSummary,
   DataRightsStatus, DeviceSession, EInvoiceCheck, EInvoiceState, EInvoiceWorklist,
   FeatureAdoption, FeatureFlags, Gstr1Report, Gstr3bReport, GstSummary, ImpersonationSession,
   Invoice, InvoiceItem, InvoiceStats, ItcRegister, Item, ItemBulkUploadResult, ListParams,
@@ -123,6 +123,19 @@ export class ApiService {
   }
   deleteClient(id: string) {
     return this.afterWrite(this.http.delete(`${this.api}/clients/${id}`), NS.clients);
+  }
+  downloadClientsTemplate() {
+    return this.http.get(`${this.api}/clients/bulk-upload/template`, { responseType: 'blob' });
+  }
+  bulkUploadClients(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    // No Content-Type header: the browser has to set it, because only it knows
+    // the multipart boundary it generated.
+    return this.afterWrite(
+      this.http.post<ClientBulkUploadResult>(`${this.api}/clients/bulk-upload`, formData),
+      NS.clients
+    );
   }
 
   // ── Items ────────────────────────────────────

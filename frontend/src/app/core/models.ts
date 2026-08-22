@@ -269,6 +269,27 @@ export interface Item {
   status?: 'active' | 'inactive';
 }
 
+/**
+ * One row of a customer import that could not be created, and why.
+ *
+ * `row` is the spreadsheet's own row number, not an index into anything here —
+ * the point is that somebody can open their file, go to that line and fix it.
+ */
+export interface ClientBulkUploadFailure {
+  row: number;
+  companyName?: string;
+  gstin?: string;
+  errors: string[];
+}
+
+export interface ClientBulkUploadResult {
+  totalRows: number;
+  created: number;
+  failed: ClientBulkUploadFailure[];
+  /** The per-file row cap, so the screen can state it rather than hardcode it. */
+  maxRows?: number;
+}
+
 export interface ItemBulkUploadFailure {
   row: number;
   itemCode?: string;

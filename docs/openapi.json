@@ -5826,6 +5826,83 @@
         }
       }
     },
+    "/api/v1/clients/bulk-upload/template": {
+      "get": {
+        "summary": "GET /api/v1/clients/bulk-upload/template",
+        "tags": [
+          "clients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant",
+          "guard"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/clients/bulk-upload": {
+      "post": {
+        "summary": "POST /api/v1/clients/bulk-upload",
+        "tags": [
+          "clients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant",
+          "guard",
+          "csvUpload"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
     "/api/v1/clients/{id}": {
       "put": {
         "summary": "PUT /api/v1/clients/{id}",
@@ -14832,11 +14909,12 @@
     }
   },
   "x-undocumented": {
-    "count": 47,
+    "count": 48,
     "likelyGaps": [],
     "actions": [
       "POST /api/v1/auth/mfa/setup",
       "POST /api/v1/auth/resend-verification",
+      "POST /api/v1/clients/bulk-upload",
       "POST /api/v1/clients/{id}/restore",
       "POST /api/v1/expenses/{id}/restore",
       "POST /api/v1/invoices/remind-all",

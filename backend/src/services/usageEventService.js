@@ -50,6 +50,7 @@ const EVENT = {
   /** A cost with no vendor bill — salaries, rent, bank charges (2.4 #32). */
   expenseRecorded: 'expense.recorded',
   itemBulkUpload: 'item.bulk_upload',
+  clientBulkUpload: 'client.bulk_upload',
   reportViewed: 'report.viewed',
   exportCsv: 'export.csv',
   templateChanged: 'template.changed',

@@ -2185,3 +2185,260 @@ test('numbering is for the owner to set, not the accountant', maybe(async () => 
   const admin = await call('GET', '/organisations/current/document-series', { token: tenant.token });
   assert.equal(admin.status, 200, 'the admin can');
 }));
+
+// ── Item 8: importing a customer list from CSV ──
+
+/**
+ * Multipart, so it cannot use `call` — that sets a JSON content type, and the
+ * boundary has to be generated. `FormData`/`Blob` are built into Node here.
+ */
+async function uploadCsv(token, text, filename = 'customers.csv') {
+  const form = new FormData();
+  form.append('file', new Blob([text], { type: 'text/csv' }), filename);
+  const response = await fetch(`${baseUrl}/clients/bulk-upload`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form
+  });
+  const raw = await response.text();
+  let json; try { json = raw ? JSON.parse(raw) : null; } catch { json = raw; }
+  return { status: response.status, body: json };
+}
+
+const HEADER = 'Customer Name *,GSTIN,State,Email,Phone,Address,Status';
+
+test('a customer list imports from CSV', maybe(async () => {
+  const tenant = await registerOrg();
+
+  const template = await call('GET', '/clients/bulk-upload/template', { token: tenant.token });
+  assert.equal(template.status, 200);
+  assert.match(template.headers.get('content-type'), /text\/csv/);
+  /**
+   * The byte-order mark is deliberate. Without it Excel opens a UTF-8 CSV in the
+   * local code page and mangles every non-ASCII character in a customer's name.
+   */
+  assert.ok(template.text.startsWith('﻿'), 'the template carries a BOM for Excel');
+
+  const csv = [
+    HEADER,
+    'Alpha Traders,27AAPFU0939F1ZV,Maharashtra,alpha@buyer.test,9876543210,"Unit 4, BKC, Mumbai",Active',
+    'Beta Supplies,,Tamil Nadu,beta@buyer.test,,,'
+  ].join('\r\n');
+
+  const { status, body } = await uploadCsv(tenant.token, csv);
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.equal(body.totalRows, 2);
+  assert.equal(body.created, 2, JSON.stringify(body.failed));
+  assert.equal(body.failed.length, 0);
+
+  const list = await call('GET', '/clients', { token: tenant.token });
+  const alpha = list.body.data.find(c => c.companyName === 'Alpha Traders');
+  // The address survived its own commas, which is the whole reason this needs a
+  // real parser rather than a split.
+  assert.equal(alpha.address, 'Unit 4, BKC, Mumbai');
+  assert.equal(alpha.gstin, '27AAPFU0939F1ZV');
+  assert.equal(alpha.stateCode, '27');
+  assert.equal(alpha.state, 'Maharashtra');
+
+  // A state given by name, because nobody importing a list knows Tamil Nadu is 33.
+  const beta = list.body.data.find(c => c.companyName === 'Beta Supplies');
+  assert.equal(beta.stateCode, '33');
+  assert.equal(beta.status, 'active');
+}));
+
+test('a GSTIN carries its own state, and a disagreement is reported', maybe(async () => {
+  const tenant = await registerOrg();
+  const csv = [
+    HEADER,
+    // No state column value: the first two digits of the GSTIN are the state code.
+    'Derived Co,33AAACT2727Q1Z3,,,,,',
+    // Says Karnataka; the GSTIN says 27.
+    'Contradiction Co,27AAPFU0939F1ZV,Karnataka,,,,'
+  ].join('\n');
+
+  const { status, body } = await uploadCsv(tenant.token, csv);
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.equal(body.created, 1, JSON.stringify(body.failed));
+
+  const list = await call('GET', '/clients', { token: tenant.token });
+  const derived = list.body.data.find(c => c.companyName === 'Derived Co');
+  assert.equal(derived.stateCode, '33', 'taken from the GSTIN');
+  assert.equal(derived.state, 'Tamil Nadu');
+
+  /**
+   * This is the most consequential error in the file, so it is reported rather
+   * than resolved: the state decides whether every invoice to this customer
+   * carries IGST or CGST + SGST, and picking one of the two contradicting answers
+   * would mean either a wrong GSTIN or a wrong tax split on all of them.
+   */
+  assert.equal(body.failed.length, 1);
+  const failure = body.failed[0].errors.join(' ');
+  assert.match(failure, /Karnataka/);
+  assert.match(failure, /Maharashtra/);
+  assert.match(failure, /IGST or CGST/);
+}));
+
+test('an invalid GSTIN is caught by its checksum, not just its shape', maybe(async () => {
+  const tenant = await registerOrg();
+  // Right length, right pattern, last character wrong.
+  const csv = [HEADER, 'Typo Co,27AAPFU0939F1ZZ,Maharashtra,,,,'].join('\n');
+  const { body } = await uploadCsv(tenant.token, csv);
+
+  /**
+   * A GSTIN is a legal declaration on the invoice. A transposed pair of
+   * characters passes a format check while belonging to nobody — and the
+   * consequence lands on the *customer*, whose input tax credit is refused
+   * months later.
+   */
+  assert.equal(body.created, 0);
+  assert.match(body.failed[0].errors.join(' '), /not a valid GSTIN/);
+}));
+
+test('one bad row does not cost the tenant the other twenty', maybe(async () => {
+  const tenant = await registerOrg();
+  const rows = [HEADER];
+  for (let i = 1; i <= 20; i += 1) rows.push(`Bulk Co ${i},,Maharashtra,bulk${i}@buyer.test,,,`);
+  rows.splice(10, 0, 'Broken Co,,Nowhere-at-all,,,,');
+
+  const { body } = await uploadCsv(tenant.token, rows.join('\r\n'));
+  // Row by row, not all-or-nothing. Refusing the whole file over one bad row is
+  // how an import feature ends up unused.
+  assert.equal(body.totalRows, 21);
+  assert.equal(body.created, 20, JSON.stringify(body.failed));
+  assert.equal(body.failed.length, 1);
+  assert.equal(body.failed[0].companyName, 'Broken Co');
+  assert.match(body.failed[0].errors.join(' '), /not a state we recognise/);
+  // The row number is the one the user sees in their spreadsheet.
+  assert.equal(body.failed[0].row, 11);
+}));
+
+test('the same customer twice is refused, in the file and against the book', maybe(async () => {
+  const tenant = await registerOrg();
+  await uploadCsv(tenant.token, [HEADER, 'Repeat Co,27AAPFU0939F1ZV,Maharashtra,,,,'].join('\n'));
+
+  const again = await uploadCsv(tenant.token, [
+    HEADER,
+    'Repeat Co Renamed,27AAPFU0939F1ZV,Maharashtra,,,,',
+    'Twice In File,29AAACT2727Q1ZS,Karnataka,,,,',
+    'Twice In File Too,29AAACT2727Q1ZS,Karnataka,,,,'
+  ].join('\n'));
+
+  assert.equal(again.body.created, 1, JSON.stringify(again.body.failed));
+  const messages = again.body.failed.map(f => f.errors.join(' ')).join(' | ');
+  assert.match(messages, /already have a customer with GSTIN/);
+  assert.match(messages, /also appears on row/);
+}));
+
+test('two branches of one group are not treated as a duplicate', maybe(async () => {
+  const tenant = await registerOrg();
+  const csv = [
+    HEADER,
+    'Same Name Ltd,27AAPFU0939F1ZV,Maharashtra,,,,',
+    'Same Name Ltd,29AAACT2727Q1ZS,Karnataka,,,,'
+  ].join('\n');
+
+  /**
+   * One name, two registrations — which is what a company with branches in two
+   * states actually looks like, and each needs its own record because the place
+   * of supply differs.
+   */
+  const { body } = await uploadCsv(tenant.token, csv);
+  assert.equal(body.created, 2, JSON.stringify(body.failed));
+
+  // But the same name twice with no GSTIN either side is one customer entered
+  // twice, and creating both splits their invoices across two records.
+  const nameOnly = await uploadCsv(tenant.token, [
+    HEADER, 'Plain Shop,,Maharashtra,,,,', 'Plain Shop,,Maharashtra,,,,'
+  ].join('\n'));
+  assert.equal(nameOnly.body.created, 1);
+  assert.match(nameOnly.body.failed[0].errors.join(' '), /neither row has a GSTIN/);
+}));
+
+test('a CSV out of Excel imports, however Excel wrote it', maybe(async () => {
+  const tenant = await registerOrg();
+
+  /**
+   * All at once, because they arrive together in real files: a byte-order mark, a
+   * semicolon separator (Excel in some locales), CRLF endings, a quoted field
+   * holding a newline, and the columns in a different order with an extra column
+   * of the file's own.
+   */
+  const csv = '﻿GSTIN;Ledger Code;Party Name;State;Address\r\n'
+    + ';L-1;Excel Shop;Maharashtra;"Shop 2, Lane 5,\r\nPune 411001"\r\n';
+
+  const { status, body } = await uploadCsv(tenant.token, csv, 'from-excel.csv');
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.equal(body.created, 1, JSON.stringify(body.failed));
+
+  const list = await call('GET', '/clients', { token: tenant.token });
+  const shop = list.body.data.find(c => c.companyName === 'Excel Shop');
+  assert.ok(shop, 'matched "Party Name" to the customer name');
+  assert.match(shop.address, /Shop 2, Lane 5/);
+  assert.match(shop.address, /Pune 411001/);
+}));
+
+test('a file that is not the template says which columns it had', maybe(async () => {
+  const tenant = await registerOrg();
+  const { status, body } = await uploadCsv(tenant.token, 'Foo,Bar\r\n1,2\r\n');
+
+  /**
+   * Naming what was found is the difference between a message somebody can act
+   * on and one that sends them back to guess. "Invalid file" on an import screen
+   * is where tenants give up.
+   */
+  assert.equal(status, 400);
+  assert.equal(body.code, 'MISSING_COLUMNS');
+  assert.match(body.message, /"Foo", "Bar"/);
+  assert.match(body.message, /Customer Name/);
+}));
+
+test('an empty file and a header-only file are told apart', maybe(async () => {
+  const tenant = await registerOrg();
+  const empty = await uploadCsv(tenant.token, '');
+  assert.equal(empty.status, 400);
+  assert.match(empty.body.message, /empty/i);
+
+  const headerOnly = await uploadCsv(tenant.token, `${HEADER}\r\n\r\n`);
+  assert.equal(headerOnly.status, 400);
+  assert.equal(headerOnly.body.code, 'NO_DATA_ROWS');
+  // Blank trailing lines are not reported as broken rows — a trailing newline is
+  // not a mistake anybody needs telling about.
+  assert.match(headerOnly.body.message, /no customers in it/);
+}));
+
+test('the example row in the template is not imported as a customer', maybe(async () => {
+  const tenant = await registerOrg();
+  const template = await call('GET', '/clients/bulk-upload/template', { token: tenant.token });
+
+  // Uploaded back untouched, which is what somebody does to see what happens.
+  const { status, body } = await uploadCsv(tenant.token, template.text);
+  assert.equal(status, 400);
+  assert.equal(body.code, 'NO_DATA_ROWS');
+
+  const list = await call('GET', '/clients', { token: tenant.token });
+  assert.equal(list.body.data.filter(c => c.companyName === 'Acme Traders Pvt Ltd').length, 0);
+}));
+
+test('a viewer cannot import a customer list', maybe(async () => {
+  const tenant = await registerOrg();
+  const invite = await call('POST', '/users/invite', {
+    token: tenant.token,
+    body: { name: 'Viewer', email: `csvviewer${counter}@tenant.test`, role: 'viewer' }
+  });
+  const accepted = await call('POST', '/auth/accept-invite', {
+    body: {
+      token: new URL(invite.body.inviteUrl).searchParams.get('token'),
+      password: 'Password@123',
+      acceptTerms: true
+    }
+  });
+  const refused = await uploadCsv(accepted.body.token, [HEADER, 'Sneaky Co,,Maharashtra,,,,'].join('\n'));
+  assert.equal(refused.status, 403);
+}));
+
+test('a wrong file type is refused before it is parsed', maybe(async () => {
+  const tenant = await registerOrg();
+  const refused = await uploadCsv(tenant.token, 'not a spreadsheet', 'holiday.jpg');
+  assert.equal(refused.status, 400);
+  assert.equal(refused.body.code, 'BAD_FILE_TYPE');
+}));
