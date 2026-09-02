@@ -41,15 +41,28 @@ const env = {
   RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET || '',
   RAZORPAY_WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET || DEV_DEFAULTS.RAZORPAY_WEBHOOK_SECRET,
 
-  // ── E-invoicing (IRN + signed QR) ──
-  // The provider boundary. All four are needed before services/eInvoiceService.js
-  // will attempt to report an invoice; with any of them missing it validates and
-  // builds the payload but refuses to pretend it was filed.
+  /**
+   * ── E-invoicing (IRN + signed QR) ──
+   *
+   * The *platform* half only. These identify this software to the government's
+   * Invoice Registration Portal and are the same for every tenant.
+   *
+   * The taxpayer half — GSTIN, API username, API password — is **per
+   * organisation** and lives on the tenant's own record, encrypted. It cannot
+   * live here: an IRP account belongs to one GSTIN, so a single set of
+   * environment variables can only ever report for one business. `IRP_USERNAME`
+   * and `IRP_PASSWORD` used to be read here for exactly that broken reason and
+   * have been removed rather than left to mislead.
+   *
+   * `IRP_PUBLIC_KEY` is the portal's RSA public key, used to encrypt the
+   * password and the AppKey on every authentication. It differs between the
+   * sandbox and production, and is accepted as a PEM, a PEM with escaped
+   * newlines, or base64 of one — see eInvoiceCredentialService.publicKeyPem.
+   */
   IRP_BASE_URL: process.env.IRP_BASE_URL || '',
-  IRP_USERNAME: process.env.IRP_USERNAME || '',
-  IRP_PASSWORD: process.env.IRP_PASSWORD || '',
   IRP_CLIENT_ID: process.env.IRP_CLIENT_ID || '',
   IRP_CLIENT_SECRET: process.env.IRP_CLIENT_SECRET || '',
+  IRP_PUBLIC_KEY: process.env.IRP_PUBLIC_KEY || '',
 
   /**
    * ── E-way bills ──

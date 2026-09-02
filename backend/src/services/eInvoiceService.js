@@ -1,7 +1,8 @@
 const crypto = require('crypto');
-const { env } = require('../config/env');
 const { calculateLine, roundMoney } = require('./gstService');
 const { isValidGstin } = require('../validators/common');
+const credentials = require('./eInvoiceCredentialService');
+const nicIrp = require('./irp/nicIrpProvider');
 
 /**
  * E-invoicing (IRN + signed QR).
@@ -11,21 +12,22 @@ const { isValidGstin } = require('../validators/common');
  * **decorative, non-scannable** QR motif — which is worse than an absent feature,
  * because it looks like the real thing on a document that is a legal declaration.
  *
- * What is real here and what is not, stated plainly because the difference matters:
+ * The payload builder (`buildIrpPayload`) produces the NIC schema the portal
+ * consumes, and the validator (`validateForIrp`) applies the rules the portal
+ * would reject on — run first, because most failed attempts are rejected on data
+ * rather than transport, and a local message names the field while the portal's
+ * is a number.
  *
- *  - **Real:** the payload builder (`buildIrpPayload`), which produces the NIC
- *    schema the IRP actually consumes, and the validator (`validateForIrp`), which
- *    applies the rules the IRP would reject on. Both are fully testable and are the
- *    bulk of the work — most failed IRN attempts are rejected on data, not transport.
- *  - **Not real:** the network call. Reporting an invoice requires credentials from
- *    an IRP or GSP that this deployment does not have, so `generateIrn` refuses with
- *    `IRP_NOT_CONFIGURED` rather than pretending. That refusal is the honest state,
- *    and it is a *seam*: a provider adapter drops into `callIrp` without any caller
- *    changing.
+ * The network call is `services/irp/nicIrpProvider.js`, which talks to the
+ * government's own Invoice Registration Portal. It was a documented refusal for
+ * as long as there were no credentials to make it work; what unblocked it was
+ * not the transport but realising the credentials are **per taxpayer**, so they
+ * had to move out of the environment and onto each organisation. See
+ * `eInvoiceCredentialService`.
  *
- * The alternative — a mocked "success" that stamps a made-up IRN on an invoice —
- * would be indistinguishable from compliance until an audit, which is precisely the
- * failure mode the decorative QR already had.
+ * Still deliberately absent: any form of mocked success. A made-up IRN stamped
+ * on an invoice is indistinguishable from compliance until an audit, which is
+ * exactly the failure the decorative QR motif had.
  */
 
 /**
@@ -248,27 +250,31 @@ function buildIrpPayload({ invoice, org, client }) {
   };
 }
 
-/** Whether an IRP/GSP adapter is configured at all. */
+/**
+ * Whether the platform half is configured.
+ *
+ * Kept as a platform-only question, and named as one at every call site, because
+ * a tenant with no credentials of their own is a completely different situation
+ * from a server that cannot reach any portal — the first is something the tenant
+ * fixes in a form, the second is something the operator fixes in a deployment.
+ * `credentials.isReady(org)` answers the per-tenant question.
+ */
 function isIrpConfigured() {
-  return Boolean(env.IRP_BASE_URL && env.IRP_USERNAME && env.IRP_PASSWORD && env.IRP_CLIENT_ID);
+  return credentials.isPlatformConfigured();
 }
 
 /**
  * The provider boundary.
  *
- * Deliberately the only function in this file that would need to change to go live,
- * and deliberately not faked. Every IRP and GSP has its own auth dance (an encrypted
- * session key, a rotating token) and its own error envelope, so this stays a stub
- * with a precise contract rather than a guess at one vendor's API.
+ * One provider today — the government portal itself. Left as a function rather
+ * than inlined because a GSP adapter, if one is ever needed, differs only here:
+ * everything above it (eligibility, validation, the payload, the duplicate and
+ * cancellation rules) is the portal's schema and applies whoever carries the
+ * bytes.
  */
-async function callIrp() {
-  const error = new Error(
-    'No e-invoice provider is configured. Set IRP_BASE_URL, IRP_USERNAME, IRP_PASSWORD and IRP_CLIENT_ID, '
-    + 'and implement the provider adapter in services/eInvoiceService.js#callIrp.'
-  );
-  error.statusCode = 501;
-  error.code = 'IRP_NOT_CONFIGURED';
-  throw error;
+async function callIrp(payload, org) {
+  const config = credentials.resolveConfig(org);
+  return nicIrp.generateIrn(config, payload);
 }
 
 /**
@@ -297,19 +303,49 @@ async function generateIrn({ invoice, org, client }) {
   }
 
   const payload = buildIrpPayload({ invoice, org, client });
-  if (!isIrpConfigured()) {
+
+  if (!credentials.isReady(org)) {
+    /**
+     * Not configured is still a useful answer: the payload is validated and
+     * schema-correct, so it can be uploaded to the portal by hand. It rides
+     * along on the error for exactly that.
+     */
     const error = new Error(
-      'This invoice is ready to report, but no e-invoice provider is configured. '
-      + 'Its payload has been validated and can be downloaded for manual upload to the IRP.'
+      credentials.isPlatformConfigured()
+        ? 'This invoice is ready to report, but your e-invoice portal credentials are not set. '
+          + 'Add them under Business Profile → E-Invoicing, or download the payload and upload it to the portal by hand.'
+        : 'This invoice is ready to report, but e-invoicing is not set up on this server yet. '
+          + 'Its payload has been validated and can be downloaded for manual upload to the portal.'
     );
     error.statusCode = 501;
-    error.code = 'IRP_NOT_CONFIGURED';
-    // The validated payload rides along, so "not configured" is still useful: it can
-    // be uploaded to the government portal by hand.
+    error.code = credentials.isPlatformConfigured() ? 'EINVOICE_CREDENTIALS_MISSING' : 'IRP_NOT_CONFIGURED';
     error.payload = payload;
     throw error;
   }
-  return callIrp(payload);
+
+  const result = await callIrp(payload, org);
+  // The fingerprint is taken of the payload that was actually reported, so a
+  // later edit to the invoice can be detected as a divergence from what the
+  // government holds.
+  return { ...result, fingerprint: payloadFingerprint(payload) };
+}
+
+/**
+ * Cancels a reported invoice at the portal.
+ *
+ * The twenty-four-hour rule is checked locally first by `canCancelIrn`, because
+ * the portal's refusal is a code and the correct advice — issue a credit note
+ * instead — is something this product can give and the portal cannot.
+ */
+async function cancelIrn({ org, eInvoice, reasonCode, remarks }) {
+  const config = credentials.resolveConfig(org);
+  return nicIrp.cancelIrn(config, { irn: eInvoice.irn, reasonCode, remarks });
+}
+
+/** Authenticates a tenant's credentials without reporting anything. */
+async function testConnection(org) {
+  const config = credentials.resolveConfig(org);
+  return nicIrp.testCredentials(config);
 }
 
 /**
@@ -353,6 +389,8 @@ module.exports = {
   buildIrpPayload,
   isIrpConfigured,
   generateIrn,
+  cancelIrn,
+  testConnection,
   canCancelIrn,
   payloadFingerprint
 };

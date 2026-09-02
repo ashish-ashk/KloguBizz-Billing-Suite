@@ -367,7 +367,49 @@ const organisationSchema = new mongoose.Schema({
     turnoverDeclared: { type: Number, default: null },
     enabledAt: Date,
     /** Their own LUT reference, for zero-rated supplies without payment of tax. */
-    lutNumber: { type: String, default: '' }
+    lutNumber: { type: String, default: '' },
+    /**
+     * This tenant's own credentials on the government e-invoice portal.
+     *
+     * Per organisation, not per deployment, and that is the whole point: an IRP
+     * account belongs to one GSTIN, and an invoice reported under somebody
+     * else's username lands in somebody else's GSTR-1. Before this existed the
+     * credentials were five environment variables — one taxpayer for the entire
+     * platform — so e-invoicing could only ever have worked for a single tenant.
+     *
+     * See services/eInvoiceCredentialService.js for how these combine with the
+     * platform's own client id and secret.
+     */
+    credentials: {
+      /**
+       * The GSTIN the portal account is registered under. Usually the same as
+       * `gstin` above, kept separate because a business with more than one
+       * registration reports under a specific one, and silently reusing the
+       * organisation's would file against the wrong branch.
+       */
+      gstin: { type: String, default: '' },
+      /** The API username created on the e-invoice portal. Not the login. */
+      username: { type: String, default: '' },
+      /** Encrypted (utils/secretBox, namespace `einvoice`). Never returned by any API. */
+      password: { type: String, default: '' },
+      /**
+       * Optional. Only for a tenant enrolled with the portal as a direct API
+       * user; everyone else reports through the platform's client pair.
+       */
+      clientId: { type: String, default: '' },
+      /** Encrypted, and required whenever `clientId` is set. */
+      clientSecret: { type: String, default: '' },
+      /**
+       * Which portal. The sandbox issues real-looking IRNs that are not filed
+       * anywhere, so shipping with this defaulted to production would mean a
+       * mistyped credential silently reporting live documents.
+       */
+      environment: { type: String, enum: ['sandbox', 'production'], default: 'sandbox' },
+      /** When the credentials last authenticated successfully. */
+      verifiedAt: Date,
+      /** The portal's own words from the last failed attempt, for the settings screen. */
+      lastError: { type: String, default: '' }
+    }
   },
   /**
    * Self-service account deletion (#62 / DPDP erasure).

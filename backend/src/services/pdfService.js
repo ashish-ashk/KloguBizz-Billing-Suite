@@ -15,6 +15,7 @@ const fmtDate = d => (d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digi
 
 // One copy of this table, shared with the client CSV import — see utils/states.js.
 const { stateName } = require('../utils/states');
+const qrService = require('./qrService');
 
 function numberToWords(amount) {
   const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve',
@@ -451,18 +452,27 @@ function drawHeader(doc, { template, org, invoice, brand, left, right, width, fo
     doc.font(font).fontSize(8).fillColor(FAINT);
     const line2 = [org?.address, org?.gstin && `GSTIN: ${org.gstin}`].filter(Boolean).join('  ·  ');
     if (line2) doc.text(line2, textX, y + 18, { width: width * 0.45 });
-    const qrSize = 36, qrX = right - qrSize, qrY = y;
-    doc.rect(qrX, qrY, qrSize, qrSize).strokeColor(brand).lineWidth(1).stroke();
-    const cell = qrSize / 6;
-    for (let r = 0; r < 6; r++) {
-      for (let c = 0; c < 6; c++) {
-        if ((r * 6 + c) * 7919 % 13 < 6) doc.rect(qrX + c * cell + 1, qrY + r * cell + 1, cell - 2, cell - 2).fill(DARK);
-      }
-    }
-    doc.fillColor(brand).font(fontBold).fontSize(13).text(T('Tax Invoice'), left, y, { width: width - qrSize - 14, align: 'right' });
+    /**
+     * The QR that used to sit in this corner is gone, and nothing replaces it
+     * here.
+     *
+     * It was drawn as a grid filled by `(r * 6 + c) * 7919 % 13 < 6` —
+     * pseudo-random noise shaped like a QR code, scannable by nothing, on a
+     * document that is a legal declaration. Somebody pointing a phone at it got
+     * no result, having been given every reason to expect one.
+     *
+     * The real signed QR is drawn near the signature instead, by
+     * `drawEInvoiceBlock`, and not here: this corner allots 36pt, and the
+     * portal's signed QR is a 1,100-plus character JWS that needs a
+     * seventy-seven module symbol. At 36pt each module is under half a point,
+     * which is a second unscannable square. Size is not a style question for a
+     * QR code — below a certain size it simply stops being one.
+     */
+    const qrSize = 36;
+    doc.fillColor(brand).font(fontBold).fontSize(13).text(T('Tax Invoice'), left, y, { width, align: 'right' });
     doc.fillColor(MUTED).font(font).fontSize(8.5);
-    doc.text(invoice.invoiceNumber, left, y + 18, { width: width - qrSize - 14, align: 'right' });
-    doc.text(`Due ${fmtDate(invoice.dueDate)}`, left, y + 30, { width: width - qrSize - 14, align: 'right' });
+    doc.text(invoice.invoiceNumber, left, y + 18, { width, align: 'right' });
+    doc.text(`Due ${fmtDate(invoice.dueDate)}`, left, y + 30, { width, align: 'right' });
     return y + qrSize + 14;
   }
 
@@ -521,6 +531,13 @@ async function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
   // resolveBrandingImages. Every caller already `await`ed this function, so
   // making it async is transparent to them.
   const images = await resolveBrandingImages(org);
+  /**
+   * The signed QR, as modules rather than pixels — drawn below as vector
+   * rectangles so it stays exact at any output resolution. Null when the
+   * invoice has not been reported, which is the ordinary case.
+   */
+  const signedQr = qrService.moduleRuns(qrService.signedQrMatrix(invoice?.eInvoice?.signedQrCode));
+  const hasSignedQr = signedQr.runs.length > 0;
   return new Promise((resolve, reject) => {
     const template = resolveTemplate(org?.brandingConfig, platformDefaults?.templateId);
     const content = org?.brandingConfig?.invoiceContent || {};
@@ -556,7 +573,22 @@ async function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
     const pageBottom = doc.page.height - doc.page.margins.bottom;
     // Room reserved at the foot of every page for the footer strip and the page
     // number that now sits there.
-    const FOOTER_RESERVE = 42;
+    /**
+     * Room at the foot of every page for the footer strip and the page number,
+     * plus the e-invoice block when there is one to draw. Adding the block's
+     * height here rather than only at the draw site is what makes the table
+     * break a page early enough to leave it empty space to land in.
+     */
+    /**
+     * 84pt is ~29.6mm, which holds each module at or above the ~0.25mm a phone
+     * camera needs for a symbol this dense. It is a decode threshold, not a
+     * layout preference — see services/qrService.js for the measurements.
+     */
+    const QR_BOX = 84;
+    // Derived, never written twice: when these two were separate numbers an edit
+    // to one left the footer text printing across the bottom of the QR.
+    const EINVOICE_BLOCK_HEIGHT = (hasSignedQr || invoice.eInvoice?.irn) ? QR_BOX + 14 : 0;
+    const FOOTER_RESERVE = 42 + EINVOICE_BLOCK_HEIGHT;
     // The lowest y a row may start at and still fit above the footer.
     const contentBottom = pageBottom - FOOTER_RESERVE;
     // The totals panel and signature block are tall; starting them too near the
@@ -983,6 +1015,63 @@ async function renderInvoicePdf({ invoice, client, org, platformDefaults }) {
      */
     const FOOTER_BLOCK_HEIGHT = 32;
     const footY = pageBottom - FOOTER_BLOCK_HEIGHT;
+
+    /**
+     * The e-invoice block: the IRN and the portal's signed QR.
+     *
+     * Drawn on **every** template rather than only the one with "qr" in its
+     * name. Whether an invoice has been reported to the government is a property
+     * of the invoice, not of the design a tenant happened to pick, and a
+     * reported invoice is required to carry its IRN and QR whatever it looks
+     * like.
+     *
+     * Space for it is reserved up in `FOOTER_RESERVE`, so the table breaks a
+     * page early enough to leave this room. Drawing into unreserved space is how
+     * a footer ends up on top of the last two line items.
+     */
+    if (hasSignedQr || invoice.eInvoice?.irn) {
+      const blockY = footY - EINVOICE_BLOCK_HEIGHT + 6;
+      const qrBox = QR_BOX;
+      let textX = left;
+
+      if (hasSignedQr) {
+        /**
+         * One rectangle per run of dark modules, in page units.
+         *
+         * `module` is deliberately not rounded: pdfkit works in floating-point
+         * points and the PDF renderer resolves them at its own resolution, which
+         * is the whole reason this is vector. Rounding to whole points here would
+         * reintroduce the quantisation the bitmap version suffered from.
+         */
+        const module = qrBox / signedQr.span;
+        // A white ground under the symbol, so it never has to survive whatever
+        // the template painted behind it.
+        doc.rect(left, blockY, qrBox, qrBox).fill('#ffffff');
+        doc.fillColor('#000000');
+        signedQr.runs.forEach(run => {
+          doc.rect(left + run.x * module, blockY + run.y * module, run.width * module, module);
+        });
+        doc.fill();
+        textX = left + qrBox + 10;
+      }
+
+      doc.fillColor(FAINT).font(fontBold).fontSize(7)
+        .text('E-INVOICE · IRN', textX, blockY, { width: 230, characterSpacing: 0.4 });
+      doc.fillColor(DARK).font(font).fontSize(6.5)
+        // The IRN is 64 hex characters. Wrapped over two lines at this size
+        // rather than truncated: a partial IRN cannot be checked against
+        // anything, so it may as well not be printed.
+        .text(String(invoice.eInvoice?.irn || ''), textX, blockY + 11, { width: 230, lineGap: 0.5 });
+
+      const ack = [
+        invoice.eInvoice?.ackNo && `Ack ${invoice.eInvoice.ackNo}`,
+        invoice.eInvoice?.ackDate && fmtDate(invoice.eInvoice.ackDate)
+      ].filter(Boolean).join('  ·  ');
+      if (ack) {
+        doc.fillColor(MUTED).font(font).fontSize(7).text(ack, textX, blockY + 40, { width: 230 });
+      }
+    }
+
     doc.fillColor(FAINT).font(font).fontSize(8).text('This is a computer generated invoice.', left, footY, { width: 250 });
     if (showSignature) {
       /**
