@@ -10,6 +10,14 @@ const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { toCsv } = require('../services/csvService');
 const { buildGstr1, toGstnJson, buildGstr3b } = require('../services/gstReturnService');
 const eInvoice = require('../services/eInvoiceService');
+const eInvoiceCredentials = require('../services/eInvoiceCredentialService');
+
+/**
+ * "Nowhere to file it" rather than "not ready to file". One is the operator's to
+ * fix in a deployment, the other the tenant's to fix in a form; neither is a
+ * problem with the invoice, so both are reported the same way here.
+ */
+const NOT_CONFIGURED_CODES = ['IRP_NOT_CONFIGURED', 'EINVOICE_CREDENTIALS_MISSING'];
 const ewb = require('../services/ewayBillService');
 const gstr2b = require('../services/gstr2bService');
 const { logAudit } = require('../services/auditService');
@@ -249,7 +257,14 @@ const checkEInvoice = asyncHandler(async (req, res) => {
     eligibility,
     valid: validation.valid,
     problems: validation.problems,
+    /**
+     * Two different answers, because they have two different fixes: the server
+     * having no portal settings is the operator's problem, and this tenant not
+     * having entered their own credentials is theirs.
+     */
     providerConfigured: eInvoice.isIrpConfigured(),
+    tenantConfigured: eInvoiceCredentials.isTenantConfigured(org),
+    ready: eInvoiceCredentials.isReady(org),
     current: invoice.eInvoice || null,
     // The built payload is returned when everything checks out, so a tenant with no
     // IRP integration can still upload it to the government portal by hand rather than
@@ -269,27 +284,56 @@ const generateEInvoice = asyncHandler(async (req, res) => {
   const { invoice, org, client } = await loadInvoiceContext(req);
 
   try {
+    /**
+     * The adapter normalises the portal's field names (`Irn`, `AckNo`,
+     * `SignedQRCode`) into ours at the boundary, so nothing below this line
+     * spells a field the NIC way. This used to read `result.Irn` against a
+     * normalised result and would have stored `undefined` for every field —
+     * an invoice marked generated with no IRN on it, which looks like success
+     * everywhere until somebody tries to scan the QR that is not there.
+     */
     const result = await eInvoice.generateIrn({ invoice, org, client });
     invoice.eInvoice = {
       status: 'generated',
-      irn: result.Irn,
-      ackNo: result.AckNo,
-      ackDate: result.AckDt ? new Date(result.AckDt) : new Date(),
-      signedQrCode: result.SignedQRCode,
-      signedInvoice: result.SignedInvoice,
+      irn: result.irn,
+      ackNo: result.ackNo,
+      ackDate: result.ackDate ? new Date(result.ackDate) : new Date(),
+      signedQrCode: result.signedQrCode,
+      signedInvoice: result.signedInvoice,
       generatedAt: new Date(),
+      /** What was reported, so a later edit shows up as a divergence. */
+      reportedFingerprint: result.fingerprint,
+      errorCode: '',
+      error: '',
       attempts: (invoice.eInvoice?.attempts || 0) + 1
     };
     await invoice.save();
-    logAudit({ req, action: 'einvoice.generated', entity: 'invoice', entityId: invoice._id, meta: { irn: result.Irn } });
+    logAudit({ req, action: 'einvoice.generated', entity: 'invoice', entityId: invoice._id, meta: { irn: result.irn, duplicate: Boolean(result.duplicate) } });
     recordEvent({ req, type: EVENT.eInvoiceGenerated, meta: { invoiceNumber: invoice.invoiceNumber } });
-    return res.json({ ok: true, eInvoice: invoice.eInvoice });
+    return res.json({
+      ok: true,
+      eInvoice: invoice.eInvoice,
+      /**
+       * A duplicate is a success with a caveat, and the caveat matters: the
+       * portal returns the existing IRN but not its signed QR, so the invoice
+       * is registered and the QR square will be empty until it is fetched.
+       * Saying so is better than a tenant wondering why one invoice prints
+       * without the code.
+       */
+      duplicate: Boolean(result.duplicate),
+      message: result.duplicate
+        ? 'This invoice was already registered on the portal. Its IRN has been attached; the signed QR was not returned with a duplicate.'
+        : 'Reported to the portal.'
+    });
   } catch (error) {
     // A failed attempt is recorded on the document, so the worklist can show what
     // needs fixing instead of the tenant rediscovering it invoice by invoice.
     invoice.eInvoice = {
       ...(invoice.eInvoice?.toObject ? invoice.eInvoice.toObject() : invoice.eInvoice),
-      status: error.code === 'IRP_NOT_CONFIGURED' ? 'pending' : 'failed',
+      // Not-configured is `pending`, not `failed`: nothing is wrong with the
+      // invoice, so the worklist should keep offering it rather than parking it
+      // in an error state a tenant has to clear by hand.
+      status: NOT_CONFIGURED_CODES.includes(error.code) ? 'pending' : 'failed',
       errorCode: error.code,
       error: error.message,
       attempts: (invoice.eInvoice?.attempts || 0) + 1
@@ -297,7 +341,7 @@ const generateEInvoice = asyncHandler(async (req, res) => {
     await invoice.save();
     logAudit({ req, action: 'einvoice.failed', entity: 'invoice', entityId: invoice._id, meta: { code: error.code } });
 
-    if (error.code === 'IRP_NOT_CONFIGURED') {
+    if (NOT_CONFIGURED_CODES.includes(error.code)) {
       return res.status(501).json({
         ok: false,
         code: error.code,
@@ -310,16 +354,40 @@ const generateEInvoice = asyncHandler(async (req, res) => {
   }
 });
 
-/** Cancels an IRN inside the 24-hour window, or explains why it cannot be. */
-const cancelEInvoice = asyncHandler(async (req, _res) => {
-  const { invoice } = await loadInvoiceContext(req);
+/**
+ * Cancels an IRN inside the 24-hour window, or explains why it cannot be.
+ *
+ * The window is checked here rather than left to the portal, because the
+ * portal's refusal is a code and the useful reply — issue a credit note instead
+ * — is something this product can give and the portal cannot.
+ */
+const cancelEInvoice = asyncHandler(async (req, res) => {
+  const { invoice, org } = await loadInvoiceContext(req);
   const check = eInvoice.canCancelIrn(invoice.eInvoice);
   if (!check.allowed) throw httpError(409, check.reason, 'IRN_NOT_CANCELLABLE');
-  if (!eInvoice.isIrpConfigured()) {
-    throw httpError(501, 'No e-invoice provider is configured, so the IRN cannot be cancelled here.', 'IRP_NOT_CONFIGURED');
-  }
-  // The provider call itself is the same documented seam as generation.
-  throw httpError(501, 'IRN cancellation requires the provider adapter — see services/eInvoiceService.js.', 'IRP_NOT_CONFIGURED');
+
+  const reasonCode = String(req.body?.reasonCode || '2');
+  const remarks = String(req.body?.remarks || '').trim();
+
+  const result = await eInvoice.cancelIrn({ org, eInvoice: invoice.eInvoice, reasonCode, remarks });
+
+  invoice.eInvoice = {
+    ...(invoice.eInvoice?.toObject ? invoice.eInvoice.toObject() : invoice.eInvoice),
+    status: 'cancelled',
+    cancelledAt: result.cancelDate ? new Date(result.cancelDate) : new Date(),
+    cancelReason: remarks || 'Cancelled by the issuer',
+    /**
+     * The signed QR is dropped on cancellation. It certifies a registration that
+     * no longer stands, and leaving it on the document means the invoice keeps
+     * printing a code that scans to a cancelled IRN.
+     */
+    signedQrCode: '',
+    error: '',
+    errorCode: ''
+  };
+  await invoice.save();
+  logAudit({ req, action: 'einvoice.cancelled', entity: 'invoice', entityId: invoice._id, meta: { irn: result.irn, reasonCode } });
+  res.json({ ok: true, eInvoice: invoice.eInvoice });
 });
 
 /**

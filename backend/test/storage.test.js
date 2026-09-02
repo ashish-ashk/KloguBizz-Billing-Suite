@@ -45,6 +45,21 @@ const app = require('../server');
 
 let server;
 let baseUrl;
+/**
+ * How long to wait for the database before giving up and skipping the file.
+ *
+ * Was 2000ms, written when these tests ran against a mongod on localhost. They
+ * run against Atlas now — over the internet, and with every test file racing in
+ * parallel — so two seconds was routinely missed under load: adding one more
+ * test file to the suite silently turned eighteen passing tests into skips.
+ *
+ * A skip reads as a pass in the summary line, which is the whole danger. Ten
+ * seconds is generous enough that a real connection is never mistaken for a
+ * missing one, and short enough that a genuinely absent database does not hang
+ * the run.
+ */
+const DB_CONNECT_TIMEOUT_MS = Number(process.env.TEST_DB_TIMEOUT_MS || 10000);
+
 let dbAvailable = false;
 const originalDriver = env.STORAGE_DRIVER;
 
@@ -70,7 +85,7 @@ function toDataUri(buffer, contentType) {
 test.before(async () => {
   await fs.mkdir(uploadsDir, { recursive: true });
   try {
-    await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 2000 });
+    await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: DB_CONNECT_TIMEOUT_MS });
     dbAvailable = true;
   } catch {
     console.warn('\n[storage] No MongoDB on 127.0.0.1:27017 — DB-backed cases will skip.\n');

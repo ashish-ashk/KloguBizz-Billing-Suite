@@ -475,6 +475,98 @@
         },
         "additionalProperties": false
       },
+      "PutOrganisationsCurrentEInvoicingRequest": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "turnoverDeclared": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "enum": [
+                  "null"
+                ],
+                "nullable": true
+              }
+            ]
+          },
+          "lutNumber": {
+            "type": "string",
+            "maxLength": 200,
+            "nullable": true
+          },
+          "credentials": {
+            "type": "object",
+            "properties": {
+              "gstin": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      ""
+                    ]
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "username": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      ""
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "maxLength": 60
+                  }
+                ]
+              },
+              "password": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "clientId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      ""
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "maxLength": 120
+                  }
+                ]
+              },
+              "clientSecret": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "environment": {
+                "type": "string",
+                "enum": [
+                  "sandbox",
+                  "production"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
       "PostOrganisationsCurrentDeleteAccountRequest": {
         "type": "object",
         "properties": {
@@ -5560,6 +5652,129 @@
         "x-guards": [
           "requireTenant",
           "middleware"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/organisations/current/e-invoicing": {
+      "get": {
+        "summary": "GET /api/v1/organisations/current/e-invoicing",
+        "tags": [
+          "organisations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant",
+          "guard"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      },
+      "put": {
+        "summary": "PUT /api/v1/organisations/current/e-invoicing",
+        "tags": [
+          "organisations"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutOrganisationsCurrentEInvoicingRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant",
+          "guard",
+          "middleware"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the session has expired"
+          },
+          "403": {
+            "description": "Authenticated, but not permitted"
+          }
+        }
+      }
+    },
+    "/api/v1/organisations/current/e-invoicing/test": {
+      "post": {
+        "summary": "POST /api/v1/organisations/current/e-invoicing/test",
+        "tags": [
+          "organisations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-guards": [
+          "requireTenant",
+          "guard"
         ],
         "responses": {
           "200": {
@@ -14909,7 +15124,7 @@
     }
   },
   "x-undocumented": {
-    "count": 48,
+    "count": 49,
     "likelyGaps": [],
     "actions": [
       "POST /api/v1/auth/mfa/setup",
@@ -14926,6 +15141,7 @@
       "POST /api/v1/items/bulk-upload",
       "POST /api/v1/items/{id}/restore",
       "POST /api/v1/organisations/current/cancel-deletion",
+      "POST /api/v1/organisations/current/e-invoicing/test",
       "POST /api/v1/pay/{token}/confirm",
       "POST /api/v1/pay/{token}/order",
       "POST /api/v1/payment-links/send/{invoiceId}",

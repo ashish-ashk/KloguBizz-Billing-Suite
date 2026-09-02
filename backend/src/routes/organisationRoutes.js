@@ -4,8 +4,14 @@ const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
 const { requireTenant } = require('../middleware/tenantMiddleware');
 const { validate } = require('../middleware/validate');
+const { requireFlag } = require('../services/featureFlagService');
+const {
+  getSettings: getEInvoiceSettings,
+  updateSettings: updateEInvoiceSettings,
+  testConnection: testEInvoiceConnection
+} = require('../controllers/eInvoiceSettingsController');
 const { getSeries, updateSeries } = require('../controllers/documentSeriesController');
-const { organisationUpdateSchema, transferOwnershipSchema, accountDeletionSchema, documentSeriesSchema} = require('../validators/schemas');
+const { organisationUpdateSchema, transferOwnershipSchema, accountDeletionSchema, documentSeriesSchema, eInvoiceSettingsSchema } = require('../validators/schemas');
 const {
   exportTenantData, requestDeletion, cancelDeletion, dataRightsStatus
 } = require('../controllers/dataRightsController');
@@ -30,6 +36,18 @@ router.post('/current/transfer-ownership', requireRole('admin'), validate(transf
  */
 router.get('/current/document-series', requireRole('admin'), getSeries);
 router.put('/current/document-series', requireRole('admin'), validate(documentSeriesSchema), updateSeries);
+
+/**
+ * E-invoicing settings: this tenant's own credentials on the government portal.
+ *
+ * Admin only. These credentials file returns in the business's name, and the
+ * turnover declaration is a compliance statement about the whole business —
+ * neither is an accountant's to change. Behind the same feature flag as the
+ * reporting endpoints, so an operator can withdraw the whole feature at once.
+ */
+router.get('/current/e-invoicing', requireRole('admin'), requireFlag('einvoicing'), getEInvoiceSettings);
+router.put('/current/e-invoicing', requireRole('admin'), requireFlag('einvoicing'), validate(eInvoiceSettingsSchema), updateEInvoiceSettings);
+router.post('/current/e-invoicing/test', requireRole('admin'), requireFlag('einvoicing'), testEInvoiceConnection);
 
 router.get('/current/data-rights', requireRole('admin'), dataRightsStatus);
 router.get('/current/export', requireRole('admin'), exportTenantData);

@@ -105,7 +105,18 @@ const eInvoiceSchema = new mongoose.Schema({
   // The IRP's own error code and message from the last failed attempt.
   errorCode: String,
   error: String,
-  attempts: { type: Number, default: 0 }
+  attempts: { type: Number, default: 0 },
+  /**
+   * A hash of the payload that was actually reported.
+   *
+   * An IRN certifies the document as it stood at that moment. This product
+   * refuses edits to an issued invoice, so a divergence should be impossible —
+   * but "should be impossible" is not the same as "is detectable", and an
+   * invoice whose figures no longer match what the government holds is a
+   * mismatch the portal surfaces eventually and nobody can reconstruct after
+   * the fact. Cheap to store, and it makes the question answerable.
+   */
+  reportedFingerprint: String
 }, { _id: false });
 
 const billToSchema = new mongoose.Schema({

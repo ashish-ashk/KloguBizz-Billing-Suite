@@ -67,6 +67,28 @@ const resetPasswordSchema = z.object({
 
 // ── Clients ──────────────────────────────────────
 
+/**
+ * E-invoicing settings.
+ *
+ * The password and client secret are `.min(1)` rather than required: the form
+ * never receives the stored value back, so an untouched field arrives absent,
+ * and absent has to mean "leave it alone". An empty *string* is refused so a
+ * cleared box cannot silently blank a working credential.
+ */
+const eInvoiceSettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  turnoverDeclared: z.union([z.coerce.number().nonnegative(), z.null()]).optional(),
+  lutNumber: shortText.optional().nullable(),
+  credentials: z.object({
+    gstin: z.union([z.literal(''), z.string()]).optional(),
+    username: z.union([z.literal(''), z.string().max(60)]).optional(),
+    password: z.string().min(1).max(200).optional(),
+    clientId: z.union([z.literal(''), z.string().max(120)]).optional(),
+    clientSecret: z.string().min(1).max(200).optional(),
+    environment: z.enum(['sandbox', 'production']).optional()
+  }).optional()
+});
+
 const clientCreateSchema = z.object({
   companyName: shortText.min(2, 'must be at least 2 characters'),
   email: optionalEmail,
@@ -858,6 +880,7 @@ module.exports = {
   registerSchema, loginSchema, changePasswordSchema,
   acceptInviteSchema, forgotPasswordSchema, resetPasswordSchema,
   refreshTokenSchema, logoutSchema, switchOrgSchema,
+  eInvoiceSettingsSchema,
   clientCreateSchema, clientUpdateSchema,
   itemCreateSchema, itemUpdateSchema,
   invoiceCreateSchema, invoiceUpdateSchema, markPaidSchema,
