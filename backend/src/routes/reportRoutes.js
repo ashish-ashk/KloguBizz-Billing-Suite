@@ -103,10 +103,10 @@ router.get('/stock/:id/locations', requireCapability('warehouses'), stockLocatio
  */
 router.get('/activity', requireRole('admin'), tenantAuditLog);
 
-router.get('/e-invoice/worklist', requireFlag('einvoicing'), eInvoiceWorklist);
-router.get('/e-invoice/:id/check', requireFlag('einvoicing'), checkEInvoice);
-router.post('/e-invoice/:id/generate', requireRole('admin'), requireFlag('einvoicing'), generateEInvoice);
-router.post('/e-invoice/:id/cancel', requireRole('admin'), requireFlag('einvoicing'), cancelEInvoice);
+router.get('/e-invoice/worklist', requireFlag('einvoicing'), requireCapability('eInvoicing'), eInvoiceWorklist);
+router.get('/e-invoice/:id/check', requireFlag('einvoicing'), requireCapability('eInvoicing'), checkEInvoice);
+router.post('/e-invoice/:id/generate', requireRole('admin'), requireFlag('einvoicing'), requireCapability('eInvoicing'), generateEInvoice);
+router.post('/e-invoice/:id/cancel', requireRole('admin'), requireFlag('einvoicing'), requireCapability('eInvoicing'), cancelEInvoice);
 
 /**
  * E-way bills (2.1 #6).

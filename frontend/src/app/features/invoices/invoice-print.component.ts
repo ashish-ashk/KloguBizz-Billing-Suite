@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
@@ -8,7 +8,7 @@ import { IconComponent } from '../../shared/icons';
 import { ToastsComponent } from '../../shared/ui';
 import { InvoiceDocClient, InvoiceDocumentComponent } from '../../shared/invoice-document.component';
 import { Invoice } from '../../core/models';
-import { downloadBlob } from '../../core/format';
+import { downloadBlob, fmtDate } from '../../core/format';
 
 @Component({
   selector: 'app-invoice-print',
@@ -35,6 +35,9 @@ import { downloadBlob } from '../../core/format';
             [orgAddress]="org()?.address || ''"
             [orgGstin]="org()?.gstin || ''"
             [orgPan]="org()?.pan || ''"
+            [signedQrImage]="invoice()?.signedQrImage || ''"
+            [eInvoiceIrn]="invoice()?.eInvoice?.irn || ''"
+            [eInvoiceAck]="eInvoiceAck()"
             [templateId]="org()?.brandingConfig?.invoiceTemplateId || 'modern-minimal'"
             [customTemplate]="org()?.brandingConfig?.customInvoiceTemplate || null"
             [accentColor]="org()?.brandingConfig?.primaryColor || '#4f46e5'"
@@ -61,6 +64,13 @@ import { downloadBlob } from '../../core/format';
 export class InvoicePrintComponent implements OnInit {
   invoiceId = '';
   invoice = signal<Invoice | null>(null);
+
+  /** "Ack 112010036512345 · 20 Aug 2026", or empty when it was never reported. */
+  eInvoiceAck = computed(() => {
+    const e = this.invoice()?.eInvoice;
+    if (!e?.ackNo && !e?.ackDate) return '';
+    return [e?.ackNo && `Ack ${e.ackNo}`, e?.ackDate && fmtDate(e.ackDate)].filter(Boolean).join('  ·  ');
+  });
   loading = signal(true);
   downloading = signal(false);
 

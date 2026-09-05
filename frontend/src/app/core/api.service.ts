@@ -6,7 +6,7 @@ import { environment } from '../../environments/environment';
 import { CacheService } from './cache.service';
 import {
   AttentionLists, AuditEntry, AuditFilters, Client, ClientBulkUploadResult, CreditNote, CreditNoteReason, CreditSummary,
-  DataRightsStatus, DeviceSession, EInvoiceCheck, EInvoiceState, EInvoiceWorklist,
+  DataRightsStatus, DeviceSession, EInvoiceCheck, EInvoiceSettings, EInvoiceState, EInvoiceWorklist,
   FeatureAdoption, FeatureFlags, Gstr1Report, Gstr3bReport, GstSummary, ImpersonationSession,
   Invoice, InvoiceItem, InvoiceStats, ItcRegister, Item, ItemBulkUploadResult, ListParams,
   LoginHistoryFilters, Master, MastersResponse, MetricsSeries, MfaSetup,
@@ -473,6 +473,24 @@ export class ApiService {
       NS.invoices
     );
   }
+  // ── E-invoicing settings (this tenant's portal credentials) ──
+  eInvoiceSettings() {
+    return this.http.get<EInvoiceSettings>(`${this.api}/organisations/current/e-invoicing`);
+  }
+  saveEInvoiceSettings(payload: Record<string, unknown>) {
+    return this.http.put<EInvoiceSettings>(`${this.api}/organisations/current/e-invoicing`, payload);
+  }
+  testEInvoiceConnection() {
+    return this.http.post<{ ok: boolean; message: string; expiresAt: string }>(
+      `${this.api}/organisations/current/e-invoicing/test`, {});
+  }
+  cancelEInvoice(invoiceId: string, body: { reasonCode: string; remarks: string }) {
+    return this.afterWrite(
+      this.http.post<{ ok: boolean; eInvoice: EInvoiceState }>(`${this.api}/reports/e-invoice/${invoiceId}/cancel`, body),
+      NS.invoices
+    );
+  }
+
   eInvoiceWorklist(params: ListParams = {}) {
     return this.http.get<EInvoiceWorklist>(`${this.api}/reports/e-invoice/worklist`, { params: this.params(params) });
   }

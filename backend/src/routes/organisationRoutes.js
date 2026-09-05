@@ -5,6 +5,7 @@ const { requireRole } = require('../middleware/roleMiddleware');
 const { requireTenant } = require('../middleware/tenantMiddleware');
 const { validate } = require('../middleware/validate');
 const { requireFlag } = require('../services/featureFlagService');
+const { requireCapability } = require('../services/entitlementService');
 const {
   getSettings: getEInvoiceSettings,
   updateSettings: updateEInvoiceSettings,
@@ -45,9 +46,9 @@ router.put('/current/document-series', requireRole('admin'), validate(documentSe
  * neither is an accountant's to change. Behind the same feature flag as the
  * reporting endpoints, so an operator can withdraw the whole feature at once.
  */
-router.get('/current/e-invoicing', requireRole('admin'), requireFlag('einvoicing'), getEInvoiceSettings);
-router.put('/current/e-invoicing', requireRole('admin'), requireFlag('einvoicing'), validate(eInvoiceSettingsSchema), updateEInvoiceSettings);
-router.post('/current/e-invoicing/test', requireRole('admin'), requireFlag('einvoicing'), testEInvoiceConnection);
+router.get('/current/e-invoicing', requireRole('admin'), requireFlag('einvoicing'), requireCapability('eInvoicing'), getEInvoiceSettings);
+router.put('/current/e-invoicing', requireRole('admin'), requireFlag('einvoicing'), requireCapability('eInvoicing'), validate(eInvoiceSettingsSchema), updateEInvoiceSettings);
+router.post('/current/e-invoicing/test', requireRole('admin'), requireFlag('einvoicing'), requireCapability('eInvoicing'), testEInvoiceConnection);
 
 router.get('/current/data-rights', requireRole('admin'), dataRightsStatus);
 router.get('/current/export', requireRole('admin'), exportTenantData);

@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AppShellComponent } from '../../shared/app-shell.component';
 import { ApiService } from '../../core/api.service';
-import { Organisation } from '../../core/models';
+import { EInvoiceSettings, Organisation } from '../../core/models';
 import { AuthService } from '../../core/auth.service';
 import { ToastService } from '../../core/toast.service';
 import { STATES, isValidGSTIN, stateName } from '../../core/format';
@@ -149,6 +149,131 @@ import { STATES, isValidGSTIN, stateName } from '../../core/format';
         </section>
       </div>
 
+      @if (einv(); as e) {
+        <section class="card" style="margin-top:16px">
+          <div class="card-title" style="margin-bottom:4px;">E-Invoicing (IRN &amp; signed QR)</div>
+          <div class="card-sub" style="margin-bottom:16px;max-width:80ch">
+            Reports your invoices to the government portal and puts the IRN and its signed QR
+            on the document. Mandatory above a turnover threshold; optional below it.
+          </div>
+
+          @if (!e.platformConfigured) {
+            <!--
+              The operator's problem, not the tenant's, so it says so rather than
+              showing a form that cannot work. Naming the settings is for whoever
+              they forward this to.
+            -->
+            <div class="info-box warn" style="margin-bottom:14px;line-height:1.6">
+              <strong>E-invoicing is not switched on for this server yet.</strong>
+              Nothing you enter here can connect until it is. Missing:
+              <span class="mono">{{ e.missingPlatformSettings.join(', ') }}</span>.
+            </div>
+          }
+
+          <div class="grid grid-2" style="gap:14px;align-items:start">
+            <div>
+              <div class="field">
+                <label for="ei-gstin">Portal GSTIN</label>
+                <input id="ei-gstin" class="mono" [ngModel]="einvForm.gstin"
+                  (ngModelChange)="einvForm.gstin = ($event || '').toUpperCase(); einvTouch()"
+                  maxlength="15" placeholder="27AAPFU0939F1ZV" />
+                <div class="hint">
+                  The GSTIN your e-invoice portal account is registered under. Usually the same as above.
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="ei-user">API username</label>
+                <input id="ei-user" [ngModel]="einvForm.username"
+                  (ngModelChange)="einvForm.username = $event; einvTouch()" maxlength="60" />
+                <div class="hint">
+                  Created by you on the e-invoice portal under <strong>API Registration</strong> —
+                  not your portal login.
+                </div>
+              </div>
+
+              <div class="field" style="margin-bottom:0">
+                <label for="ei-pass">API password</label>
+                <input id="ei-pass" type="password" [ngModel]="einvForm.password"
+                  (ngModelChange)="einvForm.password = $event; einvTouch()" maxlength="200"
+                  [placeholder]="e.credentials.hasPassword ? 'Stored — leave blank to keep it' : ''" />
+                <div class="hint">
+                  Encrypted before it is stored, and never shown again.
+                  @if (e.credentials.hasPassword) { A password is already saved. }
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div class="field">
+                <label for="ei-env">Portal</label>
+                <select id="ei-env" [ngModel]="einvForm.environment"
+                  (ngModelChange)="einvForm.environment = $event; einvTouch()">
+                  <option value="sandbox">Sandbox — for testing, nothing is filed</option>
+                  <option value="production">Production — invoices are really reported</option>
+                </select>
+                <div class="hint">
+                  <!--
+                    Said plainly because the two look identical from in here and
+                    only one of them files a real document.
+                  -->
+                  The sandbox issues real-looking IRNs that are filed nowhere. Switch to production
+                  only once a test invoice has worked.
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="ei-turnover">Declared turnover (₹)</label>
+                <input id="ei-turnover" type="number" min="0" [ngModel]="einvForm.turnoverDeclared"
+                  (ngModelChange)="einvForm.turnoverDeclared = $event; einvTouch()" />
+                <div class="hint">
+                  Last year's aggregate turnover across all your GSTINs. Recorded because
+                  the threshold is a fact about your business that this software cannot work out.
+                </div>
+              </div>
+
+              <label class="checkbox" style="justify-content:space-between;margin-top:4px">
+                <span>Report invoices to the portal</span>
+                <span class="switch">
+                  <input type="checkbox" [ngModel]="einvForm.enabled"
+                    (ngModelChange)="einvForm.enabled = $event; einvTouch()" />
+                  <span class="track"></span>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          @if (e.credentials.verifiedAt) {
+            <div class="info-box ok" style="margin-top:14px">
+              Connected as <strong>{{ e.credentials.username }}</strong> on the
+              {{ e.credentials.environment }} portal, last checked {{ e.credentials.verifiedAt | date:'d MMM y, HH:mm' }}.
+            </div>
+          } @else if (e.credentials.lastError) {
+            <div class="info-box danger" style="margin-top:14px;line-height:1.6">
+              <strong>The last connection attempt failed.</strong> {{ e.credentials.lastError }}
+            </div>
+          }
+
+          <div class="actions" style="justify-content:flex-end;margin-top:14px;gap:10px">
+            <button class="btn secondary" type="button"
+              [disabled]="testingEinv() || einvDirty() || !einvCanTest()"
+              (click)="testEinv()">
+              {{ testingEinv() ? 'Connecting…' : 'Test connection' }}
+            </button>
+            <button class="btn primary" type="button" [disabled]="savingEinv() || !einvDirty()"
+              (click)="saveEinv()">
+              {{ savingEinv() ? 'Saving…' : 'Save e-invoicing settings' }}
+            </button>
+          </div>
+          @if (einvDirty()) {
+            <!-- Testing unsaved credentials would test the stored ones and mislead. -->
+            <p class="muted" style="font-size:11.5px;text-align:right;margin:6px 0 0">
+              Save first — the connection test uses the stored credentials.
+            </p>
+          }
+        </section>
+      }
+
       <p class="muted" style="font-size:12.5px;line-height:1.6;margin-top:14px;max-width:70ch">
         Your logo, signature, bank details and standing terms live on
         <strong>Invoice Templates</strong>, alongside the design they appear in.
@@ -160,6 +285,21 @@ export class BusinessProfileComponent implements OnInit {
   states = STATES;
   saving = signal(false);
   dirty = signal(false);
+
+  /**
+   * E-invoicing, on this page because it is part of the business's identity to
+   * the government rather than a billing preference. Null while it loads, and
+   * left null when the API refuses — a tenant whose plan does not include
+   * e-invoicing gets a 403 and should simply not see the card.
+   */
+  einv = signal<EInvoiceSettings | null>(null);
+  savingEinv = signal(false);
+  testingEinv = signal(false);
+  einvDirty = signal(false);
+  einvForm = {
+    gstin: '', username: '', password: '', environment: 'sandbox',
+    enabled: false, turnoverDeclared: null as number | null
+  };
 
   form = {
     name: '', gstin: '', pan: '', address: '', state: '', stateCode: '27', phone: ''
@@ -204,6 +344,7 @@ export class BusinessProfileComponent implements OnInit {
     // Re-read from the server rather than trusting the cached session copy: this
     // page is the one place these fields are edited, so it must show what is
     // actually stored.
+    this.loadEinv();
     this.api.organisation().subscribe({
       next: fresh => { this.fill(fresh); this.auth.setOrganisation(fresh); this.dirty.set(false); },
       error: () => { /* the cached copy is already on screen */ }
@@ -239,6 +380,83 @@ export class BusinessProfileComponent implements OnInit {
     // keeping them in step here means no screen has to look it up later.
     this.form.state = stateName(code);
     this.touch();
+  }
+
+  einvTouch() { this.einvDirty.set(true); }
+
+  /** Enough to attempt an authentication: both halves have to be present. */
+  einvCanTest() {
+    const e = this.einv();
+    return Boolean(e?.platformConfigured && e.credentials.gstin && e.credentials.username && e.credentials.hasPassword);
+  }
+
+  private loadEinv() {
+    this.api.eInvoiceSettings().subscribe({
+      next: settings => {
+        this.einv.set(settings);
+        this.einvForm = {
+          gstin: settings.credentials.gstin,
+          username: settings.credentials.username,
+          // Never populated from the server — it is not returned, and a
+          // placeholder here would be sent back as a literal password.
+          password: '',
+          environment: settings.credentials.environment,
+          enabled: settings.enabled,
+          turnoverDeclared: settings.turnoverDeclared
+        };
+        this.einvDirty.set(false);
+      },
+      // A 403 means this plan does not include e-invoicing, and a 404 that the
+      // feature is switched off. Neither is an error worth a toast: the card
+      // simply does not appear.
+      error: () => this.einv.set(null)
+    });
+  }
+
+  saveEinv() {
+    if (this.savingEinv()) return;
+    this.savingEinv.set(true);
+    const credentials: Record<string, unknown> = {
+      gstin: this.einvForm.gstin,
+      username: this.einvForm.username,
+      environment: this.einvForm.environment
+    };
+    // Only when it was actually typed. An empty field means "keep the stored
+    // one", which is the only sane reading when the form never receives it.
+    if (this.einvForm.password) credentials['password'] = this.einvForm.password;
+
+    this.api.saveEInvoiceSettings({
+      credentials,
+      enabled: this.einvForm.enabled,
+      turnoverDeclared: this.einvForm.turnoverDeclared
+    }).subscribe({
+      next: settings => {
+        this.savingEinv.set(false);
+        this.einv.set(settings);
+        this.einvForm.password = '';
+        this.einvDirty.set(false);
+        this.toast.success('E-invoicing settings saved.');
+      },
+      error: err => { this.savingEinv.set(false); this.toast.httpError(err); }
+    });
+  }
+
+  testEinv() {
+    if (this.testingEinv()) return;
+    this.testingEinv.set(true);
+    this.api.testEInvoiceConnection().subscribe({
+      next: result => {
+        this.testingEinv.set(false);
+        this.toast.success(result.message);
+        this.loadEinv();
+      },
+      error: err => {
+        this.testingEinv.set(false);
+        // The portal's own words — they name which credential it rejected.
+        this.toast.httpError(err);
+        this.loadEinv();
+      }
+    });
   }
 
   save() {

@@ -450,6 +450,12 @@ export interface Invoice {
   notes?: string;
   paymentTerms?: string;
   bankDetails?: BankDetails;
+  /**
+   * The signed QR as a ready PNG data URI, on the single-invoice read only.
+   * Rendered by the server so the square on screen and the one on the PDF come
+   * from the same encoder.
+   */
+  signedQrImage?: string;
 }
 
 export interface InvoiceStats {
@@ -523,8 +529,10 @@ export interface EInvoiceState {
   irn?: string;
   ackNo?: string;
   ackDate?: string;
-  /** The IRP's own scannable QR — unlike the template's decorative motif. */
+  /** The portal's own signed QR, as a JWS. Rendered into an image by the server. */
   signedQrCode?: string;
+  /** A hash of what was reported, so a later edit shows as a divergence. */
+  reportedFingerprint?: string;
   generatedAt?: string;
   cancelledAt?: string;
   errorCode?: string;
@@ -666,12 +674,43 @@ export interface Gstr3bReport {
  *  arbitrarily — a surplus is carry-forward, not a reduction elsewhere. */
 export interface Gstr3bHead { liability: number; itc: number; payable: number; carryForward: number }
 
+/**
+ * A tenant's own credentials on the government e-invoice portal.
+ *
+ * The password and client secret are never returned — only whether one is
+ * stored. Which is why the form sends them only when they are being changed.
+ */
+export interface EInvoiceSettings {
+  enabled: boolean;
+  turnoverDeclared: number | null;
+  lutNumber: string;
+  /** Whether the *server* has portal settings. Not this tenant's problem to fix. */
+  platformConfigured: boolean;
+  missingPlatformSettings: string[];
+  credentials: {
+    gstin: string;
+    username: string;
+    hasPassword: boolean;
+    clientId: string;
+    hasClientSecret: boolean;
+    environment: 'sandbox' | 'production';
+    verifiedAt: string | null;
+    lastError: string;
+  };
+  /** Enabled, plus both halves of the credentials present. */
+  ready: boolean;
+}
+
 export interface EInvoiceCheck {
   invoiceNumber: string;
   eligibility: { required: boolean; reason: string };
   valid: boolean;
   problems: Array<{ field: string; message: string }>;
   providerConfigured: boolean;
+  /** This tenant has entered their own portal credentials. */
+  tenantConfigured: boolean;
+  /** Enabled, configured, and able to report right now. */
+  ready: boolean;
   current: EInvoiceState | null;
   /** The validated NIC payload, so a tenant with no IRP integration can upload it by
    *  hand rather than retyping the invoice into a portal. */

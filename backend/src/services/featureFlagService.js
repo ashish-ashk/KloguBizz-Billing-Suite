@@ -64,10 +64,25 @@ const FLAGS = [
   {
     key: 'einvoicing',
     label: 'E-invoicing (IRN + QR)',
-    description: 'IRP integration for invoices above the turnover threshold. Not built yet — Phase 5.',
-    default: false,
-    available: false,
-    enforcedBy: null
+    description:
+      'Reports invoices to the government portal and puts the IRN and signed QR on the document. '
+      + 'Each tenant supplies their own portal credentials under Business Profile.',
+    /**
+     * Built, so `available` is true and the default is on.
+     *
+     * Defaulting to off would mean an operator toggling this per tenant before
+     * anybody could use it, which is not what a plan gate is for — the real
+     * gate is the `eInvoicing` capability, held by Business and above. Leaving
+     * both switched off would be gating the same thing twice and having neither
+     * be the answer.
+     *
+     * The flag stays because it is the withdrawal switch: an operator can take
+     * the feature off one tenant who is misusing the portal without changing
+     * their plan.
+     */
+    default: true,
+    available: true,
+    enforcedBy: 'reportRoutes (e-invoice/*), organisationRoutes (e-invoicing settings)'
   },
   {
     key: 'apiAccess',

@@ -10,6 +10,7 @@ const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { calculateInvoiceTotals, roundMoney, assertCompositionAllowed } = require('../services/gstService');
 const { nextInvoiceNumber } = require('../services/invoiceNumberService');
 const { renderInvoicePdf } = require('../services/pdfService');
+const qrService = require('../services/qrService');
 const { getPlatformDefaults } = require('../services/platformSettingsService');
 const { sendReminderEmail, sendInvoiceEmail } = require('../services/emailService');
 const { assertInvoiceQuota } = require('../services/planService');
@@ -410,7 +411,19 @@ const invoiceStats = asyncHandler(async (req, res) => {
 const getInvoice = asyncHandler(async (req, res) => {
   const invoice = await Invoice.findOne({ _id: req.params.id, ...tenantFilter(req) }).populate('clientId');
   if (!invoice) throw httpError(404, 'Invoice not found');
-  res.json(invoice);
+
+  /**
+   * The signed QR as a ready image, on the single-invoice read only.
+   *
+   * Rendered here rather than in the browser so there is exactly one encoder:
+   * the square a customer scans off a printout and the one on the screen come
+   * from the same signed string through the same code, and cannot drift. It is
+   * a few kilobytes and deliberately not on the *list* endpoint, where it would
+   * be that much times a page of invoices for something nobody can read at row
+   * height.
+   */
+  const signedQrImage = await qrService.signedQrDataUri(invoice.eInvoice?.signedQrCode);
+  res.json(signedQrImage ? { ...invoice.toObject(), signedQrImage } : invoice);
 });
 
 const createInvoice = asyncHandler(async (req, res) => {

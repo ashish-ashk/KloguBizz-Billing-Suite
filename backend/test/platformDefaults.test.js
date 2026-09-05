@@ -387,16 +387,28 @@ test('no plan advertises a capability the product does not have', maybeDb(async 
   }
 }));
 
-test('e-invoicing and e-way bills are not advertised while the provider call is a stub', maybeDb(async () => {
+test('nothing is advertised until its provider call is real', maybeDb(async () => {
   /**
-   * Everything around them is real and tested — eligibility, validation, the
-   * payload, the validity window — and `callIrp` / `callEwbApi` both throw 501.
-   * Nothing can actually be filed, so nothing may be sold on it. They join the
-   * list the day the adapter is written, which is the rule this file enforces.
+   * The rule, unchanged: a capability may only be sold once something can
+   * actually be filed on it. What has changed is which side of the line each
+   * feature sits on.
+   *
+   * **E-invoicing is now advertised**, because `services/irp/nicIrpProvider.js`
+   * talks to the government portal, the credentials are per tenant, and the
+   * signed QR is on the document. It was kept off this list until that was true,
+   * which is the whole point of the rule.
+   *
+   * **E-way bills are still not**, because `callEwbApi` still throws 501.
    */
   const advertised = capabilities.CAPABILITIES.map(c => c.label.toLowerCase()).join(' | ');
-  assert.ok(!/e-?invoic/.test(advertised), 'e-invoicing must not be advertised yet');
-  assert.ok(!/e-?way/.test(advertised), 'e-way bills must not be advertised yet');
+  assert.ok(/e-?invoic/.test(advertised), 'e-invoicing is built, so it belongs on the list');
+  assert.ok(!/e-?way/.test(advertised), 'e-way bills must not be advertised while the adapter is a stub');
+
+  // And it is sold at a tier, not to everybody: the threshold that makes
+  // e-invoicing mandatory is a turnover a cheapest-plan business is under.
+  assert.ok(!capabilities.capabilitiesFor('starter').includes('eInvoicing'));
+  assert.ok(capabilities.capabilitiesFor('business').includes('eInvoicing'));
+  assert.ok(capabilities.capabilitiesFor('enterprise').includes('eInvoicing'));
 }));
 
 test('every capability names where it is enforced', maybeDb(async () => {

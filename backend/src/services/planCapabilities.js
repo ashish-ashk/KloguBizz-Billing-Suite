@@ -35,11 +35,18 @@
  * of untruth this file exists to remove. The card states the ceiling, which is
  * what actually differs.
  *
- * E-invoicing (IRN) and e-way bills. Everything around them is real and tested —
- * eligibility, validation, the payload, the validity window — but the provider
- * call itself is a stub that throws 501, so nothing can actually be filed. They
- * go on this list the day the adapter is written and not a day sooner, which is
- * the whole rule this file exists to enforce.
+ * E-way bills. Everything around them is real and tested — eligibility,
+ * validation, the payload, the validity window — but the provider call is a stub
+ * that throws 501, so nothing can actually be filed. It goes on this list the
+ * day that adapter is written and not a day sooner, which is the whole rule this
+ * file exists to enforce.
+ *
+ * **E-invoicing was on that list until the adapter existed, and now is not.**
+ * `services/irp/nicIrpProvider.js` talks to the government portal, the
+ * credentials are per tenant, and the signed QR is drawn on the invoice — so the
+ * same rule that kept it off now puts it on. Placed at the Business tier because
+ * e-invoicing applies above a turnover threshold, and a business over that
+ * threshold is not on the cheapest plan.
  */
 const CAPABILITIES = [
   // ── Core billing: on every plan, including the cheapest ──
@@ -158,6 +165,12 @@ const CAPABILITIES = [
     label: 'Excel and CSV exports of invoices, ageing and returns',
     enforcedBy: 'reportRoutes export endpoints'
   }
+,
+  {
+    key: 'eInvoicing',
+    label: 'E-invoicing: IRN and the signed QR, filed to the government portal',
+    enforcedBy: 'reportRoutes (e-invoice), organisationRoutes (e-invoicing settings)'
+  }
 ];
 
 const CAPABILITY_KEYS = CAPABILITIES.map(capability => capability.key);
@@ -184,7 +197,8 @@ const PLAN_TIERS = [
     code: 'business',
     adds: [
       'expenses', 'profitLoss', 'warehouses', 'gstr2b',
-      'compositionAndQrmp', 'receivables', 'bulkUpload', 'exports'
+      'compositionAndQrmp', 'receivables', 'bulkUpload', 'exports',
+      'eInvoicing'
     ]
   },
   // Everything. What actually differs at this tier is the ceiling, not the

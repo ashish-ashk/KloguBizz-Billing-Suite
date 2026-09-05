@@ -692,6 +692,116 @@ The numbered action lists rendered `<strong>` on its own line — "Pick your", t
 grid item, and inline emphasis is a child. The number is now positioned rather
 than a grid column.
 
+## E-invoicing: the government portal, end to end — DONE
+
+The one thing `planCapabilities.js` deliberately refused to sell, on its own
+stated rule: it goes on the list "the day the adapter is written and not a day
+sooner". The adapter is written.
+
+### What was already there, and what actually blocked it
+
+The payload builder and the validator were real and tested. The network call was
+a documented refusal. But the thing that made e-invoicing impossible for a SaaS
+was not transport — it was that `IRP_USERNAME` and `IRP_PASSWORD` were
+environment variables. **An IRP account belongs to one GSTIN**, so a single
+username in the environment could only ever have reported for one business. The
+seam was in the right place; the credential model was not.
+
+So the credentials now divide the way the portal divides them:
+
+- **Platform** — base URL, client id, client secret, and the portal's RSA public
+  key. These identify *this software*, are the same for everyone, and stay in the
+  environment.
+- **Taxpayer** — GSTIN, API username, password. Created by the business on the
+  e-invoice portal under its own registration, stored per organisation, and the
+  password encrypted at rest under its own `secretBox` namespace — for the same
+  reason a payment key secret is: readable in a backup, it is the ability to file
+  returns as that business.
+
+A tenant enrolled as a direct API user can supply their own client pair, which
+wins over the platform's. That is the only place the two halves overlap.
+
+### The crypto, in its own file with no network in it
+
+Every mistake in it comes back from the portal as the same opaque authentication
+failure, with nothing to say which of four transforms was wrong:
+`RSA/ECB/PKCS1Padding` for the password and AppKey (**not** OAEP — the better
+padding is the wrong answer), `AES-256-ECB` under the AppKey to unwrap the
+session key, then `AES-256-ECB` under that key for every payload.
+
+ECB with no IV is indefensible cryptography and it is what the specification
+says. That is recorded as a property of the protocol rather than a choice this
+codebase made.
+
+Two things the specification does not settle, both handled rather than guessed:
+the AppKey travels as base64 *text* while the AES key is the raw bytes behind it,
+and the unwrapped session key arrives as either 32 raw bytes or base64 of them.
+
+### Two behaviours that decide whether it is usable
+
+**A stale token** is re-authenticated once and the call retried. Tokens last six
+hours in production and one in the sandbox, and the same taxpayer authenticating
+from another system invalidates ours.
+
+**A duplicate — error 2150 — is recovered, not failed.** If a first attempt
+reached the portal but its response did not reach us, the invoice *is*
+registered. Reporting that as a failure would leave a tenant with an invoice the
+government considers reported and this product considers failed, and no way to
+reconcile the two by hand. The portal returns the existing IRN alongside the
+error; it is dug out of `InfoDtls`.
+
+### The QR
+
+`gst-einvoice-qr` drew a grid filled by `(r * 6 + c) * 7919 % 13 < 6` —
+pseudo-random noise shaped like a QR code, scannable by nothing, on a legal
+document. It is gone. The real signed QR is drawn on **every** template, because
+whether an invoice was reported is a property of the invoice and not of the
+design a tenant picked.
+
+Making it actually scan took three corrections, each found by decoding it back
+off a rasterised page rather than by looking at it:
+
+1. **56pt is too small.** At ~101 modules that is 0.18mm per module against the
+   ~0.25mm a phone needs. 84pt (29.6mm) holds 0.25mm even at the long end.
+2. **Error correction `L`, not `M`.** On a fixed square, `M`'s twelve extra
+   modules cost more in module size than they return in robustness for paper.
+3. **Vector, not raster.** A PNG embedded at 534px and shown at 84pt is
+   resampled by whatever renders the PDF, and the blur made a *larger* QR decode
+   *worse*. Drawn as merged runs of filled rectangles it is exact at any
+   resolution — and the PDF is half the size.
+
+Decoded off pages rasterised at 96, 120, 150, 200, 300 and 600dpi: exact match
+from 150dpi up, which covers a poor scan and a phone photo.
+
+### A bug that would have shipped silently
+
+The controller stored `result.Irn`, `result.AckNo` and `result.SignedQRCode` —
+the raw NIC spellings — while the adapter normalises them at the boundary. Every
+field would have been `undefined`: an invoice marked *generated* with no IRN on
+it, which looks like success everywhere until somebody tries to scan a QR that is
+not there.
+
+### Verified
+
+**Fifteen tests against a fake portal that speaks the real protocol** — it
+RSA-decrypts the password and AppKey with its own private key, wraps a session
+key under that AppKey, and requires every payload AES-encrypted under it. A
+mocked `generateIrn` would pass with all four transforms wrong. The fake strips
+PKCS#1 padding by hand rather than running the suite with `--security-revert`;
+the shipped code only ever public-encrypts.
+
+Then driven in a browser against a standing fake portal: the settings card, the
+credentials saved, the connection test authenticating, reporting switched on, an
+invoice validated and reported, and the IRN and signed QR appearing on the
+document and in the PDF.
+
+### What still needs the user
+
+Real credentials. `IRP_BASE_URL`, `IRP_CLIENT_ID`, `IRP_CLIENT_SECRET` and
+`IRP_PUBLIC_KEY` on the server, and each tenant's own GSTIN, API username and
+password in the app. Everything up to the last hop is exercised; that hop is the
+one thing a fake portal cannot prove.
+
 ## Order, and why
 
 **1 → 2 → 3** first, because they are one thread: nothing can be honestly gated

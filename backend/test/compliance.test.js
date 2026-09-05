@@ -676,11 +676,28 @@ test('a B2C invoice is out of scope for e-invoicing', maybe(async () => {
   assert.ok(!worklist.body.invoices.some(row => String(row._id) === String(invoice._id)));
 }));
 
-test('the e-invoicing routes are gated by the feature flag', maybe(async () => {
+test('the e-invoicing routes are gated, and the flag is the withdrawal switch', maybe(async () => {
   const tenant = await registerOrg();
   invalidateFeatureFlagCache();
-  // The flag defaults to off, and the flag is what the platform console toggles — this
-  // is what stopped it being decorative.
+
+  /**
+   * The flag now defaults to **on**, because the feature is built and the real
+   * gate is the `eInvoicing` capability. Leaving both off would be gating the
+   * same thing twice and having neither be the answer.
+   *
+   * What the flag is still for is withdrawal: an operator can take e-invoicing
+   * off one tenant who is misusing the portal without changing their plan. That
+   * is what this checks — the route obeys the switch.
+   */
+  const allowed = await call('GET', '/reports/e-invoice/worklist', { token: tenant.token });
+  assert.equal(allowed.status, 200, 'a tenant whose plan includes it can reach the worklist');
+
+  await Organisation.updateOne(
+    { _id: tenant.org._id },
+    { $set: { 'featureFlags.einvoicing': false } }
+  );
+  invalidateFeatureFlagCache();
+
   const refused = await call('GET', '/reports/e-invoice/worklist', { token: tenant.token });
   assert.equal(refused.status, 403);
   assert.equal(refused.body.code, 'FEATURE_DISABLED');

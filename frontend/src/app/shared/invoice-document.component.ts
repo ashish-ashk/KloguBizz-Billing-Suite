@@ -648,6 +648,33 @@ export interface InvoiceDocClient {
         </div>
       </div>
 
+      @if (signedQrImage() || eInvoiceIrn()) {
+        <!--
+          The e-invoice block, on every template rather than only the one with
+          "qr" in its name: whether an invoice was reported is a property of the
+          invoice, not of the design the tenant picked.
+
+          The image is rendered by the server from the portal's signed string, so
+          the square here and the one on the PDF come out of the same encoder and
+          cannot drift.
+        -->
+        <div style="display:flex;gap:14px;align-items:flex-start;margin-top:34px;">
+          @if (signedQrImage()) {
+            <img [src]="signedQrImage()" alt="Signed e-invoice QR code"
+              style="width:104px;height:104px;flex:none;image-rendering:pixelated;background:#fff;" />
+          }
+          <div style="min-width:0;">
+            <div style="font-size:9.5px;font-weight:700;letter-spacing:.09em;color:var(--faint);">E-INVOICE · IRN</div>
+            <div style="font-size:9.5px;line-height:1.45;word-break:break-all;margin-top:3px;" [style.color]="dark">
+              {{ eInvoiceIrn() }}
+            </div>
+            @if (eInvoiceAck()) {
+              <div style="font-size:10px;color:var(--faint);margin-top:6px;">{{ eInvoiceAck() }}</div>
+            }
+          </div>
+        </div>
+      }
+
       <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:40px;gap:20px;">
         <div style="font-size:11px;color:var(--faint);">This is a computer generated invoice.</div>
         @if (showSignature()) {
@@ -770,6 +797,17 @@ export class InvoiceDocumentComponent {
   showAmountInWords = input(true);
   /** Overrides every template's default title word ("Invoice"/"Tax Invoice") — e.g. "Proforma Invoice", "Bill", "Receipt". Empty keeps each template's own default. */
   invoiceTitleLabel = input('');
+
+  /**
+   * The signed QR, already an image. The server renders it from the portal's
+   * signed string rather than the browser encoding it again — one encoder for
+   * the screen and the PDF, so a customer scanning a printout and a customer
+   * scanning the page get the same result.
+   */
+  signedQrImage = input('');
+  eInvoiceIrn = input('');
+  /** "Ack 112010036512345 · 20 Aug 2026", assembled by the caller. */
+  eInvoiceAck = input('');
 
   /** Per-invoice bank details win; the organisation's fill the gaps. */
   bank = computed(() => {
