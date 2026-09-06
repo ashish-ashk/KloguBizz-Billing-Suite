@@ -59,7 +59,7 @@ docs/       API spec, deploy notes, and the two pages below
 
 ## For customers
 
-Two self-contained HTML pages — open either in a browser, or print it to PDF.
+Three self-contained HTML pages — open any of them in a browser, or print to PDF.
 No build step, no assets folder.
 
 - **[docs/user-guide.html](docs/user-guide.html)** — fifteen numbered steps with a
@@ -70,15 +70,23 @@ No build step, no assets folder.
   price and limit on it is read from the running product, and the two features
   that are not live yet are named as such. Two contact details are marked
   placeholders; replace them before sending it to anyone.
+- **[docs/einvoicing-setup.html](docs/einvoicing-setup.html)** — the e-invoicing
+  runbook, in two parts for two different readers: Part A is the four steps a
+  platform operator does once (NIC sandbox registration, the portal's public key,
+  the four Render settings); Part B is the four steps every business does on its
+  own (entering its own portal credentials, testing the connection, switching
+  reporting on, moving from sandbox to production).
 
-Both are also committed as PDFs, for emailing and printing:
-**[KloguBizz-Sales-Deck.pdf](docs/KloguBizz-Sales-Deck.pdf)** (7 landscape pages)
-and **[KloguBizz-User-Guide.pdf](docs/KloguBizz-User-Guide.pdf)** (18 portrait
-pages, numbered). They are built from the same HTML, never edited separately —
-after changing either page run:
+All three are also committed as PDFs, for emailing and printing:
+**[KloguBizz-Sales-Deck.pdf](docs/KloguBizz-Sales-Deck.pdf)** (7 landscape pages),
+**[KloguBizz-User-Guide.pdf](docs/KloguBizz-User-Guide.pdf)** (18 portrait pages,
+numbered), and **[KloguBizz-EInvoicing-Setup.pdf](docs/KloguBizz-EInvoicing-Setup.pdf)**
+(6 portrait pages, numbered). They are built from the same HTML, never edited
+separately — after changing any of the source pages run:
 
 ```bash
-node docs/build-user-guide.js   # only if the guide's screenshots changed
+node docs/build-user-guide.js       # only if the guide's screenshots changed
+node docs/build-einvoicing-setup.js # only if the e-invoicing steps changed
 node docs/build-pdfs.js
 ```
 

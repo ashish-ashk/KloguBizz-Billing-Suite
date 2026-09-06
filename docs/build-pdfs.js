@@ -42,6 +42,26 @@ const { chromium } = require(PLAYWRIGHT);
 
 const DOCS = [
   {
+    source: 'einvoicing-setup.html',
+    output: 'KloguBizz-EInvoicing-Setup.pdf',
+    // Portrait, with a footer — the same shape as the user guide, since it is
+    // read the same way: on the desk while somebody is actually doing the steps.
+    pdf: {
+      format: 'A4',
+      printBackground: true,
+      preferCSSPageSize: true,
+      displayHeaderFooter: true,
+      headerTemplate: '<div></div>',
+      footerTemplate: `
+        <div style="width:100%;padding:0 13mm;font-family:Arial,sans-serif;font-size:8pt;color:#8C93A8;
+                    display:flex;justify-content:space-between;">
+          <span>KloguBizz &mdash; e-invoicing setup</span>
+          <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+        </div>`,
+      margin: { top: '14mm', bottom: '16mm', left: '13mm', right: '13mm' }
+    }
+  },
+  {
     source: 'sales-deck.html',
     output: 'KloguBizz-Sales-Deck.pdf',
     // Landscape: the spreads are two-column bands, and portrait would stack
