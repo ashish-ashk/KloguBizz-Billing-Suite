@@ -61,9 +61,17 @@ function auditContext(req, user, orgId) {
  * one. A platform account (`role: 'superadmin'`) has no membership at all and
  * passes its own `role`/`orgId: null` straight through.
  */
-function signToken(user, orgId, role) {
+/**
+ * `family` names which login this access token belongs to (see
+ * services/sessionService.js's `createSession`/`rotateSession`) — carried in
+ * the token itself, as `fam`, so `protect` can tell the device-sessions list
+ * which row is "this device" without a second database round trip. Omitted
+ * for tokens with no backing Session row at all (register's pre-verification
+ * token) — those simply cannot be attributed to a row in that list.
+ */
+function signToken(user, orgId, role, family) {
   return jwt.sign(
-    { sub: user._id, role, orgId, sv: user.sessionVersion || 0 },
+    { sub: user._id, role, orgId, sv: user.sessionVersion || 0, ...(family ? { fam: family } : {}) },
     env.JWT_SECRET,
     { expiresIn: sessionService.ACCESS_TOKEN_TTL }
   );
@@ -113,9 +121,9 @@ function publicUser(user, role) {
   };
 }
 
-function authPayload(user, organisation, orgId, role) {
+function authPayload(user, organisation, orgId, role, family) {
   return {
-    token: signToken(user, orgId, role),
+    token: signToken(user, orgId, role, family),
     // Seconds, not the JWT's raw `exp`, so the client doesn't need to decode
     // the token just to know when to refresh.
     expiresIn: sessionService.ACCESS_TOKEN_TTL_SECONDS,
@@ -138,8 +146,8 @@ function authPayload(user, organisation, orgId, role) {
  * token here would be an orphaned row nothing ever presents.
  */
 async function authPayloadWithSession(user, organisation, orgId, role, req) {
-  const { refreshToken } = await sessionService.createSession({ user, req, orgId });
-  return { ...authPayload(user, organisation, orgId, role), refreshToken };
+  const { refreshToken, session } = await sessionService.createSession({ user, req, orgId });
+  return { ...authPayload(user, organisation, orgId, role, session.family), refreshToken };
 }
 
 /**
@@ -687,7 +695,7 @@ const refresh = asyncHandler(async (req, res) => {
   }
 
   res.json({
-    token: signToken(user, session.orgId, role),
+    token: signToken(user, session.orgId, role, session.family),
     expiresIn: sessionService.ACCESS_TOKEN_TTL_SECONDS,
     refreshToken: nextRefreshToken
   });
@@ -704,7 +712,10 @@ const logout = asyncHandler(async (req, res) => {
   res.json({ ok: true });
 });
 
-/** Lists the signed-in user's active devices/sessions. */
+/** Lists the signed-in user's active devices/sessions. `current` marks the one
+ *  making this very request, resolved from the `fam` claim `protect` reads off
+ *  the access token — never from user-agent/IP, which two tabs in the same
+ *  browser would share. */
 const listSessions = asyncHandler(async (req, res) => {
   const sessions = await sessionService.listActiveSessions(req.user._id);
   res.json(sessions.map(s => ({
@@ -713,7 +724,8 @@ const listSessions = asyncHandler(async (req, res) => {
     ip: s.ip || null,
     createdAt: s.createdAt,
     lastSeenAt: s.lastSeenAt,
-    expiresAt: s.expiresAt
+    expiresAt: s.expiresAt,
+    current: Boolean(req.sessionFamily) && String(s.family) === String(req.sessionFamily)
   })));
 });
 
@@ -722,6 +734,24 @@ const revokeSession = asyncHandler(async (req, res) => {
   await sessionService.revokeOwnSession(req.user._id, req.params.id, 'user_revoked');
   logAudit({ req, action: 'user.session_revoked', entity: 'user', entityId: req.user._id });
   res.json({ ok: true });
+});
+
+/**
+ * Signs out every device *except* this one — the "visibility and control"
+ * alternative to forcing a single session platform-wide (#50 stays reverted;
+ * see sessionService.revokeAllForUserExceptFamily). Refused if this access
+ * token itself carries no `fam` claim (issued before this existed, or the
+ * family-less register token) — with nothing to keep, "everything but this"
+ * cannot be answered safely, and the honest failure is better than guessing
+ * and possibly signing the caller out of the device asking.
+ */
+const revokeOtherSessions = asyncHandler(async (req, res) => {
+  if (!req.sessionFamily) {
+    throw httpError(400, 'This device could not be identified. Please sign in again and retry.', 'SESSION_UNIDENTIFIED');
+  }
+  const result = await sessionService.revokeAllForUserExceptFamily(req.user._id, req.sessionFamily);
+  logAudit({ req, action: 'user.other_sessions_revoked', entity: 'user', entityId: req.user._id, meta: { count: result.modifiedCount } });
+  res.json({ ok: true, count: result.modifiedCount });
 });
 
 // ── Org switching (#53, #54) ─────────────────────
@@ -757,6 +787,6 @@ module.exports = {
   inviteDetails, acceptInvite,
   forgotPassword, resetPassword,
   verifyEmail, resendVerification, issueEmailVerification,
-  refresh, logout, listSessions, revokeSession,
+  refresh, logout, listSessions, revokeSession, revokeOtherSessions,
   switchOrg
 };

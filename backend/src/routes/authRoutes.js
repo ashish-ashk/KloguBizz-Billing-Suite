@@ -5,7 +5,7 @@ const {
   inviteDetails, acceptInvite,
   forgotPassword, resetPassword,
   verifyEmail, resendVerification,
-  refresh, logout, listSessions, revokeSession,
+  refresh, logout, listSessions, revokeSession, revokeOtherSessions,
   switchOrg
 } = require('../controllers/authController');
 const { setupMfa, enableMfa, disableMfa, regenerateBackupCodes } = require('../controllers/mfaController');
@@ -98,6 +98,10 @@ router.post('/refresh', refreshLimiter, validate(refreshTokenSchema), refresh);
 router.post('/logout', validate(logoutSchema), logout);
 router.get('/sessions', protect, listSessions);
 router.delete('/sessions/:id', protect, revokeSession);
+// Static path, registered ahead of nothing that would conflict — Express
+// only ever matches this against a literal DELETE :id above for a different
+// method, so no ordering trap here despite the shared '/sessions' prefix.
+router.post('/sessions/revoke-others', protect, credentialLimiter, revokeOtherSessions);
 
 // Org switching (#53, #54) — requires an existing session (any organisation),
 // re-issued for a different one the identity also belongs to.

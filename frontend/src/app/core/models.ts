@@ -755,6 +755,8 @@ export interface DeviceSession {
   createdAt: string;
   lastSeenAt: string;
   expiresAt: string;
+  /** Whether this row is the device/tab making the request right now. */
+  current: boolean;
 }
 
 /** One organisation the signed-in identity can act in (#53, #54) — the

@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AppShellComponent } from '../../shared/app-shell.component';
@@ -132,29 +132,43 @@ import { downloadBlob, fmtDate } from '../../core/format';
 
       <!-- Active sessions (#50, #51) -->
       <section class="card" style="margin-top:16px">
-        <div class="card-title">Active sessions</div>
-        <div class="card-sub" style="margin-bottom:14px">
-          Every device currently signed in to your account. Sessions expire on their own after
-          {{ 30 }} days, or end them here right away.
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div>
+            <div class="card-title">Active sessions</div>
+            <div class="card-sub">
+              Every device currently signed in to your account. Sessions expire on their own after
+              {{ 30 }} days, or end them here right away.
+            </div>
+          </div>
+          @if (hasOtherSessions()) {
+            <button class="btn secondary sm" type="button" [disabled]="revokingAll()" (click)="endOtherSessions()">
+              @if (revokingAll()) { <span class="spinner"></span> } Sign out of all other devices
+            </button>
+          }
         </div>
         @if (sessions().length) {
-          <div style="display:grid;gap:8px">
+          <div style="display:grid;gap:8px;margin-top:14px">
             @for (s of sessions(); track s.id) {
               <div class="stat-block" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
                 <div>
-                  <div class="sb-value" style="font-size:13px">{{ s.userAgent || 'Unknown device' }}</div>
+                  <div class="sb-value" style="font-size:13px;display:flex;align-items:center;gap:8px">
+                    {{ s.userAgent || 'Unknown device' }}
+                    @if (s.current) { <span class="chip paid" style="font-size:10px">This device</span> }
+                  </div>
                   <div class="sb-label">
                     {{ s.ip || 'Unknown location' }} · last active {{ fmtDate(s.lastSeenAt) }}
                   </div>
                 </div>
-                <button class="btn secondary sm" type="button" [disabled]="revoking() === s.id" (click)="endSession(s)">
-                  @if (revoking() === s.id) { <span class="spinner"></span> } Sign out
-                </button>
+                @if (!s.current) {
+                  <button class="btn secondary sm" type="button" [disabled]="revoking() === s.id" (click)="endSession(s)">
+                    @if (revoking() === s.id) { <span class="spinner"></span> } Sign out
+                  </button>
+                }
               </div>
             }
           </div>
         } @else {
-          <div class="card-sub">No other active sessions.</div>
+          <div class="card-sub" style="margin-top:14px">No other active sessions.</div>
         }
       </section>
 
@@ -203,6 +217,11 @@ export class AccountSecurityComponent implements OnInit {
   // ── Active sessions (#50, #51) ──
   sessions = signal<DeviceSession[]>([]);
   revoking = signal<string | null>(null);
+  revokingAll = signal(false);
+
+  /** Whether there is any *other* device to sign out — hides the bulk action
+   *  when this device is the only one signed in. */
+  hasOtherSessions = computed(() => this.sessions().some(s => !s.current));
 
   password = '';
   confirmName = '';
@@ -259,6 +278,18 @@ export class AccountSecurityComponent implements OnInit {
         this.toast.success('That device has been signed out.');
       },
       error: err => { this.revoking.set(null); this.toast.httpError(err); }
+    });
+  }
+
+  endOtherSessions() {
+    this.revokingAll.set(true);
+    this.api.revokeOtherSessions().subscribe({
+      next: () => {
+        this.revokingAll.set(false);
+        this.sessions.update(list => list.filter(x => x.current));
+        this.toast.success('Every other device has been signed out.');
+      },
+      error: err => { this.revokingAll.set(false); this.toast.httpError(err); }
     });
   }
 

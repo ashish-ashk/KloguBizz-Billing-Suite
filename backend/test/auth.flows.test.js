@@ -430,6 +430,48 @@ test('a user can list and revoke their own device sessions', maybe(async () => {
   assert.equal(after.body.length, list.body.length - 1);
 }));
 
+test('the sessions list marks exactly the device asking, and nothing else', maybe(async () => {
+  const owner = await registerOrg();
+  const deviceA = await loginFresh(owner);
+  const deviceB = await loginFresh(owner);
+
+  const asA = await call('GET', '/auth/sessions', { token: deviceA.token });
+  const asB = await call('GET', '/auth/sessions', { token: deviceB.token });
+
+  const currentInA = asA.body.filter(s => s.current);
+  const currentInB = asB.body.filter(s => s.current);
+  assert.equal(currentInA.length, 1, 'exactly one row is "this device" when asked as device A');
+  assert.equal(currentInB.length, 1, 'exactly one row is "this device" when asked as device B');
+  assert.notEqual(currentInA[0].id, currentInB[0].id, 'the two devices must not agree on which one is "current"');
+}));
+
+test('signing out of "all other devices" leaves only the one that asked', maybe(async () => {
+  const owner = await registerOrg();
+  const deviceA = await loginFresh(owner);
+  const deviceB = await loginFresh(owner);
+  const deviceC = await loginFresh(owner);
+
+  const revoke = await call('POST', '/auth/sessions/revoke-others', { token: deviceA.token, body: {} });
+  assert.equal(revoke.status, 200, JSON.stringify(revoke.body));
+  assert.equal(revoke.body.count, 2, 'B and C should have been revoked, A left alone');
+
+  // A still works …
+  assert.equal((await call('GET', '/auth/me', { token: deviceA.token })).status, 200);
+  // … and its refresh token still rotates.
+  const rotated = await call('POST', '/auth/refresh', { body: { refreshToken: deviceA.refreshToken } });
+  assert.equal(rotated.status, 200);
+
+  // B and C's refresh tokens are dead.
+  const bRefresh = await call('POST', '/auth/refresh', { body: { refreshToken: deviceB.refreshToken } });
+  assert.equal(bRefresh.status, 401);
+  const cRefresh = await call('POST', '/auth/refresh', { body: { refreshToken: deviceC.refreshToken } });
+  assert.equal(cRefresh.status, 401);
+
+  const after = await call('GET', '/auth/sessions', { token: rotated.body.token });
+  assert.equal(after.body.length, 1, 'only device A remains');
+  assert.equal(after.body[0].current, true);
+}));
+
 test('changing your password revokes every refresh token too, not just sessionVersion', maybe(async () => {
   const owner = await registerOrg();
   const session = await loginFresh(owner);

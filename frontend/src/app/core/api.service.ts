@@ -540,6 +540,9 @@ export class ApiService {
   revokeSession(id: string) {
     return this.http.delete<{ ok: boolean }>(`${this.api}/auth/sessions/${id}`);
   }
+  revokeOtherSessions() {
+    return this.http.post<{ ok: boolean; count: number }>(`${this.api}/auth/sessions/revoke-others`, {});
+  }
   mfaRegenerateBackupCodes(code: string) {
     return this.http.post<{ ok: boolean; backupCodes: string[]; message: string }>(`${this.api}/auth/mfa/backup-codes`, { code });
   }

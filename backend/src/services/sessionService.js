@@ -60,24 +60,39 @@ async function createSession({ user, req, orgId }) {
  * token is revoked and a new one is issued in the same family with the same
  * absolute expiry.
  *
- * A token that resolves to an *already revoked* row is reuse — the previous
- * holder already rotated past it, so whoever is presenting it now is not the
- * legitimate chain. The whole family is revoked and every access token for
- * this user is killed via `sessionVersion`, on the assumption that a stolen
- * refresh token may already have been used to mint one.
+ * A revoked row is only treated as **reuse** — the whole family killed and
+ * every access token for this user invalidated via `sessionVersion`, on the
+ * assumption a stolen token may already have minted one — when it was
+ * revoked *by being rotated past* (`replacedBy` set): that is the actual
+ * signal that somebody is presenting a stale link from earlier in a chain
+ * that has already moved on.
+ *
+ * A row revoked for an ordinary reason instead — sign-out of this one device,
+ * "sign out of all my other devices", an admin/support force-logout, a
+ * password change — has no `replacedBy`; it was simply ended, not superseded.
+ * Treating that the same as theft was a real bug, not a hypothetical: it
+ * meant ending any *other* device's session and then having that device
+ * merely attempt its own routine refresh (nothing malicious happening at
+ * all) would silently sign the caller's own current device out too, some
+ * time later, for no visible reason. Found via the "sign out of all other
+ * devices" feature, which made it happen on essentially every use.
  */
 async function rotateSession({ refreshToken, req }) {
   const hash = hashToken(refreshToken);
   const session = await Session.findOne({ refreshTokenHash: hash });
   if (!session) throw httpError(401, 'Your session could not be renewed. Please sign in again.', 'REFRESH_INVALID');
 
-  if (session.revokedAt) {
+  if (session.revokedAt && session.replacedBy) {
     await Session.updateMany(
       { userId: session.userId, family: session.family, revokedAt: null },
       { revokedAt: new Date(), revokedReason: 'reuse_detected' }
     );
     await User.updateOne({ _id: session.userId }, { $inc: { sessionVersion: 1 } });
     throw httpError(401, 'This session was used from somewhere unexpected and has been ended for your safety. Please sign in again.', 'REFRESH_REUSE_DETECTED');
+  }
+
+  if (session.revokedAt) {
+    throw httpError(401, 'Your session has ended. Please sign in again.', 'REFRESH_REVOKED');
   }
 
   if (session.expiresAt < new Date()) {
@@ -133,10 +148,12 @@ async function revokeAllForOrg(orgId, reason = 'admin_revoked') {
   return Session.updateMany({ orgId, revokedAt: null }, { revokedAt: new Date(), revokedReason: reason });
 }
 
-/** Active sessions for a user's device-list UI, most recently used first. */
+/** Active sessions for a user's device-list UI, most recently used first.
+ *  `family` is included (never sent to the client as-is) so the controller can
+ *  mark which row is the one making the request right now. */
 async function listActiveSessions(userId) {
   return Session.find({ userId, revokedAt: null, expiresAt: { $gt: new Date() } })
-    .select('userAgent ip lastSeenAt createdAt expiresAt')
+    .select('userAgent ip lastSeenAt createdAt expiresAt family')
     .sort({ lastSeenAt: -1 })
     .lean();
 }
@@ -150,8 +167,24 @@ async function revokeOwnSession(userId, sessionId, reason = 'user_revoked') {
   if (!result.matchedCount) throw httpError(404, 'Session not found');
 }
 
+/**
+ * Ends every one of the caller's sessions *except* the one making this
+ * request — "sign out of all my other devices" without a lost-phone
+ * lockout locking the phone itself out. `exceptFamily` rather than
+ * `exceptSessionId` because a session's own row is replaced on every
+ * refresh (`rotateSession`); the family is the stable identity of "this
+ * device's login" across that rotation.
+ */
+async function revokeAllForUserExceptFamily(userId, exceptFamily, reason = 'user_revoked_others') {
+  return Session.updateMany(
+    { userId, family: { $ne: exceptFamily }, revokedAt: null },
+    { revokedAt: new Date(), revokedReason: reason }
+  );
+}
+
 module.exports = {
   createSession, rotateSession, revokeByToken,
-  revokeAllForUser, revokeAllForOrg, listActiveSessions, revokeOwnSession,
+  revokeAllForUser, revokeAllForOrg, revokeAllForUserExceptFamily,
+  listActiveSessions, revokeOwnSession,
   hashToken, ACCESS_TOKEN_TTL, ACCESS_TOKEN_TTL_SECONDS, REFRESH_TOKEN_TTL_DAYS
 };

@@ -71,6 +71,12 @@ const protect = asyncHandler(async (req, res, next) => {
   }
 
   req.user = user;
+  // Which login/device this access token belongs to (authController.signToken's
+  // `fam` claim) — absent on tokens issued before this existed, or ones with no
+  // backing Session row at all. Used only to mark "this device" in the
+  // sessions list and to scope "sign out my other devices" (never for auth
+  // itself — sessionVersion above is what actually gates the token).
+  req.sessionFamily = payload.fam || null;
 
   /**
    * Which organisation, and with what role (#53, #54).
