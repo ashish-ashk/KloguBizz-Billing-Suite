@@ -349,6 +349,7 @@ const HTML = `<title>E-Invoicing Setup</title>
     <div class="top-facts">
       <span><b>Steps 1&ndash;4</b> platform operator, once</span>
       <span><b>5&ndash;8</b> every business, on their own</span>
+      <span>Try it at <a href="https://demo.klogubizz.klogu.com/login">demo.klogubizz.klogu.com</a></span>
     </div>
   </div>
 </header>

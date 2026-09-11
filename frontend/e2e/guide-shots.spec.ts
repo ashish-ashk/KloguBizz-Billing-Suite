@@ -115,6 +115,28 @@ test('capture the guide screenshots', async ({ page, request }) => {
   await page.waitForTimeout(4000);
   await page.screenshot({ path: `${OUT}/15-gst-returns.png` });
 
+  // ── E-invoicing settings, on Business Profile (gated at the Business plan
+  // and above — see backend/src/services/planCapabilities.js) ──
+  await page.goto(`${APP}/business`);
+  await page.waitForTimeout(2500);
+  const einvoicing = page.locator('section.card').filter({ hasText: /e-invoicing/i }).first();
+  if (await einvoicing.count()) {
+    await einvoicing.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(400);
+    // Sandbox placeholder credentials only — never click "Test connection" here,
+    // it would call the real NIC sandbox portal.
+    await page.locator('#ei-gstin').fill('27AAPFU0939F1ZV');
+    await page.locator('#ei-user').fill('sandbox-user');
+    await page.locator('#ei-pass').fill('Sandbox@12345');
+    await page.locator('#ei-env').selectOption('sandbox');
+    await page.waitForTimeout(300);
+    await page.getByRole('button', { name: /save e-invoicing settings/i }).click();
+    await page.waitForTimeout(1500);
+    await einvoicing.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(600);
+    await einvoicing.screenshot({ path: `${OUT}/19-einvoicing.png` });
+  }
+
   // ── Reports ──
   await page.goto(`${APP}/reports`);
   await page.waitForTimeout(3000);

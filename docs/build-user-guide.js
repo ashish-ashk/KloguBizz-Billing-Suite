@@ -233,7 +233,27 @@ const PARTS = [
       'Look at this before the filing date, not on it. If a number looks wrong, the bill behind it can '
       + 'still be fixed.', 'tip'),
 
-    step(14, 'Reports',
+    step(14, 'Turn on e-invoicing',
+      `<p>Open <strong>Business Profile</strong> and scroll to <strong>E-Invoicing (IRN &amp; signed
+          QR)</strong>. This card only appears on the Business plan and above.</p>
+       <ol class="do">
+         <li>Type your <strong>Portal GSTIN</strong> — the one your e-invoice portal account is
+             registered under.</li>
+         <li>Type the <strong>API username</strong> and <strong>API password</strong> the portal issued
+             you. These are not your login for this app, and not your login for the GST portal.</li>
+         <li>Leave <strong>Portal</strong> on <strong>Sandbox</strong> until a test invoice has worked.</li>
+         <li>Fill in your <strong>declared turnover</strong>, switch on <strong>Report invoices to the
+             portal</strong>, and press <strong>Save e-invoicing settings</strong>.</li>
+       </ol>
+       <p>Raise an invoice for a customer who has a GSTIN, open it, and press <strong>Generate
+          IRN</strong> — the IRN and a signed QR appear on the document.</p>`,
+      shot('19-einvoicing.png',
+        'E-Invoicing settings, on Business Profile. GSTIN, portal credentials and the sandbox/production switch all live here.'),
+      'The full walkthrough — registering on the government portal, getting your API credentials, and '
+      + 'moving from sandbox to production — is in the separate <strong>E-Invoicing Setup</strong> guide.',
+      'tip'),
+
+    step(15, 'Reports',
       `<p>Open <strong>Reports</strong> for sales by customer, by item and by month, and for the money
           still owed to you. Every report has a <strong>Download</strong> button, so your accountant gets
           a spreadsheet instead of a screenshot.</p>`,
@@ -241,7 +261,7 @@ const PARTS = [
   ]],
 
   ['E', 'On your phone', [
-    step(15, 'Put it on your home screen',
+    step(16, 'Put it on your home screen',
       `<p>It works like an app, and there is nothing to install from a store.</p>
        <ol class="do">
          <li>Open the site in your phone browser.</li>
@@ -590,15 +610,16 @@ const html = `<title>KloguBizz Step by Step</title>
     </div>
     <h1>How to use KloguBizz, step by step</h1>
     <p>
-      Fifteen steps, in the order you will need them. Every step shows the actual screen,
+      Sixteen steps, in the order you will need them. Every step shows the actual screen,
       so you can match what is in front of you to the picture.
     </p>
     <div class="top-facts">
       <span><b>Steps 1&ndash;4</b> set-up, once</span>
       <span><b>5&ndash;7</b> your customers and products</span>
       <span><b>8&ndash;12</b> every day</span>
-      <span><b>13&ndash;14</b> GST time</span>
-      <span><b>15</b> on your phone</span>
+      <span><b>13&ndash;15</b> GST time</span>
+      <span><b>16</b> on your phone</span>
+      <span>Try it at <a href="https://demo.klogubizz.klogu.com/login">demo.klogubizz.klogu.com</a></span>
     </div>
   </div>
 </header>
