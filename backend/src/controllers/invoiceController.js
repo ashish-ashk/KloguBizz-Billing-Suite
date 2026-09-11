@@ -9,7 +9,9 @@ const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
 const { calculateInvoiceTotals, roundMoney, assertCompositionAllowed } = require('../services/gstService');
 const { nextInvoiceNumber } = require('../services/invoiceNumberService');
-const { renderInvoicePdf } = require('../services/pdfService');
+// Renders off the request thread (see pdfRenderer.js) — not pdfService.js
+// directly, which is the synchronous renderer this calls into on a worker.
+const { renderInvoicePdf } = require('../services/pdfRenderer');
 const qrService = require('../services/qrService');
 const { getPlatformDefaults } = require('../services/platformSettingsService');
 const { sendReminderEmail, sendInvoiceEmail } = require('../services/emailService');

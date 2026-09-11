@@ -12,7 +12,9 @@ const { logAudit } = require('../services/auditService');
 const { recordEvent, EVENT } = require('../services/usageEventService');
 const { streamCsv } = require('../services/csvService');
 const { paginate, escapeRegex, parseSort } = require('../utils/pagination');
-const { renderInvoicePdf } = require('../services/pdfService');
+// Renders off the request thread (see pdfRenderer.js) — not pdfService.js
+// directly, which is the synchronous renderer this calls into on a worker.
+const { renderInvoicePdf } = require('../services/pdfRenderer');
 const { getPlatformDefaults } = require('../services/platformSettingsService');
 const { totalsFor, normalizeBuyer } = require('./invoiceController');
 const stock = require('../services/stockService');
