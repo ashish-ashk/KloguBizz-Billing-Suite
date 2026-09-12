@@ -113,9 +113,13 @@ import { LegalContentComponent } from '../../shared/legal-content.component';
             <a routerLink="/forgot-password" style="color:var(--brand);font-weight:600;font-size:13px;">Forgot your password?</a>
           </p>
 
-          <p style="margin-top:10px;color:var(--muted);font-size:13px;text-align:center;">
-            New to {{ branding()?.appName || 'Klogu Bizz' }}? <a routerLink="/register" style="color:var(--brand);font-weight:600;">Create an account</a>
-          </p>
+          <a routerLink="/register" class="trial-cta">
+            <span class="trial-cta-text">
+              <strong>Start your 14-day free trial</strong>
+              <span>Register now — no credit card required</span>
+            </span>
+            <app-icon name="chevronRight" [size]="16" />
+          </a>
 
           <p style="margin-top:10px;color:var(--faint,var(--muted));font-size:11.5px;text-align:center;">
             By signing in, you agree to our
@@ -166,7 +170,39 @@ import { LegalContentComponent } from '../../shared/legal-content.component';
       [width]="640" (close)="legalOpen.set(null)">
       @if (legalOpen()) { <app-legal-content [type]="legalOpen()!" /> }
     </app-modal>
-  `
+  `,
+  styles: [`
+    /* Bigger than the shared .auth-brand-logo size — this is the first screen a
+       visitor lands on, so the logo carries more weight here than on register. */
+    .auth-brand .auth-brand-logo { width: 76px; height: 76px; border-radius: 18px; }
+    .auth-brand .brand-name { font-size: 22px; }
+
+    .trial-cta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 12px;
+      padding: 14px 18px;
+      border-radius: 12px;
+      text-decoration: none;
+      color: #fff;
+      background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+      box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+      transition: transform 0.15s var(--ease), box-shadow 0.2s var(--ease);
+    }
+    .trial-cta:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(79, 70, 229, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.2); }
+    .trial-cta:active { transform: translateY(0) scale(0.98); }
+    .trial-cta-text { display: flex; flex-direction: column; gap: 2px; }
+    .trial-cta-text strong { font-size: 13.5px; font-weight: 700; }
+    .trial-cta-text span { font-size: 11.5px; opacity: 0.85; font-weight: 500; }
+    .trial-cta app-icon { flex-shrink: 0; transition: transform 0.15s var(--ease); }
+    .trial-cta:hover app-icon { transform: translateX(3px); }
+
+    @media (max-width: 880px) {
+      .auth-brand .auth-brand-logo { width: 60px; height: 60px; border-radius: 15px; }
+    }
+  `]
 })
 export class LoginComponent implements OnInit, AfterViewChecked {
   email = '';
