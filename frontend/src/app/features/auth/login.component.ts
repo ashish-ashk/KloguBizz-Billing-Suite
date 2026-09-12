@@ -115,10 +115,10 @@ import { LegalContentComponent } from '../../shared/legal-content.component';
 
           <a routerLink="/register" class="trial-cta">
             <span class="trial-cta-text">
-              <strong>Don't have an account?</strong>
-              <span>Register now — start your 14-day free trial</span>
+              <span class="trial-cta-eyebrow">Don't have an account?</span>
+              <strong>Start your 14-day free trial</strong>
             </span>
-            <app-icon name="chevronRight" [size]="16" />
+            <span class="trial-cta-arrow"><app-icon name="chevronRight" [size]="18" /></span>
           </a>
 
           <p style="margin-top:10px;color:var(--faint,var(--muted));font-size:11.5px;text-align:center;">
@@ -179,27 +179,41 @@ import { LegalContentComponent } from '../../shared/legal-content.component';
     .auth-brand .auth-brand-logo { width: 76px; height: 76px; border-radius: 18px; }
     .auth-brand .brand-name { font-size: 22px; }
 
+    /* Pulsing glow + a bold, larger headline: this is the primary conversion
+       point on the login screen, so it needs to out-compete "Sign In" above it
+       for attention rather than read as a quiet footnote link. */
     .trial-cta {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 10px;
-      margin-top: 12px;
-      padding: 14px 18px;
-      border-radius: 12px;
+      gap: 12px;
+      margin-top: 16px;
+      padding: 16px 20px;
+      border-radius: 14px;
       text-decoration: none;
       color: #fff;
       background: linear-gradient(135deg, var(--brand), var(--brand-dark));
-      box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+      box-shadow: 0 6px 20px rgba(79, 70, 229, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.2);
       transition: transform 0.15s var(--ease), box-shadow 0.2s var(--ease);
+      animation: trialCtaGlow 2.6s ease-in-out infinite;
     }
-    .trial-cta:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(79, 70, 229, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.2); }
+    .trial-cta:hover { transform: translateY(-2px) scale(1.01); box-shadow: 0 10px 28px rgba(79, 70, 229, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.25); animation-play-state: paused; }
     .trial-cta:active { transform: translateY(0) scale(0.98); }
-    .trial-cta-text { display: flex; flex-direction: column; gap: 2px; }
-    .trial-cta-text strong { font-size: 13.5px; font-weight: 700; }
-    .trial-cta-text span { font-size: 11.5px; opacity: 0.85; font-weight: 500; }
-    .trial-cta app-icon { flex-shrink: 0; transition: transform 0.15s var(--ease); }
-    .trial-cta:hover app-icon { transform: translateX(3px); }
+    .trial-cta-text { display: flex; flex-direction: column; gap: 3px; }
+    .trial-cta-eyebrow { font-size: 11.5px; font-weight: 600; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px; }
+    .trial-cta-text strong { font-size: 16.5px; font-weight: 800; letter-spacing: -0.2px; }
+    .trial-cta-arrow {
+      display: flex; align-items: center; justify-content: center;
+      width: 34px; height: 34px; border-radius: 50%;
+      background: rgba(255, 255, 255, 0.18);
+      flex-shrink: 0;
+      transition: transform 0.15s var(--ease), background 0.2s var(--ease);
+    }
+    .trial-cta:hover .trial-cta-arrow { transform: translateX(3px); background: rgba(255, 255, 255, 0.3); }
+    @keyframes trialCtaGlow {
+      0%, 100% { box-shadow: 0 6px 20px rgba(79, 70, 229, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.2); }
+      50% { box-shadow: 0 6px 28px rgba(79, 70, 229, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.2); }
+    }
 
     @media (max-width: 880px) {
       .auth-brand .auth-brand-logo { width: 60px; height: 60px; border-radius: 15px; }
