@@ -115,8 +115,8 @@ import { LegalContentComponent } from '../../shared/legal-content.component';
 
           <a routerLink="/register" class="trial-cta">
             <span class="trial-cta-text">
-              <strong>Start your 14-day free trial</strong>
-              <span>Register now — no credit card required</span>
+              <strong>Don't have an account?</strong>
+              <span>Register now — start your 14-day free trial</span>
             </span>
             <app-icon name="chevronRight" [size]="16" />
           </a>
@@ -135,8 +135,10 @@ import { LegalContentComponent } from '../../shared/legal-content.component';
           @if (showDemo()) {
             <div class="info-box" style="margin-top:10px;font-size:11.5px;">
               <strong>Demo logins</strong><br />
-              Tenant admin: admin&#64;techsoft.local / Admin&#64;123<br />
-              Super admin: superadmin&#64;klogubizz.local / SuperAdmin&#64;123
+              Tenant admin: admin&#64;techsoft.local / Admin&#64;123
+              @if (!isPublicDemoHost) {
+                <br />Super admin: superadmin&#64;klogubizz.local / SuperAdmin&#64;123
+              }
             </div>
           }
           }
@@ -212,6 +214,14 @@ export class LoginComponent implements OnInit, AfterViewChecked {
   showPassword = signal(false);
   showDemo = signal(false);
   justRegistered = signal(false);
+
+  /**
+   * demo.klogubizz.klogu.com is handed out publicly (sales links, docs); the
+   * super admin demo credential would let any visitor there into the platform
+   * console. The klogu-bizz-billing-suite.vercel.app preview stays internal-only,
+   * so it keeps showing both.
+   */
+  isPublicDemoHost = typeof window !== 'undefined' && window.location.hostname === 'demo.klogubizz.klogu.com';
   branding = signal<PublicBranding | null>(null);
 
   // ── Second factor ────────────────────────────
