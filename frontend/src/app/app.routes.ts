@@ -54,6 +54,10 @@ export const routes: Routes = [
       { path: 'receivables', canActivate: [requireCapability('receivables', 'Receivables')], loadComponent: () => import('./features/reports/receivables.component').then(m => m.ReceivablesComponent) },
       { path: 'activity', loadComponent: () => import('./features/account/activity.component').then(m => m.ActivityComponent) },
       { path: 'security', loadComponent: () => import('./features/account/security.component').then(m => m.AccountSecurityComponent) },
+      // Forced on an account created via the tenant-invite flow with a system-
+      // generated temporary password (#65) — every other route refuses server-
+      // side until this is done, via requirePasswordChange in accountGuards.js.
+      { path: 'change-password', loadComponent: () => import('./features/account/change-password.component').then(m => m.ChangePasswordComponent) },
       /**
        * The seller side of every invoice — GSTIN, address, state.
        *

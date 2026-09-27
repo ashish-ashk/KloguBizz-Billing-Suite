@@ -8,7 +8,7 @@ const { recordActivity } = require('../services/usageEventService');
 const { getActiveMembership } = require('../services/membershipService');
 const { logAudit } = require('../services/auditService');
 const { isForbiddenWhileImpersonating } = require('../services/impersonationService');
-const { requireVerifiedEmail, requireSuperadminMfa } = require('./accountGuards');
+const { requireVerifiedEmail, requireSuperadminMfa, requirePasswordChange } = require('./accountGuards');
 
 // Routes a suspended tenant may still write to. Suspension is a commercial
 // measure, not a punishment: the tenant keeps access to the pages that let them
@@ -231,9 +231,12 @@ const protect = asyncHandler(async (req, res, next) => {
    * chaining below hands control to the error handler exactly as a mounted middleware
    * would.
    */
-  return requireSuperadminMfa(req, res, mfaError => {
-    if (mfaError) return next(mfaError);
-    return requireVerifiedEmail(req, res, next);
+  return requirePasswordChange(req, res, pwError => {
+    if (pwError) return next(pwError);
+    return requireSuperadminMfa(req, res, mfaError => {
+      if (mfaError) return next(mfaError);
+      return requireVerifiedEmail(req, res, next);
+    });
   });
 });
 

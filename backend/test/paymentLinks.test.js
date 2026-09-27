@@ -38,6 +38,7 @@ const gateway = require('../src/services/tenantGatewayService');
 const links = require('../src/services/paymentLinkService');
 const { sweepExpiredLinks } = require('../src/services/paymentLinkService');
 const secretBox = require('../src/utils/secretBox');
+const { activateInvitedUser } = require('./testHelpers');
 
 const KEY_ID = 'rzp_test_ABC123';
 const KEY_SECRET = 'test_key_secret_for_hmac_checks';
@@ -634,19 +635,12 @@ test('gateway settings are admin-only', maybe(async () => {
   await connectGateway(tenant.token);
 
   // An accountant records payments; connecting a merchant account is not theirs.
-  const invited = await call('POST', '/users/invite', {
-    token: tenant.token,
-    body: { name: 'Book Keeper', email: `acct${counter}@paylink.test`, role: 'accountant' }
+  const { token: accountantToken } = await activateInvitedUser(call, {
+    ownerToken: tenant.token, name: 'Book Keeper', email: `acct${counter}@paylink.test`, role: 'accountant'
   });
-  assert.equal(invited.status, 201);
-  const inviteToken = decodeURIComponent(new URL(invited.body.inviteUrl).searchParams.get('token'));
-  const accepted = await call('POST', '/auth/accept-invite', {
-    body: { token: inviteToken, password: 'Accountant@1', acceptTerms: true }
-  });
-  assert.equal(accepted.status, 200);
 
-  assert.equal((await call('GET', '/payment-links/gateway', { token: accepted.body.token })).status, 403);
+  assert.equal((await call('GET', '/payment-links/gateway', { token: accountantToken })).status, 403);
   assert.equal((await call('PUT', '/payment-links/gateway', {
-    token: accepted.body.token, body: { keyId: 'rzp_test_HIJACK' }
+    token: accountantToken, body: { keyId: 'rzp_test_HIJACK' }
   })).status, 403);
 }));

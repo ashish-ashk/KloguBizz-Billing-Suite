@@ -243,6 +243,52 @@ async function sendInviteEmail({ to, name, inviteUrl, orgName, inviterName, expi
 }
 
 /**
+ * Emails a brand-new teammate their login email and a system-generated temporary
+ * password directly, rather than an accept-invite link — the account already
+ * exists and works the moment it's created (see controllers/userController.js
+ * #inviteUser), instead of waiting on the invitee to complete a second step.
+ *
+ * The plaintext password sitting in an inbox is the real tradeoff of this
+ * approach versus the token-link flow `sendInviteEmail` still uses for any invite
+ * issued before this shipped. It is bounded rather than accepted blindly:
+ * `mustChangePassword` (set alongside it) forces a change on first sign-in via the
+ * same account-guard pattern the superadmin MFA-enrolment gate uses
+ * (middleware/accountGuards.js#requirePasswordChange) — every other route refuses
+ * until it's cleared — so the temporary password is single-use in effect even
+ * though nothing stops it being read twice.
+ */
+async function sendCredentialsEmail({ to, name, tempPassword, loginUrl, orgName, inviterName, orgId }) {
+  const who = inviterName ? `<strong>${escapeHtml(inviterName)}</strong> has added you` : 'You have been added';
+  const body = `
+    <p style="margin:0 0 12px;">Hello ${escapeHtml(name || 'there')},</p>
+    <p style="margin:0 0 12px;">
+      ${who} to <strong>${escapeHtml(orgName || 'KloguBizz')}</strong> on KloguBizz, the GST billing suite.
+      Your account is ready to use right away.
+    </p>
+    <div style="margin:0 0 12px;background:#f4f4f7;border-radius:8px;padding:14px 16px;">
+      <div style="margin-bottom:6px;">Login email: <strong>${escapeHtml(to)}</strong></div>
+      <div>Temporary password: <strong style="font-family:monospace;font-size:15px;">${escapeHtml(tempPassword)}</strong></div>
+    </div>
+    <p style="margin:0;">You'll be asked to choose your own password the first time you sign in.</p>`;
+  return sendEmail({
+    to,
+    orgId,
+    type: 'credentials',
+    subject: `${inviterName || 'Your team'} added you to ${orgName || 'KloguBizz'}`,
+    html: layout({
+      title: 'Your account is ready',
+      body,
+      ctaLabel: 'Sign in',
+      ctaUrl: loginUrl,
+      footer: "For your security, you'll be required to set a new password on first sign-in. If you weren't expecting this, contact whoever manages your team."
+    }),
+    text: `Hello ${name || 'there'},\n\n${inviterName ? inviterName + ' has added you' : 'You have been added'} to ${orgName || 'KloguBizz'} on KloguBizz. Your account is ready to use right away.\n\n`
+      + `Login email: ${to}\nTemporary password: ${tempPassword}\n\n`
+      + `Sign in here: ${loginUrl}\nYou'll be asked to choose your own password the first time you sign in.\n`
+  });
+}
+
+/**
  * Notifies an *already-registered* identity that they've been added to a
  * further organisation (#53, #54).
  *
@@ -622,6 +668,7 @@ module.exports = {
   isSuppressed,
   recordEmail,
   sendInviteEmail,
+  sendCredentialsEmail,
   sendAddedToOrgEmail,
   sendPaymentLinkEmail,
   sendPasswordResetEmail,

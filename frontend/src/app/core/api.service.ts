@@ -772,7 +772,10 @@ export class ApiService {
    *  so the flow stays testable without leaking a live credential in production. */
   inviteUser(payload: { name: string; email: string; role: string }) {
     return this.afterWrite(
-      this.http.post<{ user: OrgUser; inviteUrl?: string; delivered: boolean }>(`${this.api}/users/invite`, payload),
+      // `tempPassword` (never `inviteUrl`) only when local mode has no mail
+      // provider configured — see userController.js#inviteUser. The account is
+      // already active with a system-generated password, not a pending link.
+      this.http.post<{ user: OrgUser; tempPassword?: string; delivered: boolean }>(`${this.api}/users/invite`, payload),
       NS.users, NS.subscription
     );
   }
@@ -793,7 +796,7 @@ export class ApiService {
   removeUser(id: string) {
     return this.afterWrite(this.http.delete<OrgUser>(`${this.api}/users/${id}`), NS.users, NS.subscription);
   }
-  changePassword(payload: { currentPassword: string; newPassword: string }) {
+  changePassword(payload: { currentPassword: string; newPassword: string; acceptTerms?: boolean }) {
     return this.http.post<{ ok: boolean }>(`${this.api}/auth/change-password`, payload);
   }
 

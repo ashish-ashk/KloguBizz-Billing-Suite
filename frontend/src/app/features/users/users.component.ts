@@ -290,21 +290,32 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
         </div>
       </app-modal>
 
-      <!-- Copyable invitation link, shown when email delivery isn't available.
-           Without this the admin has no way to get the invitee in at all. -->
-      <app-modal [open]="!!pendingInviteUrl()" title="Share this invitation link" [width]="560" (close)="pendingInviteUrl.set(null)">
-        @if (pendingInviteUrl(); as pending) {
+      <!-- Copyable invitation credentials/link, shown when email delivery isn't
+           available. Without this the admin has no way to get the invitee in at all. -->
+      <app-modal [open]="!!pendingInviteShare()" title="Share these sign-in details" [width]="560" (close)="pendingInviteShare.set(null)">
+        @if (pendingInviteShare(); as pending) {
           <p style="margin:0 0 14px;font-size:13px;color:var(--muted);line-height:1.6">
-            Email delivery isn't configured on this deployment, so the invitation for
-            <strong style="color:var(--text)">{{ pending.email }}</strong> wasn't sent.
-            Send them this link instead — it expires in seven days.
+            Email delivery isn't configured on this deployment, so nothing was sent to
+            <strong style="color:var(--text)">{{ pending.email }}</strong>.
+            @if (pending.tempPassword) {
+              Share their login email and temporary password with them directly.
+            } @else {
+              Send them this link instead — it expires in seven days.
+            }
           </p>
-          <div class="info-box" style="word-break:break-all;font-family:var(--font-mono,monospace);font-size:12px;">
-            {{ pending.url }}
-          </div>
+          @if (pending.tempPassword) {
+            <div class="info-box" style="font-family:var(--font-mono,monospace);font-size:12px;display:grid;gap:6px;">
+              <div>Login email: {{ pending.email }}</div>
+              <div>Temporary password: {{ pending.tempPassword }}</div>
+            </div>
+          } @else {
+            <div class="info-box" style="word-break:break-all;font-family:var(--font-mono,monospace);font-size:12px;">
+              {{ pending.url }}
+            </div>
+          }
           <div class="modal-foot">
-            <button class="btn ghost" type="button" (click)="pendingInviteUrl.set(null)">Close</button>
-            <button class="btn primary" type="button" (click)="copyInviteUrl()">Copy link</button>
+            <button class="btn ghost" type="button" (click)="pendingInviteShare.set(null)">Close</button>
+            <button class="btn primary" type="button" (click)="copyPendingShare()">Copy</button>
           </div>
         }
       </app-modal>
@@ -361,9 +372,11 @@ export class UsersComponent implements OnInit {
   removeTarget = signal<OrgUser | null>(null);
   revokeOpen = signal(false);
   revokeTarget = signal<OrgUser | null>(null);
-  /** Set when an invitation could not be emailed (no provider configured),
-   *  so the admin can copy the link and pass it on themselves. */
-  pendingInviteUrl = signal<{ email: string; url: string } | null>(null);
+  /** Set when an invitation could not be emailed (no provider configured), so the
+   *  admin can share it themselves — a link for `resendInvite` (still the legacy
+   *  token flow), or login credentials for a brand-new `inviteUser` (#65, which
+   *  creates the account active with a system-generated password instead). */
+  pendingInviteShare = signal<{ email: string; url?: string; tempPassword?: string } | null>(null);
 
   inviteName = '';
   inviteEmail = '';
@@ -490,21 +503,23 @@ export class UsersComponent implements OnInit {
       next: result => {
         this.saving.set(false);
         this.inviteOpen.set(false);
-        this.announceInvite(email, result.delivered, result.inviteUrl);
+        this.announceInvite(email, result.delivered, { tempPassword: result.tempPassword });
         this.load();
       },
       error: err => { this.saving.set(false); this.toast.httpError(err); }
     });
   }
 
-  /** Sends a fresh link, replacing any outstanding one. */
+  /** Sends a fresh link, replacing any outstanding one. Only reachable for a
+   *  legacy invite issued before #65 — a new invite is active immediately and
+   *  has nothing pending to resend. */
   resendInvite(u: OrgUser) {
     if (this.saving()) return;
     this.saving.set(true);
     this.api.resendInvite(u._id).subscribe({
       next: result => {
         this.saving.set(false);
-        this.announceInvite(u.email, result.delivered, result.inviteUrl);
+        this.announceInvite(u.email, result.delivered, { url: result.inviteUrl });
         this.load();
       },
       error: err => { this.saving.set(false); this.toast.httpError(err); }
@@ -514,30 +529,32 @@ export class UsersComponent implements OnInit {
   /**
    * Reports the outcome honestly.
    *
-   * With no email provider configured the backend returns the link instead of
-   * sending it, so claiming "invitation sent" would be a lie and the admin would
-   * have no way to get the invitee in. The link is surfaced for copying instead.
+   * With no email provider configured the backend returns the credentials (or,
+   * for a legacy resend, the link) instead of sending them, so claiming
+   * "invitation sent" would be a lie and the admin would have no way to get the
+   * invitee in. They're surfaced for copying instead.
    */
-  private announceInvite(email: string, delivered: boolean, inviteUrl?: string) {
+  private announceInvite(email: string, delivered: boolean, share: { url?: string; tempPassword?: string }) {
     if (delivered) {
       this.toast.success('Invitation emailed to ' + email);
-      this.pendingInviteUrl.set(null);
+      this.pendingInviteShare.set(null);
       return;
     }
-    if (inviteUrl) {
-      this.pendingInviteUrl.set({ email, url: inviteUrl });
-      this.toast.info('Email is not configured — copy the invitation link below.');
+    if (share.url || share.tempPassword) {
+      this.pendingInviteShare.set({ email, ...share });
+      this.toast.info('Email is not configured — share these sign-in details yourself.');
       return;
     }
     this.toast.info(`Invitation created for ${email}, but the email could not be delivered.`);
   }
 
-  copyInviteUrl() {
-    const pending = this.pendingInviteUrl();
+  copyPendingShare() {
+    const pending = this.pendingInviteShare();
     if (!pending) return;
-    navigator.clipboard?.writeText(pending.url).then(
-      () => this.toast.success('Invitation link copied'),
-      () => this.toast.error('Could not copy — select the link and copy it manually.')
+    const text = pending.tempPassword ? `${pending.email}\n${pending.tempPassword}` : (pending.url || '');
+    navigator.clipboard?.writeText(text).then(
+      () => this.toast.success(pending.tempPassword ? 'Login details copied' : 'Invitation link copied'),
+      () => this.toast.error('Could not copy — select the text and copy it manually.')
     );
   }
 

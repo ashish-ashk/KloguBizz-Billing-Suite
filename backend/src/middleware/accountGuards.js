@@ -88,6 +88,36 @@ function requireSuperadminMfa(req, res, next) {
 }
 
 /**
+ * Forces a fresh password before anything else, for an account created with a
+ * system-generated temporary password (the tenant-invite flow).
+ *
+ * Same shape as `requireSuperadminMfa` above, and for the same reason: a hard
+ * requirement checked at login would lock the invitee out of the only route that
+ * lets them fix it. So enforcement lives here, after authentication, and lets the
+ * routes that actually change the password (and the ones the app needs merely to
+ * render the page asking for it) through. Everything else refuses with
+ * `PASSWORD_CHANGE_REQUIRED` until `userController.changePassword` clears the flag.
+ */
+const PASSWORD_CHANGE_ALLOWED_PREFIXES = [
+  '/api/v1/auth/change-password',
+  '/api/v1/auth/me',
+  '/api/v1/auth/logout',
+  '/api/v1/auth/refresh'
+];
+
+function requirePasswordChange(req, res, next) {
+  if (!req.user || !req.user.mustChangePassword) return next();
+  if (isAlwaysAllowed(req)) return next();
+  if (PASSWORD_CHANGE_ALLOWED_PREFIXES.some(prefix => req.originalUrl.startsWith(prefix))) return next();
+
+  return next(httpError(
+    403,
+    'You must set a new password before continuing.',
+    'PASSWORD_CHANGE_REQUIRED'
+  ));
+}
+
+/**
  * Matches an IP against an allowlist entry, which may be a plain address or a CIDR
  * block. IPv4 only — an IPv6 CIDR match is a different algorithm, and quietly
  * accepting an IPv6 address that was never actually checked would be worse than
@@ -149,6 +179,7 @@ function superadminIpAllowlist(req, res, next) {
 module.exports = {
   requireVerifiedEmail,
   requireSuperadminMfa,
+  requirePasswordChange,
   superadminIpAllowlist,
   ipMatches
 };

@@ -6,13 +6,14 @@ const { Organisation } = require('../models/Organisation');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
-const { sendInviteEmail, sendAddedToOrgEmail } = require('../services/emailService');
+const { sendInviteEmail, sendCredentialsEmail, sendAddedToOrgEmail } = require('../services/emailService');
 const { assertUserQuota } = require('../services/planService');
 const { logAudit } = require('../services/auditService');
 const { pickFields } = require('../utils/pickFields');
 const { createToken, expiryFromNow, INVITE_TTL_MS } = require('../services/tokenService');
 const { revokeAllForUser } = require('../services/sessionService');
 const { env } = require('../config/env');
+const { CURRENT_TERMS_VERSION } = require('../config/legal');
 
 // Roles a tenant admin is allowed to hand out. Deliberately excludes
 // 'superadmin': that role is in the User enum because the platform owner
@@ -96,23 +97,44 @@ async function issueInvite(user, membership, req, orgName) {
 }
 
 /**
+ * A temporary password for a brand-new invitee (#65).
+ *
+ * Excludes visually ambiguous characters (0/O, 1/l/I) since a person may need to
+ * type this by hand from the email rather than paste it. 14 characters from this
+ * 60-character set is well over 80 bits of entropy — comfortably more than the
+ * account needs for the short window before `mustChangePassword` forces it to be
+ * replaced with one the person chose themselves.
+ */
+const TEMP_PASSWORD_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+function generateTempPassword(length = 14) {
+  const bytes = crypto.randomBytes(length);
+  let out = '';
+  for (let i = 0; i < length; i += 1) out += TEMP_PASSWORD_CHARSET[bytes[i] % TEMP_PASSWORD_CHARSET.length];
+  return out;
+}
+
+/**
  * Adds someone to the team.
  *
  * Three cases, because `User.email` is a single global identity but a person
  * can now belong to more than one organisation (#53, #54):
  *
- *  1. Genuinely new email — create the identity and its first (pending)
- *     membership together, exactly as before memberships existed.
+ *  1. Genuinely new email — create the identity and its first membership
+ *     together, both active immediately with a system-generated temporary
+ *     password (#65) rather than a pending invite to accept.
  *  2. An existing, already-active identity with no membership here yet — link
  *     immediately. There is nothing to accept: the person can already sign
  *     in, and the new organisation is simply there next time (or right away,
  *     via the org-switcher). This is the fix for #53 — inviting an
  *     accountant who already has their own KloguBizz account into a second
- *     business used to be flatly refused as "already registered".
- *  3. An existing identity that was invited elsewhere and never activated —
- *     refused: there is no working password yet for that identity to sign in
- *     with, so it cannot be an instant add. They have to finish their first
- *     invite before being added to a second.
+ *     business used to be flatly refused as "already registered". Since #65,
+ *     this is also where a brand-new invitee's *second* invite lands — their
+ *     first invite already made them case 2's "existing, already-active"
+ *     identity, so there is no more in-between state to block on.
+ *  3. An existing identity invited elsewhere and never activated — refused:
+ *     there is no working password yet for that identity to sign in with, so
+ *     it cannot be an instant add. Only reachable for a row that predates
+ *     #65 — a fresh invite is case 1 above and is never left in this state.
  */
 const inviteUser = asyncHandler(async (req, res) => {
   const { name, email, role = 'viewer' } = req.body;
@@ -153,22 +175,45 @@ const inviteUser = asyncHandler(async (req, res) => {
     return res.status(201).json({ user: shapeOrgUser(existing, newMembership), delivered: !!result.sent });
   }
 
+  /**
+   * The account is created active, with a real (system-generated) password, and
+   * usable the instant this responds — not a token-link the invitee has to
+   * complete first (#65). `mustChangePassword` is what keeps that safe: every
+   * route except the ones needed to change it refuses until they have, via
+   * `middleware/accountGuards.js#requirePasswordChange` — the same shape already
+   * used to make superadmin MFA enrolment mandatory without being a lockout.
+   */
+  const tempPassword = generateTempPassword();
   const user = await User.create({
     orgId: req.orgId, // legacy "home org" only — see models/User.js
     name,
     email,
     role,
-    status: 'invited',
-    // A random unusable password: the account has no password until the invite
-    // is redeemed, and this keeps the required field satisfied without leaving
-    // a guessable value behind.
-    passwordHash: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12)
+    status: 'active',
+    mustChangePassword: true,
+    passwordHash: await bcrypt.hash(tempPassword, 12)
   });
-  const membership = await Membership.create({ userId: user._id, orgId: req.orgId, role, status: 'invited' });
+  const membership = await Membership.create({ userId: user._id, orgId: req.orgId, role, status: 'active' });
 
-  const { inviteUrl, delivered } = await issueInvite(user, membership, req, org?.name);
+  const result = await sendCredentialsEmail({
+    orgId: req.orgId,
+    to: user.email,
+    name: user.name,
+    tempPassword,
+    loginUrl: `${env.FRONTEND_URL}/login`,
+    orgName: org?.name,
+    inviterName: req.user?.name
+  });
+  const delivered = !!result.sent;
   logAudit({ req, action: 'user.invited', entity: 'user', entityId: user._id, meta: { email, role, delivered } });
-  res.status(201).json({ user: shapeOrgUser(user, membership), inviteUrl, delivered });
+  // In local mode there's no email, so the temp password is returned for hand-off.
+  // Never in production, where an admin could otherwise harvest a working
+  // credential for an address they don't control.
+  res.status(201).json({
+    user: shapeOrgUser(user, membership),
+    delivered,
+    tempPassword: result.skipped && !env.isProduction ? tempPassword : undefined
+  });
 });
 
 /**
@@ -217,13 +262,33 @@ const revokeInvite = asyncHandler(async (req, res) => {
 
 // Authenticated user changes their own password.
 const changePassword = asyncHandler(async (req, res) => {
-  const { currentPassword, newPassword } = req.body;
+  const { currentPassword, newPassword, acceptTerms } = req.body;
   if (!currentPassword || !newPassword) throw httpError(400, 'currentPassword and newPassword are required');
   if (newPassword.length < 8) throw httpError(400, 'New password must be at least 8 characters');
   const user = await User.findById(req.user._id);
   const valid = await bcrypt.compare(currentPassword, user.passwordHash);
   if (!valid) throw httpError(401, 'Current password is incorrect');
+
+  /**
+   * The tenant-invite flow (#65) creates the account active immediately with a
+   * system-generated password, and never asked the invitee to accept the Terms &
+   * Conditions/SLA the way `register` and the legacy accept-invite flow both do —
+   * a real gap, not a shortcut. This mandatory first password change is the one
+   * guaranteed moment the invitee interacts with their own account, so it doubles
+   * as that acceptance. `termsAcceptedAt` already unset is what scopes this to
+   * only that first change — a routine later password change doesn't re-ask.
+   */
+  if (user.mustChangePassword && !user.termsAcceptedAt) {
+    if (acceptTerms !== true) {
+      throw httpError(400, 'You must accept the Terms & Conditions and SLA to continue');
+    }
+    user.termsAcceptedAt = new Date();
+    user.termsVersion = CURRENT_TERMS_VERSION;
+  }
+
   user.passwordHash = await bcrypt.hash(newPassword, 12);
+  // Clears the tenant-invite gate (#65) — a no-op for anyone who didn't have it set.
+  user.mustChangePassword = false;
   // Invalidate other active sessions in case the password was compromised.
   user.sessionVersion = (user.sessionVersion || 0) + 1;
   await user.save();

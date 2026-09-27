@@ -49,6 +49,9 @@ export interface AuthUser {
     backupCodesRemaining: number;
   };
   platformRole?: string;
+  /** Set only for an account created via the tenant-invite flow with a
+   *  system-generated temporary password — see change-password.component.ts. */
+  mustChangePassword?: boolean;
 }
 
 export interface Organisation {

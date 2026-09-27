@@ -16,13 +16,17 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const app = require('../server');
 const { Plan } = require('../src/models/Plan');
 const { User } = require('../src/models/User');
+const { Membership } = require('../src/models/Membership');
 const { Organisation } = require('../src/models/Organisation');
 const { Reminder } = require('../src/models/Settings');
 const { ReminderLog } = require('../src/models/ReminderLog');
 const { runReminderSweep } = require('../src/services/reminderService');
+const { createToken, expiryFromNow, INVITE_TTL_MS } = require('../src/services/tokenService');
 
 let server;
 let baseUrl;
@@ -99,6 +103,30 @@ function tokenFromUrl(url) {
   return decodeURIComponent(new URL(url).searchParams.get('token'));
 }
 
+/**
+ * Builds a pending token-based invite directly, bypassing `POST /users/invite`.
+ *
+ * That endpoint now creates a *new* invitee's account active immediately, with a
+ * system-generated temporary password rather than a token to redeem (#65) — real
+ * accounts are never in the 'invited' state going forward. The token/accept-invite
+ * machinery below it is unchanged and still matters for any row already in that
+ * state from before this shipped, which is what these tests construct by hand,
+ * mirroring exactly what `userController.js#issueInvite` used to do at this point.
+ */
+async function createLegacyInvite({ orgId, name, email, role = 'accountant' }) {
+  const user = await User.create({
+    orgId, name, email, role, status: 'invited',
+    passwordHash: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12)
+  });
+  await Membership.create({ userId: user._id, orgId, role, status: 'invited' });
+  const { token, hash } = createToken();
+  user.inviteTokenHash = hash;
+  user.inviteTokenExpires = expiryFromNow(INVITE_TTL_MS);
+  user.invitedAt = new Date();
+  await user.save();
+  return { user, inviteToken: token };
+}
+
 const maybe = fn => async t => {
   if (!dbAvailable) return t.skip('MongoDB not available');
   return fn(t);
@@ -108,12 +136,9 @@ const maybe = fn => async t => {
 
 test('an invited teammate can actually activate their account and sign in', maybe(async () => {
   const owner = await registerOrg();
-  const invite = await call('POST', '/users/invite', {
-    token: owner.token,
-    body: { name: 'New Teammate', email: `mate${counter}@flow.test`, role: 'accountant' }
+  const { inviteToken } = await createLegacyInvite({
+    orgId: owner.org._id, name: 'New Teammate', email: `mate${counter}@flow.test`, role: 'accountant'
   });
-  assert.equal(invite.status, 201);
-  const inviteToken = tokenFromUrl(invite.body.inviteUrl);
 
   // Before activation the account exists but cannot be used — this is exactly
   // the state every invited user used to be stuck in forever.
@@ -153,10 +178,9 @@ test('an invited teammate can actually activate their account and sign in', mayb
 
 test('accepting an invitation requires accepting the terms', maybe(async () => {
   const owner = await registerOrg();
-  const invite = await call('POST', '/users/invite', {
-    token: owner.token, body: { name: 'Terms Refuser', email: `terms${counter}@flow.test` }
+  const { inviteToken } = await createLegacyInvite({
+    orgId: owner.org._id, name: 'Terms Refuser', email: `terms${counter}@flow.test`
   });
-  const inviteToken = tokenFromUrl(invite.body.inviteUrl);
 
   const refused = await call('POST', '/auth/accept-invite', {
     body: { token: inviteToken, password: 'Password@123', acceptTerms: false }
@@ -171,10 +195,9 @@ test('accepting an invitation requires accepting the terms', maybe(async () => {
 
 test('the invite token is stored only as a hash', maybe(async () => {
   const owner = await registerOrg();
-  const invite = await call('POST', '/users/invite', {
-    token: owner.token, body: { name: 'Hash Check', email: `hash${counter}@flow.test` }
+  const { inviteToken } = await createLegacyInvite({
+    orgId: owner.org._id, name: 'Hash Check', email: `hash${counter}@flow.test`
   });
-  const inviteToken = tokenFromUrl(invite.body.inviteUrl);
 
   const stored = await User.findOne({ email: `hash${counter}@flow.test` }).lean();
   assert.ok(stored.inviteTokenHash, 'a hash should be stored');
@@ -186,8 +209,7 @@ test('the invite token is stored only as a hash', maybe(async () => {
 test('an expired invitation is refused with a distinct, actionable error', maybe(async () => {
   const owner = await registerOrg();
   const email = `expired${counter}@flow.test`;
-  const invite = await call('POST', '/users/invite', { token: owner.token, body: { name: 'Late', email } });
-  const inviteToken = tokenFromUrl(invite.body.inviteUrl);
+  const { inviteToken } = await createLegacyInvite({ orgId: owner.org._id, name: 'Late', email });
 
   await User.updateOne({ email }, { inviteTokenExpires: new Date(Date.now() - 1000) });
 
@@ -204,9 +226,8 @@ test('an expired invitation is refused with a distinct, actionable error', maybe
 test('resending replaces the old link, and withdrawing frees the email address', maybe(async () => {
   const owner = await registerOrg();
   const email = `resend${counter}@flow.test`;
-  const first = await call('POST', '/users/invite', { token: owner.token, body: { name: 'Resend Me', email } });
-  const firstToken = tokenFromUrl(first.body.inviteUrl);
-  const userId = first.body.user._id;
+  const { user: firstUser, inviteToken: firstToken } = await createLegacyInvite({ orgId: owner.org._id, name: 'Resend Me', email });
+  const userId = String(firstUser._id);
 
   const resent = await call('POST', `/users/${userId}/resend-invite`, { token: owner.token, body: {} });
   assert.equal(resent.status, 200);
@@ -321,10 +342,14 @@ test('an expired reset link is refused', maybe(async () => {
   assert.equal(reset.body.code, 'RESET_EXPIRED');
 }));
 
-test('an invited user cannot use password reset to bypass the invite flow', maybe(async () => {
+test('an invited-but-unactivated legacy user cannot use password reset to bypass the invite flow', maybe(async () => {
+  // A brand-new invite (#65) is active immediately with a real password, so this
+  // scenario — an account that exists but was never activated — is now only
+  // reachable for a pre-existing legacy 'invited' row, constructed directly here
+  // the same way the other legacy-invite tests above do.
   const owner = await registerOrg();
   const email = `bypass${counter}@flow.test`;
-  await call('POST', '/users/invite', { token: owner.token, body: { name: 'Not Yet', email } });
+  await createLegacyInvite({ orgId: owner.org._id, name: 'Not Yet', email });
 
   // Accepting the invite is the only way in — a reset here would activate the
   // account without terms acceptance.

@@ -22,7 +22,10 @@ const loginSchema = z.object({
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, 'is required').max(200),
-  newPassword: z.string().min(8, 'must be at least 8 characters').max(200)
+  newPassword: z.string().min(8, 'must be at least 8 characters').max(200),
+  // Only meaningful — and only required — on the mandatory first change after a
+  // tenant invite (#65); see userController.js#changePassword.
+  acceptTerms: z.boolean().optional()
 });
 
 // Tokens are base64url of 32 random bytes; bounded so an absurd payload is

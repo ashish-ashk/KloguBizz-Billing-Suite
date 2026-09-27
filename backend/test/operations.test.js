@@ -25,6 +25,7 @@ const { Organisation } = require('../src/models/Organisation');
 const { Item } = require('../src/models/Item');
 const { StockMovement } = require('../src/models/StockMovement');
 const { StockLayer } = require('../src/models/StockLayer');
+const { activateInvitedUser } = require('./testHelpers');
 const { EmailLog } = require('../src/models/EmailLog');
 const { Master } = require('../src/models/Settings');
 const { invalidateMasterCache } = require('../src/services/masterService');
@@ -1353,23 +1354,12 @@ test('a tenant can read its own audit trail, and only its own', maybe(async () =
 
 test('the activity log is admin-only', maybe(async () => {
   const tenant = await registerOrg();
-  const invite = await call('POST', '/users/invite', {
-    token: tenant.token,
-    body: { name: 'Viewer', email: `viewer${counter}@tenant.test`, role: 'viewer' }
+  const { token: viewerToken } = await activateInvitedUser(call, {
+    ownerToken: tenant.token, name: 'Viewer', email: `viewer${counter}@tenant.test`, role: 'viewer'
   });
-  assert.equal(invite.status, 201, JSON.stringify(invite.body));
-
-  const accepted = await call('POST', '/auth/accept-invite', {
-    body: {
-      token: new URL(invite.body.inviteUrl).searchParams.get('token'),
-      password: 'Password@123',
-      acceptTerms: true
-    }
-  });
-  assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
 
   // It names individual users' actions, so it is not a viewer's to read.
-  const refused = await call('GET', '/reports/activity', { token: accepted.body.token });
+  const refused = await call('GET', '/reports/activity', { token: viewerToken });
   assert.equal(refused.status, 403);
 }));
 
@@ -2171,29 +2161,19 @@ test('each document type keeps its own series', maybe(async () => {
 
 test('numbering is for the owner to set, not the accountant', maybe(async () => {
   const tenant = await registerOrg();
-  const invite = await call('POST', '/users/invite', {
-    token: tenant.token,
-    body: { name: 'Books', email: `books${counter}@tenant.test`, role: 'accountant' }
+  const { token: accountantToken } = await activateInvitedUser(call, {
+    ownerToken: tenant.token, name: 'Books', email: `books${counter}@tenant.test`, role: 'accountant'
   });
-  assert.equal(invite.status, 201, JSON.stringify(invite.body));
-  const accepted = await call('POST', '/auth/accept-invite', {
-    body: {
-      token: new URL(invite.body.inviteUrl).searchParams.get('token'),
-      password: 'Password@123',
-      acceptTerms: true
-    }
-  });
-  assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
 
   /**
    * Numbering decides what is printed on every document the business issues, and
    * the next-number field can move a series forward irreversibly. That is the
    * owner's call, so both reading and writing are admin-only.
    */
-  const read = await call('GET', '/organisations/current/document-series', { token: accepted.body.token });
+  const read = await call('GET', '/organisations/current/document-series', { token: accountantToken });
   assert.equal(read.status, 403);
   const write = await call('PUT', '/organisations/current/document-series', {
-    token: accepted.body.token, body: { invoice: { nextNumber: 9000 } }
+    token: accountantToken, body: { invoice: { nextNumber: 9000 } }
   });
   assert.equal(write.status, 403);
 
@@ -2436,18 +2416,10 @@ test('the example row in the template is not imported as a customer', maybe(asyn
 
 test('a viewer cannot import a customer list', maybe(async () => {
   const tenant = await registerOrg();
-  const invite = await call('POST', '/users/invite', {
-    token: tenant.token,
-    body: { name: 'Viewer', email: `csvviewer${counter}@tenant.test`, role: 'viewer' }
+  const { token: viewerToken } = await activateInvitedUser(call, {
+    ownerToken: tenant.token, name: 'Viewer', email: `csvviewer${counter}@tenant.test`, role: 'viewer'
   });
-  const accepted = await call('POST', '/auth/accept-invite', {
-    body: {
-      token: new URL(invite.body.inviteUrl).searchParams.get('token'),
-      password: 'Password@123',
-      acceptTerms: true
-    }
-  });
-  const refused = await uploadCsv(accepted.body.token, [HEADER, 'Sneaky Co,,Maharashtra,,,,'].join('\n'));
+  const refused = await uploadCsv(viewerToken, [HEADER, 'Sneaky Co,,Maharashtra,,,,'].join('\n'));
   assert.equal(refused.status, 403);
 }));
 

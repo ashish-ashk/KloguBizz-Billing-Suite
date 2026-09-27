@@ -314,6 +314,13 @@ export class LoginComponent implements OnInit, AfterViewChecked {
           this.password = '';
           return;
         }
+        // A temporary password from the tenant-invite flow (#65) — every other
+        // route refuses server-side until this is done, so land here directly
+        // rather than bouncing off a 403 on whatever the normal destination is.
+        if (res.user?.mustChangePassword) {
+          this.router.navigateByUrl('/change-password');
+          return;
+        }
         this.land(res.user?.role);
       },
       error: err => {

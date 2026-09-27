@@ -91,6 +91,10 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
         auth.requireMfaEnrolment();
       }
 
+      if (err.status === 403 && err.error?.code === 'PASSWORD_CHANGE_REQUIRED') {
+        auth.requirePasswordChange();
+      }
+
       // The organisation was suspended or cancelled while this session was open.
       // The cached organisation still says 'active' (it was stored at login), so
       // sync it — otherwise the read-only banner never appears and the user just

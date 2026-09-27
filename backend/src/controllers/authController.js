@@ -117,7 +117,12 @@ function publicUser(user, role) {
     // (which is meaningless once a membership exists — see models/User.js).
     role: role ?? user.role,
     status: user.status,
-    mfa: mfaSummary(user)
+    mfa: mfaSummary(user),
+    // Set only by the tenant-invite flow (a system-generated temporary password).
+    // The frontend redirects to the change-password screen the moment it sees this,
+    // and `middleware/accountGuards.js#requirePasswordChange` refuses every other
+    // route server-side regardless of what the client does with it.
+    mustChangePassword: !!user.mustChangePassword
   };
 }
 

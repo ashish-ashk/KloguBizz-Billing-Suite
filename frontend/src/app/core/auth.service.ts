@@ -303,6 +303,21 @@ export class AuthService {
   }
 
   /**
+   * Same shape as `requireMfaEnrolment` above, for an account created with a
+   * system-generated temporary password (the tenant-invite flow, #65). The
+   * server refuses every other route with `PASSWORD_CHANGE_REQUIRED` until it's
+   * cleared, so this is not a suggestion — it's sending the user to the one page
+   * that can actually get them unstuck.
+   */
+  private passwordChangeRedirectAt = 0;
+  requirePasswordChange() {
+    if (Date.now() - this.passwordChangeRedirectAt < 3000) return;
+    this.passwordChangeRedirectAt = Date.now();
+    this.toast.info('You must set a new password before continuing.');
+    this.router.navigateByUrl('/change-password');
+  }
+
+  /**
    * Exchanges the stored refresh token for a new 15-minute access token.
    *
    * Called proactively (shortly before the current token's own expiry, from

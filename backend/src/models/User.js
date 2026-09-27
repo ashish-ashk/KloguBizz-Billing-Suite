@@ -93,6 +93,16 @@ const userSchema = new mongoose.Schema({
     backupCodes: { type: [String], default: [] },
     backupCodesGeneratedAt: Date
   },
+  /**
+   * Set when an account is created with a system-generated temporary password
+   * (the tenant-invite flow — see controllers/userController.js#inviteUser) rather
+   * than one the person chose themselves. Enforced by
+   * middleware/accountGuards.js#requirePasswordChange, the same shape as the
+   * superadmin MFA-enrolment gate: every route refuses except the ones needed to
+   * clear it, so a plaintext password that briefly sat in an inbox has a very
+   * short useful lifetime rather than remaining a standing credential.
+   */
+  mustChangePassword: { type: Boolean, default: false },
   // Bumped on every login (and password change) to invalidate JWTs issued
   // before the bump — enforces a single active session per user.
   sessionVersion: { type: Number, default: 0 },

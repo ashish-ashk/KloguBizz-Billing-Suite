@@ -20,6 +20,7 @@ const { Plan } = require('../src/models/Plan');
 const { Reminder } = require('../src/models/Settings');
 const { ReminderLog } = require('../src/models/ReminderLog');
 const { runReminderSweep } = require('../src/services/reminderService');
+const { activateInvitedUser } = require('./testHelpers');
 
 let server;
 let baseUrl;
@@ -267,15 +268,10 @@ test('an accountant may record payments but not write off revenue', maybe(async 
   const { token, clientId, org } = await setup();
   const invoice = await issueInvoice(token, clientId);
 
-  const invite = await call('POST', '/users/invite', {
-    token, body: { name: 'Book Keeper', email: `acct${counter}@cn.test`, role: 'accountant' }
+  const { token: accountantToken, organisation } = await activateInvitedUser(call, {
+    ownerToken: token, name: 'Book Keeper', email: `acct${counter}@cn.test`, role: 'accountant'
   });
-  const inviteToken = decodeURIComponent(new URL(invite.body.inviteUrl).searchParams.get('token'));
-  const accepted = await call('POST', '/auth/accept-invite', {
-    body: { token: inviteToken, password: 'Accountant@1', acceptTerms: true }
-  });
-  const accountantToken = accepted.body.token;
-  assert.equal(String(accepted.body.organisation._id), String(org._id));
+  assert.equal(String(organisation._id), String(org._id));
 
   // Can take money in...
   assert.equal((await call('POST', '/payments', {

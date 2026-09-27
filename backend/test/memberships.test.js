@@ -232,23 +232,31 @@ test('switching organisations re-issues a session for the other membership', may
   assert.equal(denied.body.code, 'MEMBERSHIP_REVOKED');
 }));
 
-test('a pending (not yet accepted) invite blocks being added elsewhere until it is resolved', maybe(async () => {
+test('an invited identity is active immediately, so a second invite elsewhere links rather than blocks (#65)', maybe(async () => {
+  // Before #65, a fresh invite left the identity in a pending 'invited' state
+  // with no working password, and a second org inviting that same address was
+  // refused until the first invite was accepted. A fresh invite is now active
+  // immediately with a real (temporary) password, so there is no more
+  // in-between state to block on — this collapses into the same "link an
+  // existing active identity immediately" case #53 already added.
   const orgA = await registerOrg();
   const orgB = await registerOrg();
   const email = `pending${counter}@member.test`;
 
   const firstInvite = await call('POST', '/users/invite', {
     token: (await login(orgA.email)).token,
-    body: { name: 'Not Yet Active', email }
+    body: { name: 'Active Right Away', email }
   });
   assert.equal(firstInvite.status, 201);
+  assert.equal(firstInvite.body.user.status, 'active');
 
   const secondInvite = await call('POST', '/users/invite', {
     token: (await login(orgB.email)).token,
-    body: { name: 'Not Yet Active', email }
+    body: { name: 'Active Right Away', email, role: 'viewer' }
   });
-  assert.equal(secondInvite.status, 409);
-  assert.equal(secondInvite.body.code, 'EMAIL_IN_USE');
+  assert.equal(secondInvite.status, 201);
+  assert.equal(secondInvite.body.user.status, 'active');
+  assert.equal(secondInvite.body.user.role, 'viewer');
 }));
 
 test('removing someone from one organisation does not delete an identity that still belongs to another', maybe(async () => {
