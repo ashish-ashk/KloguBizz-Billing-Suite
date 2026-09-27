@@ -151,14 +151,45 @@ const inviteUser = asyncHandler(async (req, res) => {
       if (membership.status !== 'disabled') {
         throw httpError(409, `${email} is already on your team.`, 'EMAIL_IN_USE');
       }
-      // Was removed before — re-add rather than error. The identity and its
-      // history (audit entries, invoices they issued) are still valid.
+      /**
+       * Was removed before — re-add rather than error. The identity and its
+       * history (audit entries, invoices they issued) are still valid, but the
+       * *credentials* are not treated as still valid: whoever is re-adding them
+       * has no way to know, or trust, whatever password was set before, so a
+       * re-added account with an unknown password is unusable to everyone,
+       * including the person it belongs to. A fresh temporary password +
+       * `mustChangePassword` puts them through exactly the same first-login flow
+       * a brand-new invite does (#65 follow-up), and every existing session for
+       * this identity is killed the same way any other admin-initiated
+       * credential change kills sessions elsewhere in this file.
+       */
+      const tempPassword = generateTempPassword();
+      existing.passwordHash = await bcrypt.hash(tempPassword, 12);
+      existing.mustChangePassword = true;
+      existing.sessionVersion = (existing.sessionVersion || 0) + 1;
+      await existing.save();
+      await revokeAllForUser(existing._id, 'admin_revoked');
+
       membership.role = role;
       membership.status = 'active';
       await membership.save();
       logAudit({ req, action: 'user.invited', entity: 'user', entityId: existing._id, meta: { email, role, reactivated: true } });
-      const result = await sendAddedToOrgEmail({ to: existing.email, name: existing.name, orgName: org?.name, inviterName: req.user?.name, orgId: req.orgId });
-      return res.status(201).json({ user: shapeOrgUser(existing, membership), delivered: !!result.sent });
+
+      const result = await sendCredentialsEmail({
+        orgId: req.orgId,
+        to: existing.email,
+        name: existing.name,
+        tempPassword,
+        loginUrl: `${env.FRONTEND_URL}/login`,
+        orgName: org?.name,
+        inviterName: req.user?.name
+      });
+      const delivered = !!result.sent;
+      return res.status(201).json({
+        user: shapeOrgUser(existing, membership),
+        delivered,
+        tempPassword: result.skipped && !env.isProduction ? tempPassword : undefined
+      });
     }
 
     if (existing.status !== 'active') {
@@ -297,6 +328,56 @@ const changePassword = asyncHandler(async (req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * Lets an org admin reset any teammate's password at any time — not only when
+ * they've forgotten it (that's the self-service `/auth/forgot-password`), but
+ * whenever the admin decides to: handing the account to a different person,
+ * responding to a suspected compromise, or simply because the teammate lost
+ * their temporary password before ever signing in. Mirrors the superadmin
+ * platform console's `resetTenantUserPassword` (platformController.js),
+ * scoped down to this tenant and to whichever teammate an admin may already
+ * manage — no separate capability, since anyone who can invite or remove a
+ * teammate can already affect their access just as thoroughly.
+ */
+const resetUserPassword = asyncHandler(async (req, res) => {
+  await assertNotProtectedOwner(req, req.params.id);
+  const membership = await Membership.findOne({ userId: req.params.id, ...tenantFilter(req) });
+  if (!membership) throw httpError(404, 'User not found');
+  const user = await User.findById(req.params.id);
+  if (!user) throw httpError(404, 'User not found');
+
+  const tempPassword = generateTempPassword();
+  user.passwordHash = await bcrypt.hash(tempPassword, 12);
+  user.mustChangePassword = true;
+  // Same reasoning as the superadmin console's version: resolving a reset also
+  // clears a brute-force lockout, and every existing session must die — a
+  // reset that leaves the old session alive is not a reset.
+  user.failedLoginAttempts = 0;
+  user.lockedUntil = undefined;
+  user.lastFailedLoginAt = undefined;
+  user.sessionVersion = (user.sessionVersion || 0) + 1;
+  await user.save();
+  await revokeAllForUser(user._id, 'admin_revoked');
+
+  const org = await Organisation.findById(req.orgId).select('name').lean();
+  const result = await sendCredentialsEmail({
+    orgId: req.orgId,
+    to: user.email,
+    name: user.name,
+    tempPassword,
+    loginUrl: `${env.FRONTEND_URL}/login`,
+    orgName: org?.name,
+    inviterName: req.user?.name
+  });
+  const delivered = !!result.sent;
+  logAudit({ req, action: 'user.password_reset_by_admin', entity: 'user', entityId: user._id, meta: { delivered } });
+  res.json({
+    user: shapeOrgUser(user, membership),
+    delivered,
+    tempPassword: result.skipped && !env.isProduction ? tempPassword : undefined
+  });
+});
+
 const updateUser = asyncHandler(async (req, res) => {
   await assertNotProtectedOwner(req, req.params.id);
   // Only these three fields — see ASSIGNABLE_ROLES above for why role in
@@ -352,5 +433,5 @@ const removeUser = asyncHandler(async (req, res) => {
 
 module.exports = {
   listUsers, inviteUser, resendInvite, revokeInvite,
-  updateUser, removeUser, changePassword
+  updateUser, removeUser, changePassword, resetUserPassword
 };

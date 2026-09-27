@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const {
   listUsers, inviteUser, resendInvite, revokeInvite,
-  updateUser, removeUser
+  updateUser, removeUser, resetUserPassword
 } = require('../controllers/userController');
 const { protect } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/roleMiddleware');
@@ -17,6 +17,7 @@ router.post('/invite', requireRole('admin'), validate(userInviteSchema), inviteU
 router.post('/:id/resend-invite', requireRole('admin'), resendInvite);
 router.delete('/:id/invite', requireRole('admin'), revokeInvite);
 router.put('/:id', requireRole('admin'), validate(userUpdateSchema), updateUser);
+router.post('/:id/reset-password', requireRole('admin'), resetUserPassword);
 router.delete('/:id', requireRole('admin'), removeUser);
 
 module.exports = router;

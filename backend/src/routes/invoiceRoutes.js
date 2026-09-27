@@ -10,6 +10,7 @@ const {
   cancelInvoice,
   sendReminder,
   remindAll,
+  reminderStatusForInvoices,
   deleteInvoice,
   restoreInvoice,
   sendInvoiceToCustomer,
@@ -28,6 +29,7 @@ router.get('/stats', invoiceStats);
 router.get('/export.csv', exportInvoicesCsv);
 router.post('/', requireRole('admin', 'accountant'), validate(invoiceCreateSchema), createInvoice);
 router.post('/remind-all', requireRole('admin', 'accountant'), remindAll);
+router.get('/reminder-status', requireRole('admin', 'accountant'), reminderStatusForInvoices);
 router.get('/:id', getInvoice);
 router.put('/:id', requireRole('admin', 'accountant'), validate(invoiceUpdateSchema), updateInvoice);
 router.post('/:id/duplicate', requireRole('admin', 'accountant'), duplicateInvoice);

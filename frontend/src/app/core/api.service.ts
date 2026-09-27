@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, of } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 import { CacheService } from './cache.service';
@@ -189,6 +189,14 @@ export class ApiService {
     return this.http.post<{
       queued: boolean; eligible: number; withoutEmail: number; total: number; message: string;
     }>(`${this.api}/invoices/remind-all`, {});
+  }
+  /** The latest reminder attempt per invoice — "already reminded today" vs.
+   *  "genuinely hasn't been chased", which look identical otherwise. */
+  reminderStatus(ids: string[]) {
+    if (!ids.length) return of({} as Record<string, { stage: string; status: string; reason?: string; createdAt: string }>);
+    return this.http.get<Record<string, { stage: string; status: string; reason?: string; createdAt: string }>>(
+      `${this.api}/invoices/reminder-status`, { params: { ids: ids.join(',') } }
+    );
   }
   deleteInvoice(id: string) {
     return this.afterWrite(this.http.delete(`${this.api}/invoices/${id}`), NS.invoices, NS.reports);
@@ -783,6 +791,14 @@ export class ApiService {
   resendInvite(id: string) {
     return this.afterWrite(
       this.http.post<{ user: OrgUser; inviteUrl?: string; delivered: boolean }>(`${this.api}/users/${id}/resend-invite`, {}),
+      NS.users
+    );
+  }
+  /** Admin-initiated, any time — not just "forgot password". Issues a fresh
+   *  temporary password and forces the teammate to change it on next sign-in. */
+  resetUserPassword(id: string) {
+    return this.afterWrite(
+      this.http.post<{ user: OrgUser; tempPassword?: string; delivered: boolean }>(`${this.api}/users/${id}/reset-password`, {}),
       NS.users
     );
   }

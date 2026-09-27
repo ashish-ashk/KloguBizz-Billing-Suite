@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit, computed, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, effect, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AppShellComponent } from '../../shared/app-shell.component';
@@ -273,6 +273,12 @@ type PayTab = 'tracker' | 'history' | 'reminders';
                     }
                   </div>
                 </div>
+                @if (reminderNote(inv); as note) {
+                  <!-- Otherwise "already reminded today, correctly skipped" and
+                       "genuinely stuck" look identical — the dedup in the sweep
+                       is invisible without this. -->
+                  <div class="hint" [style.color]="note.color" style="margin-bottom:12px">{{ note.text }}</div>
+                }
                 <div style="display:flex;gap:8px">
                   <button class="btn primary sm" type="button" style="flex:1" (click)="openRemind(inv)"><app-icon name="mail" [size]="13" /> Send Reminder</button>
                   <button class="btn success sm" type="button" (click)="openPay(inv)">Record Payment</button>
@@ -435,6 +441,9 @@ export class PaymentsComponent implements OnInit, OnDestroy {
   confirmRemindAll = signal(false);
   remindingAll = signal(false);
   exporting = signal(false);
+  /** The latest reminder attempt per invoice id, for the note under each card —
+   *  see `reminderNote()`. */
+  reminderStatus = signal<Record<string, { stage: string; status: string; reason?: string; createdAt: string }>>({});
 
   methods = ['Bank Transfer', 'UPI', 'NEFT', 'RTGS', 'Razorpay', 'Cheque', 'Cash'];
 
@@ -461,6 +470,18 @@ export class PaymentsComponent implements OnInit, OnDestroy {
     this.due.sort.set('dueDate');
     this.due.pageSize.set(10);
     this.history.pageSize.set(10);
+
+    // Whenever the due-invoices page changes — including right after Remind
+    // All or a single Send Reminder refreshes it — fetch the latest reminder
+    // attempt for exactly the invoices on screen.
+    effect(() => {
+      const ids = this.due.rows().map(inv => inv._id);
+      if (!ids.length) { this.reminderStatus.set({}); return; }
+      this.api.reminderStatus(ids).subscribe({
+        next: byInvoice => this.reminderStatus.set(byInvoice),
+        error: () => {} // Cosmetic — the page works fine without it.
+      });
+    });
   }
 
   ngOnInit() { this.load(); }
@@ -512,6 +533,23 @@ export class PaymentsComponent implements OnInit, OnDestroy {
    */
   remainingFor(inv: Invoice): number {
     return inv.balanceDue ?? Math.max(0, inv.totals?.total || 0);
+  }
+
+  /**
+   * A short line on why this invoice's reminder state is what it is — mainly so
+   * "Remind All correctly skipped this, already sent today" doesn't look
+   * identical to "this is genuinely stuck". Returns null (renders nothing) when
+   * there's no attempt on record at all, which is the common case for an
+   * invoice that isn't overdue yet.
+   */
+  reminderNote(inv: Invoice): { text: string; color: string } | null {
+    const entry = this.reminderStatus()[inv._id];
+    if (!entry) return null;
+    const when = this.fmtDate(entry.createdAt);
+    if (entry.status === 'sent') return { text: `Last reminder sent ${when}`, color: 'var(--green)' };
+    if (entry.status === 'failed') return { text: `Last attempt failed (${when}): ${entry.reason || 'unknown reason'}`, color: 'var(--red)' };
+    // 'skipped' — no recipient, suppressed, or no mail provider configured.
+    return { text: `Last attempt skipped (${when}): ${entry.reason || 'not delivered'}`, color: 'var(--amber)' };
   }
 
   orgName(): string {

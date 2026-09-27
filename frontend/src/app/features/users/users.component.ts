@@ -102,6 +102,9 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
                       <button class="btn ghost sm" type="button" [disabled]="isOwner(u)"
                         [title]="isOwner(u) ? 'Transfer ownership before you can edit the owner' : ''"
                         (click)="openEdit(u)">Edit</button>
+                      <button class="btn ghost sm" type="button" [disabled]="isOwner(u)"
+                        [title]="isOwner(u) ? 'Transfer ownership before you can reset this password' : 'Issue a new temporary password and sign them out everywhere'"
+                        (click)="openResetPassword(u)">Reset password</button>
                       @if (!isSelf(u)) {
                         <button class="btn danger sm" type="button" [disabled]="isOwner(u)"
                           [title]="isOwner(u) ? 'Transfer ownership before you can remove the owner' : ''"
@@ -270,6 +273,27 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
         </div>
       </app-modal>
 
+      <!-- Reset password confirm modal -->
+      <app-modal [open]="resetPasswordOpen()" title="Reset Password" [width]="440" (close)="resetPasswordOpen.set(false)">
+        <p style="margin:0;font-size:13px;color:var(--muted);line-height:1.6">
+          A new temporary password is issued and emailed to them. Every device they're
+          currently signed in on is signed out immediately, and they'll be asked to
+          choose their own password the next time they sign in.
+        </p>
+        @if (resetPasswordTarget(); as u) {
+          <div style="margin-top:12px;font-weight:700;font-size:13px">
+            {{ u.name }} <span style="color:var(--muted);font-weight:500">· {{ u.email }}</span>
+          </div>
+        }
+        <div class="modal-foot">
+          <button class="btn ghost" type="button" (click)="resetPasswordOpen.set(false)">Cancel</button>
+          <button class="btn primary solid" type="button" [disabled]="saving()" (click)="confirmResetPassword()">
+            @if (saving()) { <span class="spinner"></span> }
+            Reset Password
+          </button>
+        </div>
+      </app-modal>
+
       <!-- Withdraw invitation modal -->
       <app-modal [open]="revokeOpen()" title="Withdraw Invitation" [width]="440" (close)="revokeOpen.set(false)">
         <p style="margin:0;font-size:13px;color:var(--muted);line-height:1.6">
@@ -372,6 +396,8 @@ export class UsersComponent implements OnInit {
   removeTarget = signal<OrgUser | null>(null);
   revokeOpen = signal(false);
   revokeTarget = signal<OrgUser | null>(null);
+  resetPasswordOpen = signal(false);
+  resetPasswordTarget = signal<OrgUser | null>(null);
   /** Set when an invitation could not be emailed (no provider configured), so the
    *  admin can share it themselves — a link for `resendInvite` (still the legacy
    *  token flow), or login credentials for a brand-new `inviteUser` (#65, which
@@ -597,6 +623,28 @@ export class UsersComponent implements OnInit {
         this.saving.set(false);
         this.editOpen.set(false);
         this.toast.success('User updated');
+        this.load();
+      },
+      error: err => { this.saving.set(false); this.toast.httpError(err); }
+    });
+  }
+
+  // ── Reset password ──────────────────────────────
+  openResetPassword(u: OrgUser) {
+    if (this.isOwner(u)) return;
+    this.resetPasswordTarget.set(u);
+    this.resetPasswordOpen.set(true);
+  }
+
+  confirmResetPassword() {
+    const u = this.resetPasswordTarget();
+    if (!u || this.saving()) return;
+    this.saving.set(true);
+    this.api.resetUserPassword(u._id).subscribe({
+      next: result => {
+        this.saving.set(false);
+        this.resetPasswordOpen.set(false);
+        this.announceInvite(u.email, result.delivered, { tempPassword: result.tempPassword });
         this.load();
       },
       error: err => { this.saving.set(false); this.toast.httpError(err); }

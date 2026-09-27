@@ -839,6 +839,48 @@ const exportInvoicesCsv = asyncHandler(async (req, res) => {
 });
 
 /**
+ * The latest reminder attempt per invoice, so the Remind All screen can show
+ * "already reminded today" instead of leaving a correctly-skipped invoice
+ * looking identical to a genuinely stuck one — the dedup in `runReminderSweep`
+ * is invisible otherwise, which is exactly what prompted this.
+ */
+const reminderStatusForInvoices = asyncHandler(async (req, res) => {
+  const ids = String(req.query.ids || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(id => /^[0-9a-fA-F]{24}$/.test(id))
+    .slice(0, 200);
+  if (!ids.length) return res.json({});
+
+  // Cast explicitly: tenantFilter(req).orgId is a string, which Mongoose casts
+  // for a plain `find` but not inside an aggregation `$match`.
+  const orgId = new mongoose.Types.ObjectId(String(req.orgId));
+  const rows = await ReminderLog.aggregate([
+    {
+      $match: {
+        orgId,
+        invoiceId: { $in: ids.map(id => new mongoose.Types.ObjectId(id)) }
+      }
+    },
+    { $sort: { createdAt: -1 } },
+    {
+      $group: {
+        _id: '$invoiceId',
+        stage: { $first: '$stage' },
+        status: { $first: '$status' },
+        reason: { $first: '$reason' },
+        createdAt: { $first: '$createdAt' }
+      }
+    }
+  ]);
+
+  res.json(Object.fromEntries(rows.map(r => [
+    String(r._id),
+    { stage: r.stage, status: r.status, reason: r.reason, createdAt: r.createdAt }
+  ])));
+});
+
+/**
  * Chases every unpaid invoice for this tenant.
  *
  * Runs as a background job rather than inside the request. The old version sent
@@ -1021,6 +1063,7 @@ module.exports = {
   cancelInvoice,
   sendReminder,
   remindAll,
+  reminderStatusForInvoices,
   deleteInvoice,
   restoreInvoice,
   sendInvoiceToCustomer,
