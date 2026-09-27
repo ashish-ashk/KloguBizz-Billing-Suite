@@ -70,7 +70,7 @@ function layout({ title, body, ctaLabel, ctaUrl, footer }) {
         ${button}
         <tr><td style="padding-top:20px;border-top:1px solid #e5e7eb;font-size:12px;color:#9ca3af;line-height:1.6;">
           ${footer || 'You are receiving this because your email address was used on KloguBizz.'}
-        </td></tr>
+          <!--BRAND_FOOTER--></td></tr>
       </table>
     </td></tr>
   </table>
@@ -148,6 +148,17 @@ async function sendEmail({ to, subject, text, html, type = 'generic', orgId, met
   const effectiveReplyTo = replyTo || settings.replyTo || undefined;
   const effectiveBcc = bcc || settings.bcc || undefined;
 
+  // The configured footer is appended under each template's own contextual footer
+  // (an expiry date, "sent by <org> via KloguBizz") rather than replacing it — the
+  // per-email context is more useful than a blanket line, so this is added, not
+  // swapped in. `layout()` leaves the `<!--BRAND_FOOTER-->` marker for exactly this;
+  // a `text`-only send with no `html` at all still gets it appended below.
+  const brandFooter = String(settings.footer || '').trim();
+  const finalHtml = html
+    ? html.replace('<!--BRAND_FOOTER-->', brandFooter ? `<br /><br />${escapeHtml(brandFooter)}` : '')
+    : html;
+  const finalText = brandFooter ? `${text || ''}\n\n${brandFooter}` : text;
+
   try {
     const res = await fetch(BREVO_SEND_URL, {
       method: 'POST',
@@ -160,8 +171,8 @@ async function sendEmail({ to, subject, text, html, type = 'generic', orgId, met
         sender: { email: senderEmail, name: senderName },
         to: toRecipients(to),
         subject,
-        textContent: text,
-        htmlContent: html,
+        textContent: finalText,
+        htmlContent: finalHtml,
         ...(cc ? { cc: toRecipients(cc) } : {}),
         ...(effectiveBcc ? { bcc: toRecipients(effectiveBcc) } : {}),
         // The tenant's own address, so a customer's reply reaches them rather than us.
@@ -206,7 +217,11 @@ async function sendInviteEmail({ to, name, inviteUrl, orgName, inviterName, expi
     <p style="margin:0 0 12px;">
       ${who} to join <strong>${escapeHtml(orgName || 'KloguBizz')}</strong> on KloguBizz, the GST billing suite.
     </p>
-    <p style="margin:0;">Choose a password to activate your account and get started.</p>`;
+    <p style="margin:0 0 12px;">Choose a password to activate your account and get started.</p>
+    <p style="margin:0;background:#f4f4f7;border-radius:8px;padding:12px 14px;">
+      Your login email: <strong>${escapeHtml(to)}</strong><br />
+      Keep this handy — it's what you'll sign in with every time, not the link below.
+    </p>`;
   return sendEmail({
     to,
     orgId,
@@ -221,7 +236,9 @@ async function sendInviteEmail({ to, name, inviteUrl, orgName, inviterName, expi
         ? `This invitation expires on ${expiry}. If you weren't expecting it, you can ignore this email.`
         : "If you weren't expecting this invitation, you can ignore this email."
     }),
-    text: `Hello ${name || 'there'},\n\n${inviterName ? inviterName + ' has invited you' : 'You have been invited'} to join ${orgName || 'KloguBizz'} on KloguBizz.\n\nSet your password here: ${inviteUrl}\n${expiry ? `\nThis invitation expires on ${expiry}.\n` : ''}`
+    text: `Hello ${name || 'there'},\n\n${inviterName ? inviterName + ' has invited you' : 'You have been invited'} to join ${orgName || 'KloguBizz'} on KloguBizz.\n\n`
+      + `Your login email: ${to}\nKeep this handy — it's what you'll sign in with every time, not the link below.\n\n`
+      + `Set your password here: ${inviteUrl}\n${expiry ? `\nThis invitation expires on ${expiry}.\n` : ''}`
   });
 }
 
