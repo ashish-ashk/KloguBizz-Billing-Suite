@@ -1,6 +1,7 @@
 const { env } = require('../config/env');
 const { logger } = require('../utils/logger');
 const { EmailLog, Suppression } = require('../models/EmailLog');
+const { GlobalSetting } = require('../models/Settings');
 
 const BREVO_SEND_URL = 'https://api.brevo.com/v3/smtp/email';
 
@@ -10,6 +11,26 @@ function toRecipients(value) {
   const list = Array.isArray(value) ? value : String(value).split(',');
   const emails = list.map(v => String(v).trim()).filter(Boolean);
   return emails.length ? emails.map(email => ({ email })) : undefined;
+}
+
+/**
+ * The super admin's "Global Email Settings" card (#65).
+ *
+ * That card saved to `GlobalSetting('email')` and nothing ever read it back — every
+ * send used `env.FROM_EMAIL` unconditionally and had no reply-to/bcc default, so the
+ * whole card was decorative. Read fresh on every send rather than cached: this is a
+ * single small document behind a settings-write-frequency key, not a hot read path,
+ * and a stale sender identity after a save is a worse failure mode than one extra
+ * `findOne`.
+ */
+async function getEmailSettings() {
+  try {
+    const row = await GlobalSetting.findOne({ key: 'email' }).lean();
+    return row?.value || {};
+  } catch (error) {
+    logger.warn('email settings lookup failed', { err: error });
+    return {};
+  }
 }
 
 function escapeHtml(value) {
@@ -99,7 +120,7 @@ function recordEmail(entry) {
  * behaved identically to one that was sending, and nothing anywhere recorded which
  * it was.
  */
-async function sendEmail({ to, subject, text, html, type = 'generic', orgId, meta, attachments, cc, replyTo }) {
+async function sendEmail({ to, subject, text, html, type = 'generic', orgId, meta, attachments, cc, bcc, replyTo }) {
   const base = { orgId: orgId || undefined, to: String(to || ''), subject, type, meta };
 
   if (!to) return { skipped: true, reason: 'no recipient address' };
@@ -117,6 +138,16 @@ async function sendEmail({ to, subject, text, html, type = 'generic', orgId, met
     return { skipped: true, reason: 'BREVO_API_KEY is not configured' };
   }
 
+  // The super admin's Global Email Settings, applied here rather than at each of the
+  // eight call sites: sender identity, a bcc every outgoing mail should copy, and the
+  // reply-to to fall back to when a caller doesn't have a more specific one (a tenant's
+  // own address, for the emails sent on their behalf).
+  const settings = await getEmailSettings();
+  const senderEmail = settings.senderEmail || settings.fromEmail || env.FROM_EMAIL;
+  const senderName = settings.senderName || settings.fromName || 'KloguBizz';
+  const effectiveReplyTo = replyTo || settings.replyTo || undefined;
+  const effectiveBcc = bcc || settings.bcc || undefined;
+
   try {
     const res = await fetch(BREVO_SEND_URL, {
       method: 'POST',
@@ -126,14 +157,15 @@ async function sendEmail({ to, subject, text, html, type = 'generic', orgId, met
         Accept: 'application/json'
       },
       body: JSON.stringify({
-        sender: { email: env.FROM_EMAIL },
+        sender: { email: senderEmail, name: senderName },
         to: toRecipients(to),
         subject,
         textContent: text,
         htmlContent: html,
         ...(cc ? { cc: toRecipients(cc) } : {}),
+        ...(effectiveBcc ? { bcc: toRecipients(effectiveBcc) } : {}),
         // The tenant's own address, so a customer's reply reaches them rather than us.
-        ...(replyTo ? { replyTo: { email: replyTo } } : {}),
+        ...(effectiveReplyTo ? { replyTo: { email: effectiveReplyTo } } : {}),
         ...(attachments?.length
           ? { attachment: attachments.map(a => ({ content: a.content, name: a.filename })) }
           : {})
@@ -518,6 +550,55 @@ async function sendInvoiceEmail({
   });
 }
 
+const DEFAULT_RECEIPT_SUBJECT = 'Payment received — thank you!';
+const DEFAULT_RECEIPT_BODY_INTRO = 'We have received your payment. Please find the receipt details below.';
+
+/**
+ * A payment receipt (super admin's "Payment Receipt Settings" card).
+ *
+ * That card's `autoSend`/`includeInvoiceCopy`/subject/body-intro fields were saved to
+ * `GlobalSetting('receipt')` and nothing ever sent a receipt on payment — `createPayment`
+ * recorded the money and stopped. So the whole card was decorative, the same shape of
+ * bug as #58 and the reminders page before it: settings a tenant configures and
+ * believes are in effect, silently doing nothing.
+ */
+async function sendReceiptEmail({
+  to, orgId, orgName, clientName, invoiceNumber, amount, paymentDate, method, replyTo,
+  pdf, subject, bodyIntro
+}) {
+  const paidOn = paymentDate
+    ? new Date(paymentDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    : null;
+  const intro = escapeHtml(bodyIntro?.trim() || DEFAULT_RECEIPT_BODY_INTRO);
+  const body = `
+    <p style="margin:0 0 12px;">Dear ${escapeHtml(clientName || 'Customer')},</p>
+    <p style="margin:0 0 12px;">${intro}</p>
+    <p style="margin:0 0 12px;">
+      <strong>${escapeHtml(amount)}</strong> received${paidOn ? ` on <strong>${paidOn}</strong>` : ''}
+      against invoice <strong>${escapeHtml(invoiceNumber)}</strong>${method ? ` via ${escapeHtml(method)}` : ''}.
+    </p>
+    <p style="margin:0;">Thank you for your business.</p>`;
+
+  return sendEmail({
+    to,
+    orgId,
+    replyTo,
+    type: 'receipt',
+    meta: { invoiceNumber },
+    subject: subject?.trim() || DEFAULT_RECEIPT_SUBJECT,
+    html: layout({
+      title: 'Payment received',
+      body,
+      footer: `Sent by ${escapeHtml(orgName || 'KloguBizz')} via KloguBizz.`
+    }),
+    text: `Dear ${clientName || 'Customer'},\n\n${bodyIntro?.trim() || DEFAULT_RECEIPT_BODY_INTRO}\n\n`
+      + `${amount} received${paidOn ? ` on ${paidOn}` : ''} against invoice ${invoiceNumber}${method ? ` via ${method}` : ''}.\n`,
+    attachments: pdf
+      ? [{ content: pdf.toString('base64'), filename: `${invoiceNumber}.pdf`, type: 'application/pdf', disposition: 'attachment' }]
+      : undefined
+  });
+}
+
 module.exports = {
   sendEmail,
   sendInvoiceEmail,
@@ -530,7 +611,10 @@ module.exports = {
   sendEmailVerification,
   sendDunningEmail,
   sendReminderEmail,
+  sendReceiptEmail,
   renderTemplate,
   DEFAULT_REMINDER_SUBJECT,
-  DEFAULT_REMINDER_BODY
+  DEFAULT_REMINDER_BODY,
+  DEFAULT_RECEIPT_SUBJECT,
+  DEFAULT_RECEIPT_BODY_INTRO
 };

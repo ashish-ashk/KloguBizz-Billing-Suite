@@ -1018,6 +1018,11 @@ export class ApiService {
       NS.superadmin
     );
   }
+  superSendTestEmail(payload: { to: string; template: string }) {
+    return this.http.post<{ sent?: boolean; skipped?: boolean; suppressed?: boolean; failed?: boolean; reason?: string }>(
+      `${this.api}/superadmin/settings/test-email`, payload
+    );
+  }
   /** Filterable and paginated. Was an unfiltered list capped at 200 rows, which
    *  made the trail unusable past the first 200 events. */
   superAuditLogs(filters: AuditFilters = {}) {

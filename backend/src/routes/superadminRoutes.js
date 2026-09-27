@@ -13,6 +13,7 @@ const {
   updateReminder,
   getSettings,
   saveSetting,
+  sendTestEmail,
   listAuditLogs,
   exportAuditLogsCsv
 } = require('../controllers/superadminController');
@@ -33,7 +34,7 @@ const {
   tenantLimitsSchema, tenantFlagsSchema, tenantNoticeSchema, tenantSupportSchema,
   tenantUserUpdateSchema, platformRoleSchema, broadcastSchema, planUpsertSchema,
   mastersSaveSchema, reminderUpdateSchema, organisationAdminUpdateSchema,
-  couponUpsertSchema, creditCreateSchema, creditSettleSchema
+  couponUpsertSchema, creditCreateSchema, creditSettleSchema, testEmailSchema
 } = require('../validators/schemas');
 const { requireApproval, requireCapabilityOrGrant } = require('../middleware/approvalMiddleware');
 const { assertDeletionConfirmed } = require('../controllers/superadminController');
@@ -180,6 +181,7 @@ router.put('/reminders/:id', requireCapability(CAPABILITY.settingsWrite), valida
 router.get('/settings', requireCapability(CAPABILITY.platformRead), getSettings);
 router.put('/settings/:key', requireCapability(CAPABILITY.settingsWrite),
   validatedElsewhere('validators/settings.js assertValidSetting — the body shape depends on :key'), saveSetting);
+router.post('/settings/test-email', requireCapability(CAPABILITY.settingsWrite), validate(testEmailSchema), sendTestEmail);
 
 // ── Audit & security (3.4) ───────────────────────
 // Declared before the plain list so the literal path isn't shadowed by it.

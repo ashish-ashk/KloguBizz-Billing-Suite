@@ -31,6 +31,7 @@ const { invalidateFeatureFlagCache } = require('../services/featureFlagService')
 const { invalidatePlatformNotice } = require('../services/noticeService');
 const { computeRecurringRevenue } = require('../services/metricsService');
 const { assertValidSetting } = require('../validators/settings');
+const { sendReminderEmail, sendReceiptEmail } = require('../services/emailService');
 const { serialiseOrganisation, storeImage, platformAssetUrl } = require('../services/brandingAssetService');
 const { startSessionIfSupported, withTransaction } = require('../utils/transaction');
 const { logger } = require('../utils/logger');
@@ -640,6 +641,60 @@ const saveSetting = asyncHandler(async (req, res) => {
 });
 
 /**
+ * The Reminders &amp; Receipts page's "Send Test Email" action.
+ *
+ * Previously a pure frontend stub — it never called the backend at all, and showed a
+ * hardcoded "provider not configured" toast regardless of whether one actually was.
+ * That made the button actively misleading: an operator who had just finished setting
+ * up the mail provider had no way to confirm it from here, and the message named the
+ * wrong provider the moment the platform switched away from it.
+ *
+ * Uses real content (a reminder's configured subject/template, or the receipt
+ * settings' subject/body-intro) against fabricated invoice numbers, so this is a true
+ * end-to-end check of what a customer would actually receive — not a synthetic ping.
+ */
+const sendTestEmail = asyncHandler(async (req, res) => {
+  const to = String(req.body?.to || '').trim();
+  if (!to) throw httpError(400, 'A recipient email address is required.', 'VALIDATION_ERROR');
+  const templateName = String(req.body?.template || '').trim();
+  if (!templateName) throw httpError(400, 'Choose a template to test.', 'VALIDATION_ERROR');
+
+  const sampleValues = {
+    to,
+    clientName: 'Test Customer',
+    invoiceNumber: 'TEST-0001',
+    amount: 'INR 5,000.00',
+    balanceDue: 'INR 5,000.00',
+    dueDate: new Date(),
+    orgName: 'KloguBizz'
+  };
+
+  let result;
+  if (templateName === 'receipt') {
+    const receiptSettings = (await GlobalSetting.findOne({ key: 'receipt' }).lean())?.value || {};
+    result = await sendReceiptEmail({
+      ...sampleValues,
+      paymentDate: new Date(),
+      method: 'Bank Transfer',
+      subject: receiptSettings.subject,
+      bodyIntro: receiptSettings.bodyIntro
+    });
+  } else {
+    const reminder = await Reminder.findOne({ name: templateName }).lean();
+    if (!reminder) throw httpError(404, `No reminder stage named "${templateName}".`, 'NOT_FOUND');
+    result = await sendReminderEmail({
+      ...sampleValues,
+      overdueDays: reminder.daysOffset > 0 ? reminder.daysOffset : 0,
+      subject: reminder.subject,
+      template: reminder.template
+    });
+  }
+
+  logAudit({ req, action: 'settings.testEmailSent', entity: 'setting', entityId: templateName, meta: { to, result } });
+  res.json(result);
+});
+
+/**
  * The audit console.
  *
  * Was an unfiltered, unpaginated `find()` capped at 200 rows — which meant that
@@ -720,6 +775,7 @@ module.exports = {
   updateReminder,
   getSettings,
   saveSetting,
+  sendTestEmail,
   listAuditLogs,
   exportAuditLogsCsv
 };

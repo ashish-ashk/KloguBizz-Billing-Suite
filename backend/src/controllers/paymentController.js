@@ -1,5 +1,8 @@
 const { Invoice } = require('../models/Invoice');
 const { Payment } = require('../models/Payment');
+const { Client } = require('../models/Client');
+const { Organisation } = require('../models/Organisation');
+const { GlobalSetting } = require('../models/Settings');
 const { asyncHandler } = require('../utils/asyncHandler');
 const { httpError } = require('../utils/httpError');
 const { tenantFilter } = require('../middleware/tenantMiddleware');
@@ -10,6 +13,10 @@ const { recordEvent, EVENT } = require('../services/usageEventService');
 const { recalculateSettlement } = require('./invoiceController');
 const { roundMoney } = require('../services/gstService');
 const { assertValidMaster } = require('../services/masterService');
+const { renderInvoicePdf } = require('../services/pdfRenderer');
+const { getPlatformDefaults } = require('../services/platformSettingsService');
+const { sendReceiptEmail } = require('../services/emailService');
+const { logger } = require('../utils/logger');
 
 const PAYMENT_SORTS = ['date', 'amount', 'createdAt'];
 
@@ -88,8 +95,65 @@ const createPayment = asyncHandler(async (req, res) => {
   await recalculateSettlement(invoice);
   logAudit({ req, action: 'payment.recorded', entity: 'payment', entityId: payment._id, meta: { invoiceNumber: invoice.invoiceNumber, amount: payment.amount } });
   recordEvent({ req, type: EVENT.paymentRecorded, value: payment.amount, meta: { method: payment.method } });
+  // Fire-and-forget, same as the audit/usage writes above: a receipt failing to send
+  // must never fail the payment that was actually recorded. maybeSendReceipt catches
+  // internally, so this promise never rejects.
+  maybeSendReceipt(req, invoice, payment);
   res.status(201).json(payment);
 });
+
+/**
+ * Sends a payment receipt when the super admin's "Payment Receipt Settings" card has
+ * auto-send switched on (#65). Previously that card's toggle, subject and body-intro
+ * were saved and never read — no receipt was ever sent, on or off.
+ */
+async function maybeSendReceipt(req, invoice, payment) {
+  try {
+    const receiptSettings = (await GlobalSetting.findOne({ key: 'receipt' }).lean())?.value || {};
+    if (!receiptSettings.autoSend) return;
+
+    const client = invoice.clientId
+      ? await Client.findById(invoice.clientId).select('companyName email address gstin stateCode').lean()
+      : null;
+    const to = client?.email || invoice.billTo?.email;
+    // No address on file — same silent-no-op the reminder sweep uses, not an error:
+    // most walk-in/no-GSTIN buyers have no email at all.
+    if (!to) return;
+
+    const org = await Organisation.findById(req.orgId).select('name adminEmail').lean();
+
+    let pdf;
+    if (receiptSettings.includeInvoiceCopy) {
+      const platformDefaults = await getPlatformDefaults();
+      const pdfClient = client || (invoice.billTo?.name ? {
+        companyName: invoice.billTo.name,
+        address: invoice.billTo.address,
+        gstin: invoice.billTo.gstin,
+        stateCode: invoice.billTo.stateCode,
+        email: invoice.billTo.email
+      } : null);
+      pdf = await renderInvoicePdf({ invoice, client: pdfClient, org, platformDefaults });
+    }
+
+    await sendReceiptEmail({
+      to,
+      orgId: req.orgId,
+      orgName: org?.name,
+      clientName: client?.companyName || invoice.billTo?.name,
+      invoiceNumber: invoice.invoiceNumber,
+      amount: `INR ${Number(payment.amount || 0).toLocaleString('en-IN')}`,
+      paymentDate: payment.date,
+      method: payment.method,
+      // The tenant's own address, so a customer's reply reaches them rather than us.
+      replyTo: org?.adminEmail,
+      pdf,
+      subject: receiptSettings.subject,
+      bodyIntro: receiptSettings.bodyIntro
+    });
+  } catch (error) {
+    logger.warn('receipt email failed', { err: error, invoiceId: invoice._id, paymentId: payment._id });
+  }
+}
 
 /**
  * Reverses a payment.

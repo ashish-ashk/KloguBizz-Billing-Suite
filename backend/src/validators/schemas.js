@@ -865,11 +865,17 @@ const reminderUpdateSchema = z.object({
   sortOrder: z.coerce.number().int().optional()
 });
 
+/** The Reminders & Receipts page's "Send Test Email" action. */
+const testEmailSchema = z.object({
+  to: email,
+  template: shortText.min(1, 'is required')
+});
+
 module.exports = {
   organisationAdminUpdateSchema,
   tenantLimitsSchema, tenantFlagsSchema, tenantNoticeSchema, tenantSupportSchema,
   tenantUserUpdateSchema, platformRoleSchema, broadcastSchema, planUpsertSchema,
-  mastersSaveSchema, reminderUpdateSchema,
+  mastersSaveSchema, reminderUpdateSchema, testEmailSchema,
   TAX_TREATMENTS, SUPPLY_TYPES,
   vendorCreateSchema, vendorUpdateSchema,
   stockAdjustSchema, inventorySettingsSchema,

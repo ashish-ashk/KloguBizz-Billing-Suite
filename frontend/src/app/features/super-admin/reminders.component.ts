@@ -103,7 +103,9 @@ import { Reminder } from '../../core/models';
                   <option value="receipt">Payment Receipt</option>
                 </select>
               </div>
-              <div><button class="btn secondary sm" type="button" (click)="sendTest()">Send Test Email</button></div>
+              <div><button class="btn secondary sm" type="button" [disabled]="sendingTest()" (click)="sendTest()">
+                {{ sendingTest() ? 'Sending…' : 'Send Test Email' }}
+              </button></div>
             </div>
           </section>
         </div>
@@ -114,6 +116,7 @@ import { Reminder } from '../../core/models';
 export class SuperRemindersComponent implements OnInit {
   loading = signal(true);
   saving = signal(false);
+  sendingTest = signal(false);
   reminders = signal<Reminder[]>([]);
   editing = signal('');
   testTo = '';
@@ -127,7 +130,14 @@ export class SuperRemindersComponent implements OnInit {
 
   ngOnInit() {
     this.api.superMasters().subscribe({
-      next: res => { this.reminders.set(res.reminders); this.loading.set(false); },
+      next: res => {
+        this.reminders.set(res.reminders);
+        // Otherwise the <select> shows its first option visually while the bound
+        // model stays '' until the operator actually touches the dropdown, and a
+        // test send goes out with no template name at all.
+        if (!this.testTemplate) this.testTemplate = res.reminders[0]?.name || 'receipt';
+        this.loading.set(false);
+      },
       error: err => { this.loading.set(false); this.toast.httpError(err); }
     });
     this.api.superSettings().subscribe({
@@ -168,6 +178,16 @@ export class SuperRemindersComponent implements OnInit {
 
   sendTest() {
     if (!this.testTo.trim()) { this.toast.error('Enter a test recipient email.'); return; }
-    this.toast.info('Test email queued (Brevo is not configured in local mode)');
+    if (!this.testTemplate) { this.toast.error('Choose a template to test.'); return; }
+    this.sendingTest.set(true);
+    this.api.superSendTestEmail({ to: this.testTo.trim(), template: this.testTemplate }).subscribe({
+      next: res => {
+        this.sendingTest.set(false);
+        if (res.sent) this.toast.success(`Test email sent to ${this.testTo.trim()}.`);
+        else if (res.suppressed || res.skipped || res.failed) this.toast.error(res.reason || 'The email was not sent.');
+        else this.toast.info('Test email queued.');
+      },
+      error: err => { this.sendingTest.set(false); this.toast.httpError(err); }
+    });
   }
 }
