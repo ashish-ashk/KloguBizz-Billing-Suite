@@ -1,10 +1,15 @@
-const sgMail = require('@sendgrid/mail');
 const { env } = require('../config/env');
 const { logger } = require('../utils/logger');
 const { EmailLog, Suppression } = require('../models/EmailLog');
 
-if (env.SENDGRID_API_KEY) {
-  sgMail.setApiKey(env.SENDGRID_API_KEY);
+const BREVO_SEND_URL = 'https://api.brevo.com/v3/smtp/email';
+
+/** Accepts a single address or an array, and Brevo's `[{email}]` shape either way. */
+function toRecipients(value) {
+  if (!value) return undefined;
+  const list = Array.isArray(value) ? value : String(value).split(',');
+  const emails = list.map(v => String(v).trim()).filter(Boolean);
+  return emails.length ? emails.map(email => ({ email })) : undefined;
 }
 
 function escapeHtml(value) {
@@ -82,7 +87,7 @@ function recordEmail(entry) {
 }
 
 /**
- * Generic sender. With no SendGrid key it logs and reports the message as
+ * Generic sender. With no Brevo key it logs and reports the message as
  * skipped, so flows that depend on email still succeed locally.
  *
  * Returns a result object rather than throwing on a provider error: a failed
@@ -106,33 +111,53 @@ async function sendEmail({ to, subject, text, html, type = 'generic', orgId, met
     return { skipped: true, suppressed: true, reason: `This address is suppressed (${suppression.reason}).` };
   }
 
-  if (!env.SENDGRID_API_KEY) {
+  if (!env.BREVO_API_KEY) {
     logger.info('email skipped — no provider configured', { to, subject });
-    recordEmail({ ...base, status: 'skipped', reason: 'SENDGRID_API_KEY is not configured' });
-    return { skipped: true, reason: 'SENDGRID_API_KEY is not configured' };
+    recordEmail({ ...base, status: 'skipped', reason: 'BREVO_API_KEY is not configured' });
+    return { skipped: true, reason: 'BREVO_API_KEY is not configured' };
   }
 
   try {
-    const [response] = await sgMail.send({
-      to,
-      from: env.FROM_EMAIL,
-      subject,
-      text,
-      html,
-      ...(cc ? { cc } : {}),
-      // The tenant's own address, so a customer's reply reaches them rather than us.
-      ...(replyTo ? { replyTo } : {}),
-      ...(attachments?.length ? { attachments } : {})
+    const res = await fetch(BREVO_SEND_URL, {
+      method: 'POST',
+      headers: {
+        'api-key': env.BREVO_API_KEY,
+        'Content-Type': 'application/json',
+        Accept: 'application/json'
+      },
+      body: JSON.stringify({
+        sender: { email: env.FROM_EMAIL },
+        to: toRecipients(to),
+        subject,
+        textContent: text,
+        htmlContent: html,
+        ...(cc ? { cc: toRecipients(cc) } : {}),
+        // The tenant's own address, so a customer's reply reaches them rather than us.
+        ...(replyTo ? { replyTo: { email: replyTo } } : {}),
+        ...(attachments?.length
+          ? { attachment: attachments.map(a => ({ content: a.content, name: a.filename })) }
+          : {})
+      })
     });
+
+    const body = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      // Brevo nests the useful part in `message`; surface it so a log entry is
+      // actually diagnosable rather than just "failed".
+      const detail = body?.message || `Brevo responded ${res.status}`;
+      logger.error('email delivery failed', { to, subject, detail });
+      recordEmail({ ...base, status: 'failed', reason: detail });
+      return { failed: true, reason: detail };
+    }
+
     // The provider's own id is what its webhook events reference, so without
     // capturing it a later bounce cannot be attached to the message that bounced.
-    const providerMessageId = response?.headers?.['x-message-id'];
+    const providerMessageId = body?.messageId;
     recordEmail({ ...base, status: 'sent', providerMessageId });
     return { sent: true, providerMessageId };
   } catch (error) {
-    // SendGrid nests the useful part; surface it so a log entry is actually
-    // diagnosable rather than just "failed".
-    const detail = error.response?.body?.errors?.[0]?.message || error.message;
+    const detail = error.message;
     logger.error('email delivery failed', { to, subject, detail });
     recordEmail({ ...base, status: 'failed', reason: detail });
     return { failed: true, reason: detail };

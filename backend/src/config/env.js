@@ -35,7 +35,7 @@ const env = {
   FRONTEND_URLS: frontendUrls,
   SUPER_ADMIN_EMAIL: process.env.SUPER_ADMIN_EMAIL || 'superadmin@klogubizz.local',
   SUPER_ADMIN_PASSWORD: process.env.SUPER_ADMIN_PASSWORD || DEV_DEFAULTS.SUPER_ADMIN_PASSWORD,
-  SENDGRID_API_KEY: process.env.SENDGRID_API_KEY || '',
+  BREVO_API_KEY: process.env.BREVO_API_KEY || '',
   FROM_EMAIL: process.env.FROM_EMAIL || 'invoices@klogubizz.local',
   RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID || '',
   RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET || '',
@@ -78,11 +78,11 @@ const env = {
   EWB_USERNAME: process.env.EWB_USERNAME || '',
   EWB_PASSWORD: process.env.EWB_PASSWORD || '',
 
-  // ── SendGrid event webhook (delivery, bounces, complaints) ──
+  // ── Brevo event webhook (delivery, bounces, complaints) ──
   // Without this the webhook route refuses every request: an unauthenticated
   // endpoint that writes delivery state is an endpoint anyone can use to mark a
   // competitor's address as bounced.
-  SENDGRID_WEBHOOK_SECRET: process.env.SENDGRID_WEBHOOK_SECRET || '',
+  BREVO_WEBHOOK_SECRET: process.env.BREVO_WEBHOOK_SECRET || '',
 
   // ── MFA ──
   // Encrypts the TOTP secrets at rest. Falls back to a key derived from
@@ -137,7 +137,7 @@ env.requireSuperadminMfa = process.env.REQUIRE_SUPERADMIN_MFA
  */
 env.emailVerificationEnforced = process.env.EMAIL_VERIFICATION_ENFORCED
   ? process.env.EMAIL_VERIFICATION_ENFORCED === 'true'
-  : Boolean(process.env.SENDGRID_API_KEY);
+  : Boolean(process.env.BREVO_API_KEY);
 // True only when Razorpay credentials are present. Billing flows check this
 // and fail closed in production instead of activating a plan for free.
 env.billingConfigured = Boolean(env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET);
@@ -185,8 +185,8 @@ function assertSecureConfig({ exitOnError = true } = {}) {
     if (!env.billingConfigured) {
       warnings.push('Razorpay keys are not set. Paid plan changes will be rejected instead of activated.');
     }
-    if (!env.SENDGRID_API_KEY) {
-      warnings.push('SENDGRID_API_KEY is not set. Invites and reminders will be skipped, not delivered.');
+    if (!env.BREVO_API_KEY) {
+      warnings.push('BREVO_API_KEY is not set. Invites and reminders will be skipped, not delivered.');
     }
 
     /**

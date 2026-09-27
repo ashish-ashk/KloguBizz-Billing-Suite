@@ -24,7 +24,7 @@ process.env.MONGO_URI = 'mongodb://127.0.0.1:27017/klogubizz_compliance_test';
 process.env.NODE_ENV = 'test';
 process.env.RAZORPAY_WEBHOOK_SECRET = 'test_webhook_secret';
 process.env.JWT_SECRET = 'test_jwt_secret_used_only_by_the_compliance_suite';
-process.env.SENDGRID_WEBHOOK_SECRET = 'test_sendgrid_webhook_secret';
+process.env.BREVO_WEBHOOK_SECRET = 'test_brevo_webhook_secret';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -1069,7 +1069,7 @@ test('every send outcome is recorded, including the silent ones', maybe(async ()
   // nothing recorded which.
   assert.equal(log.status, 'skipped');
   assert.equal(log.type, 'reminder');
-  assert.ok(log.reason.includes('SENDGRID_API_KEY'));
+  assert.ok(log.reason.includes('BREVO_API_KEY'));
   assert.equal(String(log.orgId), String(tenant.org._id));
 }));
 
@@ -1079,21 +1079,19 @@ test('a bounced address is suppressed and then refused', maybe(async () => {
   const invoice = await createInvoice(tenant.token, { clientId: client._id });
   await call('POST', `/invoices/${invoice._id}/remind`, { token: tenant.token });
 
-  const unauthorised = await call('POST', '/webhooks/sendgrid/events', {
-    body: [{ email: 'bounces@example.test', event: 'bounce', type: 'bounce', timestamp: Math.floor(Date.now() / 1000) }]
+  const unauthorised = await call('POST', '/webhooks/brevo/events', {
+    body: [{ email: 'bounces@example.test', event: 'hard_bounce', reason: '550 no such user', ts: Math.floor(Date.now() / 1000) }]
   });
   // An open endpoint here is one anyone could use to stop a competitor's mail by posting
   // a fabricated bounce.
   assert.equal(unauthorised.status, 401);
 
-  const accepted = await call('POST', '/webhooks/sendgrid/events', {
-    headers: { 'x-klogubizz-webhook-secret': 'test_sendgrid_webhook_secret' },
+  const accepted = await call('POST', `/webhooks/brevo/events?secret=test_brevo_webhook_secret`, {
     body: [{
       email: 'bounces@example.test',
-      event: 'bounce',
-      type: 'bounce',
+      event: 'hard_bounce',
       reason: '550 no such user',
-      timestamp: Math.floor(Date.now() / 1000)
+      ts: Math.floor(Date.now() / 1000)
     }]
   });
   assert.equal(accepted.status, 200);
@@ -1121,12 +1119,13 @@ test('a bounced address is suppressed and then refused', maybe(async () => {
 }));
 
 test('a soft bounce does not suppress the address', maybe(async () => {
-  const { isHardBounce } = require('../src/controllers/sendgridWebhookController');
+  const { isHardBounce } = require('../src/controllers/brevoWebhookController');
   // A full mailbox is temporary. Suppressing on it would permanently stop mail to a
   // customer whose inbox was briefly full.
-  assert.equal(isHardBounce({ event: 'bounce', type: 'blocked' }), false);
-  assert.equal(isHardBounce({ event: 'bounce', type: 'bounce' }), true);
-  assert.equal(isHardBounce({ event: 'spamreport' }), true);
+  assert.equal(isHardBounce({ event: 'soft_bounce' }), false);
+  assert.equal(isHardBounce({ event: 'deferred' }), false);
+  assert.equal(isHardBounce({ event: 'hard_bounce' }), true);
+  assert.equal(isHardBounce({ event: 'spam' }), true);
 }));
 
 // ── Data rights (#62) ────────────────────────────

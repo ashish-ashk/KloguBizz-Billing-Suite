@@ -178,10 +178,10 @@ app.use('/api/v1/purchases', require('./src/routes/purchaseRoutes'));
 app.use('/api/v1/expenses', require('./src/routes/expenseRoutes'));
 app.use('/api/v1/superadmin', require('./src/routes/superadminRoutes'));
 app.use('/api/v1/webhooks/razorpay', require('./src/routes/razorpayWebhookRoutes'));
-// SendGrid delivery events (bounces, complaints, opens). Authenticated by a shared
-// secret — an open endpoint that writes delivery state and suppresses addresses is
-// one anyone could use to stop a competitor's mail.
-app.use('/api/v1/webhooks/sendgrid', require('./src/routes/sendgridWebhookRoutes'));
+// Brevo delivery events (bounces, complaints, opens). Authenticated by a shared
+// secret passed as a query parameter — an open endpoint that writes delivery state
+// and suppresses addresses is one anyone could use to stop a competitor's mail.
+app.use('/api/v1/webhooks/brevo', require('./src/routes/brevoWebhookRoutes'));
 
 /**
  * The API description, generated from these very routes (#63).

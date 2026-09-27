@@ -168,6 +168,6 @@ export class SuperRemindersComponent implements OnInit {
 
   sendTest() {
     if (!this.testTo.trim()) { this.toast.error('Enter a test recipient email.'); return; }
-    this.toast.info('Test email queued (SendGrid is not configured in local mode)');
+    this.toast.info('Test email queued (Brevo is not configured in local mode)');
   }
 }

@@ -557,7 +557,7 @@ test('the reminder sweep uses the configured stage and does not chase twice', ma
   // earlier notices one sweep at a time.
   assert.equal(logs[0].stage, 'offset:7');
   assert.equal(logs[0].to, 'chased@buyer.test');
-  // With no SendGrid key this is a skip, not a send — so it must NOT be treated
+  // With no Brevo key this is a skip, not a send — so it must NOT be treated
   // as already-chased once email is switched on.
   assert.equal(logs[0].status, 'skipped');
   assert.equal(logs[0].balanceDue, 5900);

@@ -303,7 +303,7 @@ const systemHealth = asyncHandler(async (req, res) => {
       memory: process.memoryUsage().rss,
       // Whether the optional integrations are actually configured, which is the
       // first question when "emails aren't sending" or "billing did nothing".
-      emailConfigured: Boolean(env.SENDGRID_API_KEY),
+      emailConfigured: Boolean(env.BREVO_API_KEY),
       billingConfigured: env.billingConfigured
     }
   });
@@ -1105,8 +1105,8 @@ const emailDeliverability = asyncHandler(async (req, res) => {
   res.json({
     days,
     /** Whether mail is being sent at all — the first thing to check. */
-    providerConfigured: Boolean(env.SENDGRID_API_KEY),
-    eventWebhookConfigured: Boolean(env.SENDGRID_WEBHOOK_SECRET),
+    providerConfigured: Boolean(env.BREVO_API_KEY),
+    eventWebhookConfigured: Boolean(env.BREVO_WEBHOOK_SECRET),
     counts,
     attempted,
     failed,
